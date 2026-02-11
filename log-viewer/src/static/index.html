@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Log Viewer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace; }
+    .log-message { white-space: pre-wrap; word-break: break-all; }
+    .log-expanded { max-height: none !important; }
+    .log-collapsed { max-height: 1.5em; overflow: hidden; }
+  </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+  <div class="max-w-7xl mx-auto px-4 py-6">
+    <header class="mb-6 flex items-center justify-between">
+      <div>
+        <h1 class="text-2xl font-bold text-white">Log Viewer</h1>
+        <p class="text-gray-400 text-sm mt-1">Browse and search application logs</p>
+      </div>
+      <div id="stats-bar" class="text-xs text-gray-500"></div>
+    </header>
+
+    <!-- Filters -->
+    <div class="flex flex-wrap gap-4 mb-4 items-end">
+      <div class="flex-1 min-w-[200px]">
+        <label class="block text-xs text-gray-400 mb-1">Search</label>
+        <input type="text" id="filter-search" placeholder="Full-text search..."
+          class="w-full bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded px-3 py-1.5 focus:outline-none focus:border-blue-500">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-400 mb-1">Container</label>
+        <select id="filter-container" class="bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded px-3 py-1.5 focus:outline-none focus:border-blue-500">
+          <option value="">All containers</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs text-gray-400 mb-1">Level</label>
+        <select id="filter-level" class="bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded px-3 py-1.5 focus:outline-none focus:border-blue-500">
+          <option value="">All levels</option>
+          <option value="DEBUG">DEBUG</option>
+          <option value="INFO">INFO</option>
+          <option value="WARNING">WARNING</option>
+          <option value="ERROR">ERROR</option>
+          <option value="CRITICAL">CRITICAL</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs text-gray-400 mb-1">Time range</label>
+        <select id="filter-time" class="bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded px-3 py-1.5 focus:outline-none focus:border-blue-500">
+          <option value="">All time</option>
+          <option value="1h">Last 1 hour</option>
+          <option value="24h">Last 24 hours</option>
+          <option value="7d">Last 7 days</option>
+        </select>
+      </div>
+      <div>
+        <button id="btn-tail" class="px-3 py-1.5 rounded text-sm font-medium bg-gray-800 border border-gray-700 hover:bg-gray-700 transition-colors">
+          Live Tail
+        </button>
+      </div>
+    </div>
+
+    <!-- Live tail indicator -->
+    <div id="tail-indicator" class="hidden mb-4 flex items-center gap-2 text-sm">
+      <span class="relative flex h-2 w-2">
+        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+        <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+      </span>
+      <span class="text-green-400">Live tail active</span>
+      <span id="tail-count" class="text-gray-500 ml-2"></span>
+    </div>
+
+    <!-- Log entries -->
+    <div class="rounded-lg border border-gray-700 overflow-hidden">
+      <div id="log-list" class="divide-y divide-gray-800 max-h-[70vh] overflow-y-auto">
+        <div class="px-4 py-8 text-center text-gray-500">Loading...</div>
+      </div>
+    </div>
+
+    <!-- Pagination -->
+    <div id="pagination" class="flex items-center justify-between mt-4 text-sm text-gray-400">
+      <span id="pagination-info"></span>
+      <div class="flex gap-2">
+        <button id="btn-prev" class="px-3 py-1 rounded bg-gray-800 border border-gray-700 hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed" disabled>Prev</button>
+        <button id="btn-next" class="px-3 py-1 rounded bg-gray-800 border border-gray-700 hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed" disabled>Next</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_KEY = localStorage.getItem('api_key') || '';
+    let currentOffset = 0;
+    const LIMIT = 100;
+    let eventSource = null;
+    let tailActive = false;
+    let tailCount = 0;
+
+    function headers() {
+      const h = { 'Content-Type': 'application/json' };
+      if (API_KEY) h['X-API-Key'] = API_KEY;
+      return h;
+    }
+
+    function esc(s) {
+      if (!s) return '';
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    function formatTimestamp(iso) {
+      if (!iso) return '';
+      try {
+        const d = new Date(iso);
+        if (isNaN(d.getTime())) return iso;
+        return d.toLocaleString();
+      } catch (e) {
+        return iso;
+      }
+    }
+
+    function levelColor(level) {
+      switch ((level || '').toUpperCase()) {
+        case 'DEBUG': return 'text-gray-500';
+        case 'INFO': return 'text-blue-400';
+        case 'WARNING': case 'WARN': return 'text-yellow-400';
+        case 'ERROR': return 'text-red-400';
+        case 'CRITICAL': case 'FATAL': return 'text-red-500 font-bold';
+        default: return 'text-gray-300';
+      }
+    }
+
+    function levelBg(level) {
+      switch ((level || '').toUpperCase()) {
+        case 'DEBUG': return 'bg-gray-800';
+        case 'INFO': return 'bg-gray-900';
+        case 'WARNING': case 'WARN': return 'bg-yellow-900/10';
+        case 'ERROR': return 'bg-red-900/10';
+        case 'CRITICAL': case 'FATAL': return 'bg-red-900/20';
+        default: return 'bg-gray-900';
+      }
+    }
+
+    function levelBadge(level) {
+      switch ((level || '').toUpperCase()) {
+        case 'DEBUG': return 'bg-gray-700 text-gray-400';
+        case 'INFO': return 'bg-blue-900/40 text-blue-300';
+        case 'WARNING': case 'WARN': return 'bg-yellow-900/40 text-yellow-300';
+        case 'ERROR': return 'bg-red-900/40 text-red-300';
+        case 'CRITICAL': case 'FATAL': return 'bg-red-900/60 text-red-200';
+        default: return 'bg-gray-700 text-gray-400';
+      }
+    }
+
+    function renderLogEntry(entry) {
+      return `
+        <div class="px-4 py-2 hover:bg-gray-800/50 cursor-pointer transition-colors ${levelBg(entry.level)} log-row" onclick="toggleExpand(this)">
+          <div class="flex items-start gap-3">
+            <span class="text-xs text-gray-500 whitespace-nowrap mt-0.5 w-[140px] flex-shrink-0">${esc(formatTimestamp(entry.timestamp))}</span>
+            <span class="inline-block ${levelBadge(entry.level)} text-xs px-1.5 py-0.5 rounded w-[60px] text-center flex-shrink-0">${esc(entry.level)}</span>
+            <span class="text-xs text-purple-400 w-[100px] flex-shrink-0 truncate mt-0.5">${esc(entry.container)}</span>
+            <span class="log-message log-collapsed ${levelColor(entry.level)} text-sm flex-1">${esc(entry.message)}</span>
+          </div>
+          <div class="log-detail hidden mt-2 ml-[310px] text-xs text-gray-500 border-t border-gray-800 pt-2">
+            <div><strong>ID:</strong> ${entry.id}</div>
+            <div><strong>Stream:</strong> ${esc(entry.stream)}</div>
+            <div><strong>Container:</strong> ${esc(entry.container)}</div>
+            <div><strong>Timestamp:</strong> ${esc(entry.timestamp)}</div>
+            <div class="mt-2"><strong>Full message:</strong></div>
+            <pre class="mt-1 text-gray-400 whitespace-pre-wrap bg-gray-800 rounded p-2 max-h-[400px] overflow-auto">${esc(entry.message)}</pre>
+          </div>
+        </div>`;
+    }
+
+    function toggleExpand(el) {
+      const msg = el.querySelector('.log-message');
+      const detail = el.querySelector('.log-detail');
+      if (msg.classList.contains('log-collapsed')) {
+        msg.classList.remove('log-collapsed');
+        msg.classList.add('log-expanded');
+        detail.classList.remove('hidden');
+      } else {
+        msg.classList.add('log-collapsed');
+        msg.classList.remove('log-expanded');
+        detail.classList.add('hidden');
+      }
+    }
+
+    function getSinceTimestamp() {
+      const range = document.getElementById('filter-time').value;
+      if (!range) return null;
+      const now = new Date();
+      switch (range) {
+        case '1h': now.setHours(now.getHours() - 1); break;
+        case '24h': now.setDate(now.getDate() - 1); break;
+        case '7d': now.setDate(now.getDate() - 7); break;
+        default: return null;
+      }
+      return now.toISOString();
+    }
+
+    async function loadContainers() {
+      try {
+        const res = await fetch('/api/containers', { headers: headers() });
+        const data = await res.json();
+        const sel = document.getElementById('filter-container');
+        (data.containers || []).forEach(c => {
+          const opt = document.createElement('option');
+          opt.value = c.name;
+          opt.textContent = c.name + ' (' + c.log_count + ')';
+          sel.appendChild(opt);
+        });
+      } catch (e) {
+        console.error('Failed to load containers:', e);
+      }
+    }
+
+    async function loadStats() {
+      try {
+        const res = await fetch('/api/stats', { headers: headers() });
+        const data = await res.json();
+        document.getElementById('stats-bar').textContent =
+          `${data.total_logs.toLocaleString()} logs indexed`;
+      } catch (e) {
+        console.error('Failed to load stats:', e);
+      }
+    }
+
+    async function loadLogs() {
+      const container = document.getElementById('filter-container').value;
+      const level = document.getElementById('filter-level').value;
+      const search = document.getElementById('filter-search').value.trim();
+      const since = getSinceTimestamp();
+
+      const params = new URLSearchParams();
+      if (container) params.set('container', container);
+      if (level) params.set('level', level);
+      if (search) params.set('search', search);
+      if (since) params.set('since', since);
+      params.set('limit', LIMIT);
+      params.set('offset', currentOffset);
+
+      const logList = document.getElementById('log-list');
+
+      try {
+        const res = await fetch('/api/logs?' + params.toString(), { headers: headers() });
+        const data = await res.json();
+
+        if (!data.logs || data.logs.length === 0) {
+          logList.innerHTML = '<div class="px-4 py-8 text-center text-gray-500">No logs found</div>';
+          updatePagination(0, 0);
+          return;
+        }
+
+        logList.innerHTML = data.logs.map(renderLogEntry).join('');
+        updatePagination(data.total, data.offset);
+      } catch (e) {
+        logList.innerHTML = '<div class="px-4 py-8 text-center text-red-400">Failed to load logs</div>';
+        console.error('Failed to load logs:', e);
+      }
+    }
+
+    function updatePagination(total, offset) {
+      const info = document.getElementById('pagination-info');
+      const btnPrev = document.getElementById('btn-prev');
+      const btnNext = document.getElementById('btn-next');
+
+      if (total === 0) {
+        info.textContent = 'No logs';
+        btnPrev.disabled = true;
+        btnNext.disabled = true;
+        return;
+      }
+
+      const start = offset + 1;
+      const end = Math.min(offset + LIMIT, total);
+      info.textContent = `Showing ${start}-${end} of ${total.toLocaleString()}`;
+
+      btnPrev.disabled = offset === 0;
+      btnNext.disabled = offset + LIMIT >= total;
+    }
+
+    // Live tail
+    function startTail() {
+      if (tailActive) return;
+
+      const container = document.getElementById('filter-container').value;
+      const level = document.getElementById('filter-level').value;
+
+      const params = new URLSearchParams();
+      if (container) params.set('container', container);
+      if (level) params.set('level', level);
+      if (API_KEY) params.set('api_key', API_KEY);
+
+      const url = '/api/logs/tail' + (params.toString() ? '?' + params.toString() : '');
+      eventSource = new EventSource(url);
+      tailActive = true;
+      tailCount = 0;
+
+      document.getElementById('btn-tail').textContent = 'Stop Tail';
+      document.getElementById('btn-tail').classList.add('bg-green-900', 'border-green-700', 'text-green-300');
+      document.getElementById('btn-tail').classList.remove('bg-gray-800', 'border-gray-700');
+      document.getElementById('tail-indicator').classList.remove('hidden');
+      document.getElementById('pagination').classList.add('hidden');
+
+      // Clear current log list for tail mode
+      document.getElementById('log-list').innerHTML = '';
+
+      eventSource.addEventListener('log', function(e) {
+        try {
+          const entry = JSON.parse(e.data);
+          const logList = document.getElementById('log-list');
+          logList.insertAdjacentHTML('afterbegin', renderLogEntry(entry));
+
+          // Keep max 500 entries in DOM during tail
+          while (logList.children.length > 500) {
+            logList.removeChild(logList.lastChild);
+          }
+
+          tailCount++;
+          document.getElementById('tail-count').textContent = tailCount + ' new entries';
+        } catch (err) {
+          console.error('Failed to parse SSE log event:', err);
+        }
+      });
+
+      eventSource.addEventListener('heartbeat', function() {
+        // Connection is alive
+      });
+
+      eventSource.addEventListener('close', function() {
+        stopTail();
+      });
+
+      eventSource.onerror = function() {
+        stopTail();
+      };
+    }
+
+    function stopTail() {
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+      }
+      tailActive = false;
+
+      document.getElementById('btn-tail').textContent = 'Live Tail';
+      document.getElementById('btn-tail').classList.remove('bg-green-900', 'border-green-700', 'text-green-300');
+      document.getElementById('btn-tail').classList.add('bg-gray-800', 'border-gray-700');
+      document.getElementById('tail-indicator').classList.add('hidden');
+      document.getElementById('pagination').classList.remove('hidden');
+
+      // Reload logs to show current state
+      currentOffset = 0;
+      loadLogs();
+    }
+
+    // Event listeners
+    document.getElementById('btn-tail').addEventListener('click', () => {
+      if (tailActive) {
+        stopTail();
+      } else {
+        startTail();
+      }
+    });
+
+    document.getElementById('btn-prev').addEventListener('click', () => {
+      currentOffset = Math.max(0, currentOffset - LIMIT);
+      loadLogs();
+    });
+
+    document.getElementById('btn-next').addEventListener('click', () => {
+      currentOffset += LIMIT;
+      loadLogs();
+    });
+
+    // Debounce search input
+    let searchTimer = null;
+    document.getElementById('filter-search').addEventListener('input', () => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => { currentOffset = 0; loadLogs(); }, 300);
+    });
+
+    document.getElementById('filter-container').addEventListener('change', () => { currentOffset = 0; loadLogs(); });
+    document.getElementById('filter-level').addEventListener('change', () => { currentOffset = 0; loadLogs(); });
+    document.getElementById('filter-time').addEventListener('change', () => { currentOffset = 0; loadLogs(); });
+
+    // Initial load
+    loadContainers();
+    loadStats();
+    loadLogs();
+  </script>
+</body>
+</html>

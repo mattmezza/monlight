@@ -9,6 +9,7 @@ const rate_limit = @import("rate_limit");
 const ingestion = @import("ingestion.zig");
 const log_query = @import("log_query.zig");
 const sse_tail = @import("sse_tail.zig");
+const web_ui = @import("web_ui.zig");
 
 const server_port: u16 = 8000;
 const max_header_size = 8192;
@@ -124,6 +125,14 @@ pub fn handleConnection(conn: net.Server.Connection, api_key: []const u8, limite
     if (std.mem.eql(u8, target, "/health")) {
         handleHealth(&request, db);
         return;
+    }
+
+    // Serve web UI page (no auth required)
+    if (request.head.method == .GET) {
+        if (std.mem.eql(u8, target, "/") or std.mem.eql(u8, target, "/index.html")) {
+            web_ui.serveIndex(&request);
+            return;
+        }
     }
 
     // Authenticate the request (skips excluded paths like /health)

@@ -238,36 +238,36 @@
   - ~~Health check endpoint (`GET /health`)~~
     - ~~Return `{"status": "ok", "logs_indexed": N, "last_ingest": "..."}` with 200, no auth required~~
       - ~~Returns current log count and last ingestion timestamp~~
-  - Web UI
-    - Create HTML page displaying log entries in a scrollable list
-      - Logs are displayed with timestamp, container, level, message
-      - Log entries are color-coded by level (DEBUG=gray, INFO=default, WARNING=yellow, ERROR=red)
-    - Add search box for full-text search
-      - Search results update the list
-    - Add filter dropdowns for container and level
-      - Filters update the list
-    - Add time range selector (last 1h, 24h, 7d, custom)
-      - Time range filtering works
-    - Add live tail mode (auto-refresh using SSE)
-      - New logs appear in real-time without page refresh
-    - Add click-to-expand for full log entry (including raw JSON)
-      - Clicking a log entry shows the full raw content
-    - Style all pages with embedded Tailwind CSS
-      - CSS is embedded in the binary at compile time
-      - Pages render correctly with Tailwind utility classes
-  - Tests
-    - Write tests for Docker JSON log file parsing
-      - Tests cover valid JSON lines, malformed lines, multiline logs
-    - Write tests for multiline log reassembly
-      - Python traceback spanning multiple Docker JSON lines produces a single log entry
-      - Non-continuation lines correctly start new entries
-      - Timeout flush works for partial entries
-    - Write tests for log level extraction (all four patterns + defaults)
-      - Tests cover each pattern and fallback behavior
+  - ~~Web UI~~
+    - ~~Create HTML page displaying log entries in a scrollable list~~
+      - ~~Logs are displayed with timestamp, container, level, message~~
+      - ~~Log entries are color-coded by level (DEBUG=gray, INFO=default, WARNING=yellow, ERROR=red)~~
+    - ~~Add search box for full-text search~~
+      - ~~Search results update the list~~
+    - ~~Add filter dropdowns for container and level~~
+      - ~~Filters update the list~~
+    - ~~Add time range selector (last 1h, 24h, 7d, custom)~~
+      - ~~Time range filtering works~~
+    - ~~Add live tail mode (auto-refresh using SSE)~~
+      - ~~New logs appear in real-time without page refresh~~
+    - ~~Add click-to-expand for full log entry (including raw JSON)~~
+      - ~~Clicking a log entry shows the full raw content~~
+    - ~~Style all pages with embedded Tailwind CSS~~
+      - ~~CSS is embedded in the binary at compile time~~
+      - ~~Pages render correctly with Tailwind utility classes~~
+  - ~~Tests~~
+    - ~~Write tests for Docker JSON log file parsing~~
+      - ~~Tests cover valid JSON lines, malformed lines, multiline logs~~
+    - ~~Write tests for multiline log reassembly~~
+      - ~~Python traceback spanning multiple Docker JSON lines produces a single log entry~~
+      - ~~Non-continuation lines correctly start new entries~~
+      - ~~Timeout flush works for partial entries~~
+    - ~~Write tests for log level extraction (all four patterns + defaults)~~
+      - ~~Tests cover each pattern and fallback behavior~~
     - ~~Write tests for FTS5 search queries~~
       - ~~Tests verify search returns correct results~~
-    - Write tests for ring buffer cleanup (entries are deleted, count stays within limit)
-      - Tests verify oldest entries are removed
+    - ~~Write tests for ring buffer cleanup (entries are deleted, count stays within limit)~~
+      - ~~Tests verify oldest entries are removed~~
     - ~~Write tests for SSE endpoint~~
       - ~~Tests verify SSE event format, heartbeat delivery, and max connection enforcement~~
 

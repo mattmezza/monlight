@@ -134,6 +134,15 @@ pub fn build(b: *std.Build) void {
 
     const run_sse_tail_tests = b.addRunArtifact(sse_tail_tests);
 
+    // Test step — tests for web_ui.zig
+    const web_ui_tests = b.addTest(.{
+        .root_source_file = b.path("src/web_ui.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const run_web_ui_tests = b.addRunArtifact(web_ui_tests);
+
     const test_step = b.step("test", "Run all unit tests");
     test_step.dependOn(&run_main_tests.step);
     test_step.dependOn(&run_db_tests.step);
@@ -142,4 +151,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_ingestion_tests.step);
     test_step.dependOn(&run_log_query_tests.step);
     test_step.dependOn(&run_sse_tail_tests.step);
+    test_step.dependOn(&run_web_ui_tests.step);
 }
