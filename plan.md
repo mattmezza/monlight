@@ -127,16 +127,16 @@
       - Pages render correctly with Tailwind utility classes
       - Log levels / error states are color-coded
   - Tests
-    - Write tests for fingerprinting algorithm (deterministic output, different inputs produce different fingerprints)
-      - Tests pass with `zig build test`
+    - ~~Write tests for fingerprinting algorithm (deterministic output, different inputs produce different fingerprints)~~
+      - ~~Tests pass with `zig build test`~~
     - ~~Write tests for error ingestion logic (create, increment, reopen)~~
       - ~~Tests cover all three code paths~~
       - ~~Tests verify occurrence records are created on each ingestion~~
       - ~~Tests verify oldest occurrence is deleted when limit (5) is exceeded~~
-    - Write tests for API key validation (accept, reject, skip on /health)
-      - Tests cover auth middleware behavior
-    - Write tests for rate limiting (accept under limit, reject over limit, sliding window reset)
-      - Tests verify 429 response when rate limit exceeded
+    - ~~Write tests for API key validation (accept, reject, skip on /health)~~
+      - ~~Tests cover auth middleware behavior~~
+    - ~~Write tests for rate limiting (accept under limit, reject over limit, sliding window reset)~~
+      - ~~Tests verify 429 response when rate limit exceeded~~
     - ~~Write tests for retention cleanup (deletes old resolved, keeps unresolved, cascades occurrences)~~
       - ~~Tests verify correct deletion behavior~~
 
