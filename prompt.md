@@ -12,4 +12,7 @@ While you implement a task, if you discover something useful for future implemen
 
 
 When all of the criteria are verified and the implementation is done, mark the task itself (with all of its acceptance criteria) as done by striking them through, then commit the work and exit.
-IF no undone task is present in the plan.md (i.e. all of the tasks are striked through), create a PR for manual review, then exit outputting the following: `<promise>COMPLETE</promise>`
+A subsequent iteration will tackle the next section of the plan.
+
+When all tasks from a section of the plan are done, start tackling the next section's first task.
+IF no undone task is present in any of the sections of the plan (i.e. all of the tasks of all of the sections are striked through), create a PR for manual review, then exit outputting the following: `<promise>COMPLETE</promise>`
