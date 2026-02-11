@@ -1,6 +1,4 @@
 #!/bin/bash
-# Ralph Wiggum - Long-running AI agent loop
-# Usage: ./ralph.sh [--tool amp|claude --root .] [max_iterations]
 
 set -e
 
@@ -41,12 +39,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-echo "Starting looop - Tool: $TOOL - Max iterations: $MAX_ITERATIONS"
+echo "Starting looop - max iterations: $MAX_ITERATIONS"
 
 for i in $(seq 1 $MAX_ITERATIONS); do
   echo ""
   echo "==============================================================="
-  echo "  looop $i of $MAX_ITERATIONS ($TOOL)"
+  echo "  looop $i of $MAX_ITERATIONS"
   echo "==============================================================="
 
   OUTPUT=$(opencode run -m "$MODEL" < "$PROMPT" 2>&1 | tee /dev/stderr) || true
