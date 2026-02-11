@@ -157,6 +157,15 @@ pub fn build(b: *std.Build) void {
 
     const run_rate_limit_integration_tests = b.addRunArtifact(rate_limit_integration_tests);
 
+    // Test step — tests for fingerprint module
+    const fingerprint_tests = b.addTest(.{
+        .root_source_file = b.path("src/fingerprint.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const run_fingerprint_tests = b.addRunArtifact(fingerprint_tests);
+
     const test_step = b.step("test", "Run all unit tests");
     test_step.dependOn(&run_main_tests.step);
     test_step.dependOn(&run_db_tests.step);
@@ -167,4 +176,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_rate_limit_tests.step);
     test_step.dependOn(&run_auth_integration_tests.step);
     test_step.dependOn(&run_rate_limit_integration_tests.step);
+    test_step.dependOn(&run_fingerprint_tests.step);
 }

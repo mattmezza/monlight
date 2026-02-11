@@ -55,3 +55,11 @@
 - `handleConnection` signature changes (adding parameters) require updating ALL test files that call it. Currently `auth_test.zig` and `rate_limit_test.zig` both call `main.handleConnection(...)`.
 - For integration tests of rate limiting, use a `TestServer` that owns the `RateLimiter` with a small limit (e.g., 2-3 requests) to make tests fast and deterministic. Auth tests should use a generous limit (e.g., 1000) so rate limiting doesn't interfere.
 - Body size enforcement checks the `Content-Length` header before reading the body, avoiding memory allocation for oversized requests. Requests without `Content-Length` are allowed through (they may have no body or use chunked encoding).
+
+## Session 6: Error Tracker Fingerprinting Algorithm
+
+- The fingerprint module (`fingerprint.zig`) is pure Zig — no C deps (uses `std.crypto.hash.Md5`), no shared module deps. Test artifacts for it don't need `linkSystemLibrary` or `linkLibC`.
+- Zig 0.13's `std.crypto.hash.Md5` API: `Md5.init(.{})` → `.update(data)` → `.final(&digest)`. Digest is `[16]u8`. Also has a one-shot `Md5.hash(input, &out, .{})`.
+- Python traceback parsing: the `File "...", line N` format always has `", line "` (with the comma+space) immediately after the closing quote of the file path. The optional `, in function_name` part comes after the line number.
+- The fingerprint key format is `{project}:{exception_type}:{file}:{line}` — the MD5 hasher can be fed these parts incrementally with `.update()` calls (including the `:` separators) rather than needing to allocate a concatenated string.
+- When no traceback location can be parsed (non-Python tracebacks or plain text), the fallback uses the entire traceback string as the location component, still producing a deterministic 32-char hex fingerprint.
