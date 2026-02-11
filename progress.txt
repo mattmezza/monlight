@@ -25,3 +25,14 @@
 - In-memory SQLite databases (`:memory:`) use `memory` journal mode, not WAL. Tests that check WAL pragma should account for this.
 - SQLite `EXPLAIN QUERY PLAN` returns the detail string in column index 3 — useful for verifying index usage in tests.
 - The `_meta` table pattern for schema versioning: `(key TEXT PRIMARY KEY, value TEXT)` with `schema_version` key stores the version as a text string. Migration runner compares version as `usize` integer.
+
+## Session 3: Error Tracker Configuration Module
+
+- Shared config module (`shared/config.zig`) provides generic env var parsing helpers: `getRequired`, `getString`, `getInt`, `getBool`, `getOptional`, `initLogLevel`. Each service's config module uses these to define its own specific config struct.
+- Adding a new shared module requires updates in `build.zig`: (1) `b.addModule(...)` to create the module, (2) `exe.root_module.addImport(...)` on the executable, and (3) the same addImport on EVERY test artifact that transitively imports it.
+- The shared config module does NOT need `linkSystemLibrary("sqlite3")` or `linkLibC()` since it has no C dependencies — only test artifacts with C deps need those.
+- Environment variables in Zig tests cannot be easily set/unset, so config tests rely on verifying behavior with env vars known to NOT exist (e.g., `MONLIGHT_TEST_NONEXISTENT_VAR_12345`) rather than setting them.
+- `std.debug.print` is used for fatal startup messages (instead of `std.log`) because log level filtering might suppress the message. Fatal config errors must always be visible.
+- Config struct stores a `db_path_z: [*:0]const u8` (null-terminated) alongside the regular `database_path: []const u8` slice, because SQLite's C API requires null-terminated strings. The null-terminated version is backed by a `_db_path_buf: [512]u8` field within the struct.
+- IMPORTANT: Previous feature branches are not auto-merged into main. When branching for a new task, branch off the PREVIOUS feature branch (not main) if that branch contains required code (e.g., `shared/sqlite.zig`).
+- `std.posix.getenv()` returns `?[]const u8` — an optional slice. It returns null when the env var is not set.

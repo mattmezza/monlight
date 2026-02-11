@@ -9,6 +9,11 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("../shared/sqlite.zig"),
     });
 
+    // Shared config module from ../shared/
+    const config_mod = b.addModule("config", .{
+        .root_source_file = b.path("../shared/config.zig"),
+    });
+
     const exe = b.addExecutable(.{
         .name = "error-tracker",
         .root_source_file = b.path("src/main.zig"),
@@ -18,6 +23,7 @@ pub fn build(b: *std.Build) void {
 
     // Add shared modules
     exe.root_module.addImport("sqlite", sqlite_mod);
+    exe.root_module.addImport("config", config_mod);
 
     // Link SQLite C library
     exe.linkSystemLibrary("sqlite3");
@@ -41,6 +47,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     main_tests.root_module.addImport("sqlite", sqlite_mod);
+    main_tests.root_module.addImport("config", config_mod);
     main_tests.linkSystemLibrary("sqlite3");
     main_tests.linkLibC();
 
@@ -58,6 +65,16 @@ pub fn build(b: *std.Build) void {
 
     const run_db_tests = b.addRunArtifact(db_tests);
 
+    // Test step — tests for config.zig
+    const config_tests = b.addTest(.{
+        .root_source_file = b.path("src/config.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    config_tests.root_module.addImport("config", config_mod);
+
+    const run_config_tests = b.addRunArtifact(config_tests);
+
     // Test step — tests for shared sqlite module
     const sqlite_tests = b.addTest(.{
         .root_source_file = b.path("../shared/sqlite.zig"),
@@ -69,8 +86,19 @@ pub fn build(b: *std.Build) void {
 
     const run_sqlite_tests = b.addRunArtifact(sqlite_tests);
 
+    // Test step — tests for shared config module
+    const shared_config_tests = b.addTest(.{
+        .root_source_file = b.path("../shared/config.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const run_shared_config_tests = b.addRunArtifact(shared_config_tests);
+
     const test_step = b.step("test", "Run all unit tests");
     test_step.dependOn(&run_main_tests.step);
     test_step.dependOn(&run_db_tests.step);
+    test_step.dependOn(&run_config_tests.step);
     test_step.dependOn(&run_sqlite_tests.step);
+    test_step.dependOn(&run_shared_config_tests.step);
 }

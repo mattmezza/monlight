@@ -3,10 +3,10 @@ const net = std.net;
 const log = std.log;
 const database = @import("database.zig");
 const sqlite = @import("sqlite");
+const app_config = @import("config.zig");
 
 const server_port: u16 = 8000;
 const max_header_size = 8192;
-const default_db_path = "./data/errors.db";
 
 pub fn main() !void {
     // Check for --healthcheck CLI flag
@@ -18,21 +18,20 @@ pub fn main() !void {
         }
     }
 
-    // Read DATABASE_PATH from environment (or use default)
-    const db_path_env = std.posix.getenv("DATABASE_PATH") orelse default_db_path;
-
-    // Null-terminate the path for SQLite
-    var db_path_buf: [512]u8 = undefined;
-    if (db_path_env.len >= db_path_buf.len) {
-        log.err("DATABASE_PATH too long", .{});
+    // Load configuration from environment variables
+    const cfg = app_config.load() catch {
+        // load() already prints descriptive error messages
         std.process.exit(1);
-    }
-    @memcpy(db_path_buf[0..db_path_env.len], db_path_env);
-    db_path_buf[db_path_env.len] = 0;
-    const db_path_z: [*:0]const u8 = db_path_buf[0..db_path_env.len :0];
+    };
+
+    log.info("configuration loaded (database: {s}, base_url: {s}, retention: {d} days)", .{
+        cfg.database_path,
+        cfg.base_url,
+        cfg.retention_days,
+    });
 
     // Initialize database (opens connection + runs migrations)
-    var db = database.init(db_path_z) catch |err| {
+    var db = database.init(cfg.db_path_z) catch |err| {
         log.err("Failed to initialize database: {}", .{err});
         std.process.exit(1);
     };

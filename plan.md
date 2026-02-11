@@ -38,11 +38,11 @@
       - ~~Migration 3: All indexes: `idx_fingerprint_resolved`, `idx_project_env`, `idx_last_seen`, `idx_resolved`, `idx_occurrence_error_id`~~
         - ~~Indexes are created on startup~~
         - ~~Query planner uses indexes (verified with EXPLAIN QUERY PLAN)~~
-  - Configuration module
-    - Parse environment variables: `DATABASE_PATH`, `API_KEY`, `POSTMARK_API_TOKEN`, `POSTMARK_FROM_EMAIL`, `ALERT_EMAILS`, `RETENTION_DAYS`, `BASE_URL`, `LOG_LEVEL`
-      - All variables are read from env
-      - Missing required variables (`API_KEY`) cause a clear startup error
-      - Defaults are applied for optional variables
+  - ~~Configuration module~~
+    - ~~Parse environment variables: `DATABASE_PATH`, `API_KEY`, `POSTMARK_API_TOKEN`, `POSTMARK_FROM_EMAIL`, `ALERT_EMAILS`, `RETENTION_DAYS`, `BASE_URL`, `LOG_LEVEL`~~
+      - ~~All variables are read from env~~
+      - ~~Missing required variables (`API_KEY`) cause a clear startup error~~
+      - ~~Defaults are applied for optional variables~~
   - API key authentication
     - Use shared auth middleware configured with `API_KEY`
       - Requests without `X-API-Key` header return 401 with `{"detail": "Invalid API key"}`
