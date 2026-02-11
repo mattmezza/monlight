@@ -63,3 +63,16 @@
 - Python traceback parsing: the `File "...", line N` format always has `", line "` (with the comma+space) immediately after the closing quote of the file path. The optional `, in function_name` part comes after the line number.
 - The fingerprint key format is `{project}:{exception_type}:{file}:{line}` — the MD5 hasher can be fed these parts incrementally with `.update()` calls (including the `:` separators) rather than needing to allocate a concatenated string.
 - When no traceback location can be parsed (non-Python tracebacks or plain text), the fallback uses the entire traceback string as the location component, still producing a deterministic 32-char hex fingerprint.
+
+## Session 7: Error Tracker Error Ingestion Endpoint
+
+- The `error_ingestion.zig` module handles: JSON parsing/validation, fingerprint-based deduplication (create/increment/reopen), occurrence record creation, and occurrence trimming (max 5 per error).
+- `std.json.parseFromSliceLeaky` is preferred over `parseFromSlice` when using an arena allocator — it skips tracking individual allocations since the arena will free them all at once.
+- The ingestion flow: parse JSON → validate required fields + length limits → compute fingerprint → find existing error by fingerprint → create/increment/reopen → create occurrence → trim occurrences. All DB operations are sequential (no transactions needed for single-row operations).
+- `handleConnection` signature grew to include `db: *sqlite.Database` and `cfg: *const app_config.Config` so the error ingestion handler can access the database and config (e.g., Postmark settings for email alerts).
+- When `handleConnection` signature changes, ALL test files that call it must be updated. Test files need `makeTestConfig()` helper functions that create dummy Config structs with valid field values.
+- The `Config` struct has a `_db_path_buf: [512]u8` field that backs the null-terminated `db_path_z` pointer. When creating test configs, this buffer must be properly initialized with `@memcpy` and null terminator.
+- Body size enforcement tests that previously used `POST /api/errors` had to be changed to `POST /api/test` (which returns 404) because the error ingestion handler now tries to read the request body. If `Content-Length` claims N bytes but none are sent, the server hangs waiting for data.
+- The Postmark email integration builds JSON payloads manually using `std.ArrayList(u8)` writer with a `writeJsonEscaped` helper that escapes `"`, `\\`, `\n`, `\r`, `\t`, and control chars below 0x20.
+- `std.http.Client` in Zig 0.13: create with `{ .allocator = allocator }`, `open(.POST, uri, .{ .server_header_buffer, .extra_headers })`, set `.transfer_encoding = .{ .content_length = len }`, then `send()` → `writeAll(payload)` → `finish()` → `wait()`.
+- Email alerting is fire-and-forget: failures are logged with `log.warn` but never propagate errors back to the HTTP response. If Postmark credentials are not configured (`null`), the alert is skipped silently with an early return.

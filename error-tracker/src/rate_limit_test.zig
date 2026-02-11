@@ -2,6 +2,9 @@ const std = @import("std");
 const net = std.net;
 const main = @import("main.zig");
 const rate_limit = @import("rate_limit");
+const sqlite = @import("sqlite");
+const database = @import("database.zig");
+const app_config = @import("config.zig");
 
 const test_api_key = "test-secret-key-12345678901234";
 
@@ -12,12 +15,31 @@ const HttpResponse = struct {
     raw: []const u8,
 };
 
+/// Create a minimal Config for testing purposes.
+fn makeTestConfig() app_config.Config {
+    var cfg: app_config.Config = undefined;
+    cfg.database_path = ":memory:";
+    cfg.api_key = test_api_key;
+    cfg.postmark_api_token = null;
+    cfg.postmark_from_email = "test@example.com";
+    cfg.alert_emails = null;
+    cfg.retention_days = 90;
+    cfg.base_url = "http://localhost:8000";
+    const path = ":memory:";
+    @memcpy(cfg._db_path_buf[0..path.len], path);
+    cfg._db_path_buf[path.len] = 0;
+    cfg.db_path_z = cfg._db_path_buf[0..path.len :0];
+    return cfg;
+}
+
 /// A test server that handles a fixed number of requests then stops.
 /// Uses a tight rate limit for testing purposes.
 const TestServer = struct {
     server: net.Server,
     thread: ?std.Thread = null,
     limiter: rate_limit.RateLimiter,
+    db: sqlite.Database,
+    cfg: app_config.Config,
 
     fn init(max_requests: usize) !TestServer {
         const address = net.Address.initIp4(.{ 127, 0, 0, 1 }, 0);
@@ -25,9 +47,12 @@ const TestServer = struct {
             .reuse_address = true,
         });
         const limiter = try rate_limit.RateLimiter.init(std.testing.allocator, max_requests, 60_000);
+        const db = try database.init(":memory:");
         return .{
             .server = server,
             .limiter = limiter,
+            .db = db,
+            .cfg = makeTestConfig(),
         };
     }
 
@@ -45,7 +70,7 @@ const TestServer = struct {
         var handled: usize = 0;
         while (handled < count) {
             const conn = self.server.accept() catch continue;
-            main.handleConnection(conn, test_api_key, &self.limiter) catch {};
+            main.handleConnection(conn, test_api_key, &self.limiter, &self.db, &self.cfg) catch {};
             handled += 1;
         }
     }
@@ -55,6 +80,7 @@ const TestServer = struct {
             t.join();
         }
         self.limiter.deinit();
+        self.db.close();
         self.server.deinit();
     }
 };
@@ -201,10 +227,11 @@ test "request with Content-Length within limit is accepted" {
     try srv.start(1);
 
     // Content-Length: 50 (well under 256KB limit)
+    // Use /api/test (not /api/errors) to avoid the handler trying to read body data
     const headers = "X-API-Key: " ++ test_api_key ++ "\r\nContent-Length: 50\r\n";
-    const resp = try sendRequest(srv.port(), "POST", "/api/errors", headers);
+    const resp = try sendRequest(srv.port(), "POST", "/api/test", headers);
 
-    // Should NOT get 413 (may get 404 since endpoint isn't fully implemented)
+    // Should NOT get 413 (gets 404 since /api/test doesn't exist)
     try std.testing.expect(resp.status_code != 413);
 }
 
@@ -240,8 +267,9 @@ test "request with Content-Length exactly at limit is accepted" {
     try srv.start(1);
 
     // Content-Length: 262144 (exactly 256KB — should be accepted)
+    // Use /api/test (not /api/errors) to avoid the handler trying to read body data
     const headers = "X-API-Key: " ++ test_api_key ++ "\r\nContent-Length: 262144\r\n";
-    const resp = try sendRequest(srv.port(), "POST", "/api/errors", headers);
+    const resp = try sendRequest(srv.port(), "POST", "/api/test", headers);
 
     // Should NOT get 413
     try std.testing.expect(resp.status_code != 413);

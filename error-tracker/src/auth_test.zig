@@ -2,6 +2,9 @@ const std = @import("std");
 const net = std.net;
 const main = @import("main.zig");
 const rate_limit = @import("rate_limit");
+const sqlite = @import("sqlite");
+const database = @import("database.zig");
+const app_config = @import("config.zig");
 
 const test_api_key = "test-secret-key-12345678901234";
 
@@ -16,13 +19,20 @@ const HttpResponse = struct {
 const TestServer = struct {
     server: net.Server,
     thread: ?std.Thread = null,
+    db: sqlite.Database,
+    cfg: app_config.Config,
 
     fn init() !TestServer {
         const address = net.Address.initIp4(.{ 127, 0, 0, 1 }, 0);
         const server = try address.listen(.{
             .reuse_address = true,
         });
-        return .{ .server = server };
+        const db = try database.init(":memory:");
+        return .{
+            .server = server,
+            .db = db,
+            .cfg = makeTestConfig(),
+        };
     }
 
     fn port(self: *const TestServer) u16 {
@@ -42,7 +52,7 @@ const TestServer = struct {
         var handled: usize = 0;
         while (handled < count) {
             const conn = self.server.accept() catch continue;
-            main.handleConnection(conn, test_api_key, &limiter) catch {};
+            main.handleConnection(conn, test_api_key, &limiter, &self.db, &self.cfg) catch {};
             handled += 1;
         }
     }
@@ -51,6 +61,7 @@ const TestServer = struct {
         if (self.thread) |t| {
             t.join();
         }
+        self.db.close();
         self.server.deinit();
     }
 };
@@ -166,6 +177,25 @@ test "/health endpoint works with wrong API key too" {
     const resp = try sendRequest(srv.port(), "GET", "/health", "X-API-Key: totally-wrong\r\n");
     try std.testing.expectEqual(@as(u16, 200), resp.status_code);
     try std.testing.expect(std.mem.indexOf(u8, resp.body, "\"ok\"") != null);
+}
+
+/// Create a minimal Config for testing purposes.
+/// The values don't need to be real — the auth tests don't exercise config-dependent logic.
+fn makeTestConfig() app_config.Config {
+    var cfg: app_config.Config = undefined;
+    cfg.database_path = ":memory:";
+    cfg.api_key = test_api_key;
+    cfg.postmark_api_token = null;
+    cfg.postmark_from_email = "test@example.com";
+    cfg.alert_emails = null;
+    cfg.retention_days = 90;
+    cfg.base_url = "http://localhost:8000";
+    // Set up the null-terminated db path
+    const path = ":memory:";
+    @memcpy(cfg._db_path_buf[0..path.len], path);
+    cfg._db_path_buf[path.len] = 0;
+    cfg.db_path_z = cfg._db_path_buf[0..path.len :0];
+    return cfg;
 }
 
 test "auth 401 response has JSON content-type" {

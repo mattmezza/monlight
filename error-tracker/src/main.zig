@@ -6,6 +6,7 @@ const sqlite = @import("sqlite");
 const app_config = @import("config.zig");
 const auth = @import("auth");
 const rate_limit = @import("rate_limit");
+const error_ingestion = @import("error_ingestion.zig");
 
 const server_port: u16 = 8000;
 const max_header_size = 8192;
@@ -73,13 +74,13 @@ pub fn main() !void {
             log.err("Failed to accept connection: {}", .{err});
             continue;
         };
-        handleConnection(conn, cfg.api_key, &limiter) catch |err| {
+        handleConnection(conn, cfg.api_key, &limiter, &db, &cfg) catch |err| {
             log.err("Failed to handle connection: {}", .{err});
         };
     }
 }
 
-pub fn handleConnection(conn: net.Server.Connection, api_key: []const u8, limiter: *rate_limit.RateLimiter) !void {
+pub fn handleConnection(conn: net.Server.Connection, api_key: []const u8, limiter: *rate_limit.RateLimiter, db: *sqlite.Database, cfg: *const app_config.Config) !void {
     defer conn.stream.close();
 
     var buf: [max_header_size]u8 = undefined;
@@ -109,6 +110,8 @@ pub fn handleConnection(conn: net.Server.Connection, api_key: []const u8, limite
     // Route the request
     if (std.mem.eql(u8, request.head.target, "/health")) {
         try handleHealth(&request);
+    } else if (std.mem.eql(u8, request.head.target, "/api/errors") and request.head.method == .POST) {
+        handleErrorIngestion(&request, db, cfg);
     } else {
         try handleNotFound(&request);
     }
@@ -119,6 +122,229 @@ fn handleHealth(request: *std.http.Server.Request) !void {
         \\{"status": "ok"}
     ;
     try sendJsonResponse(request, .ok, body);
+}
+
+fn handleErrorIngestion(request: *std.http.Server.Request, db: *sqlite.Database, cfg: *const app_config.Config) void {
+    // Read request body
+    const body_reader = request.reader() catch |err| {
+        log.err("Failed to get request reader: {}", .{err});
+        return;
+    };
+
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const body = body_reader.readAllAlloc(allocator, max_body_size) catch |err| {
+        log.err("Failed to read request body: {}", .{err});
+        sendJsonResponse(request, .bad_request, "{\"detail\": \"Failed to read request body\"}") catch {};
+        return;
+    };
+
+    // Parse and validate the request body
+    var validation_err: error_ingestion.ValidationError = .{ .detail = "" };
+    const report = error_ingestion.parseAndValidate(allocator, body, &validation_err) orelse {
+        // Validation failed — format error response
+        var err_buf: [256]u8 = undefined;
+        const err_json = std.fmt.bufPrint(&err_buf, "{{\"detail\": \"{s}\"}}", .{validation_err.detail}) catch
+            "{\"detail\": \"Validation error\"}";
+        sendJsonResponse(request, .bad_request, err_json) catch {};
+        return;
+    };
+
+    // Ingest the error
+    const result = error_ingestion.ingest(db, &report) catch |err| {
+        log.err("Failed to ingest error: {}", .{err});
+        sendJsonResponse(request, .internal_server_error, "{\"detail\": \"Internal server error\"}") catch {};
+        return;
+    };
+
+    // Format response
+    var resp_buf: [512]u8 = undefined;
+    const resp_json = error_ingestion.formatResponse(&result, &resp_buf) catch {
+        sendJsonResponse(request, .internal_server_error, "{\"detail\": \"Internal server error\"}") catch {};
+        return;
+    };
+
+    // Determine status code
+    const status: std.http.Status = switch (result.status) {
+        .created => .created,
+        .incremented => .ok,
+        .reopened => .created,
+    };
+
+    sendJsonResponse(request, status, resp_json) catch {};
+
+    // Trigger email alert for new errors (asynchronously, non-blocking)
+    if (result.is_new) {
+        triggerEmailAlert(cfg, &report, &result);
+    }
+}
+
+/// Trigger an email alert for a new error.
+/// This is fire-and-forget: failures are logged but do not affect the response.
+fn triggerEmailAlert(cfg: *const app_config.Config, report: *const error_ingestion.ErrorReport, result: *const error_ingestion.IngestResult) void {
+    // If Postmark is not configured, skip silently
+    const api_token = cfg.postmark_api_token orelse return;
+    const alert_emails = cfg.alert_emails orelse return;
+
+    // Format email subject: [{project}] {exception_type}: {message_truncated_50_chars}
+    var subject_buf: [512]u8 = undefined;
+    const msg_truncated = if (report.message.len > 50) report.message[0..50] else report.message;
+    const subject = std.fmt.bufPrint(&subject_buf, "[{s}] {s}: {s}", .{
+        report.project,
+        report.exception_type,
+        msg_truncated,
+    }) catch "New error alert";
+
+    // Format email body
+    var body_buf: [8192]u8 = undefined;
+    const request_info = if (report.request_method != null and report.request_url != null) blk: {
+        var req_buf: [256]u8 = undefined;
+        break :blk std.fmt.bufPrint(&req_buf, "{s} {s}", .{ report.request_method.?, report.request_url.? }) catch "N/A";
+    } else "N/A";
+
+    const fp_str: []const u8 = if (result.fingerprint) |fp| &fp else "unknown";
+    _ = fp_str;
+
+    const dashboard_link = blk: {
+        var link_buf: [256]u8 = undefined;
+        break :blk std.fmt.bufPrint(&link_buf, "{s}/api/errors/{d}", .{ cfg.base_url, result.id }) catch cfg.base_url;
+    };
+
+    const email_body = std.fmt.bufPrint(&body_buf,
+        \\New error in {s} ({s})
+        \\
+        \\Exception: {s}
+        \\Message: {s}
+        \\
+        \\Request: {s}
+        \\
+        \\Traceback:
+        \\{s}
+        \\
+        \\---
+        \\View in Error Tracker: {s}
+    , .{
+        report.project,
+        report.environment,
+        report.exception_type,
+        report.message,
+        request_info,
+        report.traceback,
+        dashboard_link,
+    }) catch "Error alert - see error tracker for details";
+
+    // Send to each recipient
+    var email_iter = std.mem.splitScalar(u8, alert_emails, ',');
+    while (email_iter.next()) |raw_email| {
+        const email = std.mem.trim(u8, raw_email, " \t\r\n");
+        if (email.len == 0) continue;
+        sendPostmarkEmail(api_token, cfg.postmark_from_email, email, subject, email_body);
+    }
+}
+
+/// Send an email via the Postmark API.
+/// This is a blocking HTTP call — in a production system, this should be done
+/// on a separate thread. For now, the alert is sent synchronously but
+/// the caller handles failures gracefully.
+fn sendPostmarkEmail(
+    api_token: []const u8,
+    from_email: []const u8,
+    to_email: []const u8,
+    subject: []const u8,
+    body: []const u8,
+) void {
+    // Build JSON payload
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var payload_buf = std.ArrayList(u8).init(allocator);
+    const writer = payload_buf.writer();
+
+    // Manually build JSON to avoid escaping issues
+    writer.writeAll("{\"From\": \"") catch {
+        log.warn("Failed to build Postmark payload", .{});
+        return;
+    };
+    writeJsonEscaped(writer, from_email) catch return;
+    writer.writeAll("\", \"To\": \"") catch return;
+    writeJsonEscaped(writer, to_email) catch return;
+    writer.writeAll("\", \"Subject\": \"") catch return;
+    writeJsonEscaped(writer, subject) catch return;
+    writer.writeAll("\", \"TextBody\": \"") catch return;
+    writeJsonEscaped(writer, body) catch return;
+    writer.writeAll("\"}") catch return;
+
+    const payload = payload_buf.items;
+
+    // Make HTTP request to Postmark API
+    var client = std.http.Client{ .allocator = allocator };
+    defer client.deinit();
+
+    const uri = std.Uri.parse("https://api.postmarkapp.com/email") catch {
+        log.warn("Failed to parse Postmark URL", .{});
+        return;
+    };
+
+    var header_buf: [4096]u8 = undefined;
+    var req = client.open(.POST, uri, .{
+        .server_header_buffer = &header_buf,
+        .extra_headers = &.{
+            .{ .name = "Accept", .value = "application/json" },
+            .{ .name = "Content-Type", .value = "application/json" },
+            .{ .name = "X-Postmark-Server-Token", .value = api_token },
+        },
+    }) catch |err| {
+        log.warn("Failed to connect to Postmark API: {}", .{err});
+        return;
+    };
+    defer req.deinit();
+
+    req.transfer_encoding = .{ .content_length = payload.len };
+    req.send() catch |err| {
+        log.warn("Failed to send Postmark request: {}", .{err});
+        return;
+    };
+    req.writeAll(payload) catch |err| {
+        log.warn("Failed to write Postmark payload: {}", .{err});
+        return;
+    };
+    req.finish() catch |err| {
+        log.warn("Failed to finish Postmark request: {}", .{err});
+        return;
+    };
+    req.wait() catch |err| {
+        log.warn("Failed to get Postmark response: {}", .{err});
+        return;
+    };
+
+    if (req.response.status == .ok) {
+        log.info("Email alert sent to {s}", .{to_email});
+    } else {
+        log.warn("Postmark API returned status {d} for email to {s}", .{ @intFromEnum(req.response.status), to_email });
+    }
+}
+
+/// Write a string with JSON escaping (escapes backslash, double-quote, newline, tab, etc.)
+fn writeJsonEscaped(writer: anytype, s: []const u8) !void {
+    for (s) |ch| {
+        switch (ch) {
+            '"' => try writer.writeAll("\\\""),
+            '\\' => try writer.writeAll("\\\\"),
+            '\n' => try writer.writeAll("\\n"),
+            '\r' => try writer.writeAll("\\r"),
+            '\t' => try writer.writeAll("\\t"),
+            else => {
+                if (ch < 0x20) {
+                    try writer.print("\\u{x:0>4}", .{ch});
+                } else {
+                    try writer.writeByte(ch);
+                }
+            },
+        }
+    }
 }
 
 fn handleNotFound(request: *std.http.Server.Request) !void {

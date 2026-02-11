@@ -58,21 +58,21 @@
       - ~~Given the same project, exception_type, and traceback, the same fingerprint is produced~~
       - ~~Different stack trace locations produce different fingerprints~~
       - ~~Output is a 32-character hex string~~
-  - Error ingestion endpoint (`POST /api/errors`)
-    - Parse and validate JSON request body (project required, exception_type required, message required, traceback required; optional fields: environment, request_url, request_method, request_headers, user_id, extra)
-      - Invalid JSON returns 400
-      - Missing required fields return 400 with descriptive error
-      - Field length limits are enforced (project max 100, exception_type max 200)
-    - Compute fingerprint and check for existing unresolved error with same fingerprint
-      - Existing unresolved error: increment count, update last_seen, return 200 with `{"status": "incremented", "id": ..., "count": ...}`
-      - Existing resolved error with same fingerprint: reopen it (set resolved=false, increment count, update last_seen), return 201
-      - New fingerprint: insert new error row, return 201 with `{"status": "created", "id": ..., "fingerprint": ...}`
-    - Create an `error_occurrences` record for every ingestion (new or existing error)
-      - Occurrence stores the per-request context (request_url, request_method, request_headers, user_id, extra, traceback)
-      - If the error already has 5 occurrences, delete the oldest before inserting the new one
-    - Trigger email alert on new error fingerprint (first occurrence only)
-      - Alert is sent asynchronously (does not block response)
-      - If Postmark is not configured, alert is skipped silently
+  - ~~Error ingestion endpoint (`POST /api/errors`)~~
+    - ~~Parse and validate JSON request body (project required, exception_type required, message required, traceback required; optional fields: environment, request_url, request_method, request_headers, user_id, extra)~~
+      - ~~Invalid JSON returns 400~~
+      - ~~Missing required fields return 400 with descriptive error~~
+      - ~~Field length limits are enforced (project max 100, exception_type max 200)~~
+    - ~~Compute fingerprint and check for existing unresolved error with same fingerprint~~
+      - ~~Existing unresolved error: increment count, update last_seen, return 200 with `{"status": "incremented", "id": ..., "count": ...}`~~
+      - ~~Existing resolved error with same fingerprint: reopen it (set resolved=false, increment count, update last_seen), return 201~~
+      - ~~New fingerprint: insert new error row, return 201 with `{"status": "created", "id": ..., "fingerprint": ...}`~~
+    - ~~Create an `error_occurrences` record for every ingestion (new or existing error)~~
+      - ~~Occurrence stores the per-request context (request_url, request_method, request_headers, user_id, extra, traceback)~~
+      - ~~If the error already has 5 occurrences, delete the oldest before inserting the new one~~
+    - ~~Trigger email alert on new error fingerprint (first occurrence only)~~
+      - ~~Alert is sent asynchronously (does not block response)~~
+      - ~~If Postmark is not configured, alert is skipped silently~~
   - Error listing endpoint (`GET /api/errors`)
     - Support query parameters: `project`, `environment`, `resolved` (default false), `limit` (default 50, max 200), `offset` (default 0)
       - Filtering by project returns only matching errors
@@ -129,10 +129,10 @@
   - Tests
     - Write tests for fingerprinting algorithm (deterministic output, different inputs produce different fingerprints)
       - Tests pass with `zig build test`
-    - Write tests for error ingestion logic (create, increment, reopen)
-      - Tests cover all three code paths
-      - Tests verify occurrence records are created on each ingestion
-      - Tests verify oldest occurrence is deleted when limit (5) is exceeded
+    - ~~Write tests for error ingestion logic (create, increment, reopen)~~
+      - ~~Tests cover all three code paths~~
+      - ~~Tests verify occurrence records are created on each ingestion~~
+      - ~~Tests verify oldest occurrence is deleted when limit (5) is exceeded~~
     - Write tests for API key validation (accept, reject, skip on /health)
       - Tests cover auth middleware behavior
     - Write tests for rate limiting (accept under limit, reject over limit, sliding window reset)
