@@ -1,6 +1,7 @@
 Study the specs.md and plan.md files.
 Study the rest of the codebase.
 All of your work shall be done in a a branch off of main called 'loop'.
+Read the file progress.txt and absorb any useful learnings in it.
 
 From the plan.md file, take the first non-striked-through task of the task tree and start its implementation.
 Make sure you read the file progress.txt: it contains learnings from previous implementations.
