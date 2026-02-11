@@ -31,11 +31,11 @@ This document specifies a self-hosted monitoring stack for the FlowRent applicat
 ### 1.2 Design Philosophy
 
 - **Minimal**: Each service does one thing well
-- **Low resource**: Total stack uses <150MB RAM
+- **Low resource**: Total stack uses <50MB RAM
 - **Independent**: Services can be deployed individually
 - **80/20 rule**: Deliver 80% of value with 20% of complexity
 - **SQLite-based**: No external database dependencies
-- **Compatible**: Designed specifically for FlowRent's tech stack
+- **Compatible**: HTTP API integration with FlowRent's tech stack
 
 ### 1.3 Goals
 
@@ -246,20 +246,22 @@ Current error handling:
 
 | Layer | Technology | Rationale |
 |-------|------------|-----------|
-| Language | Python 3.11+ | Same as FlowRent, shared knowledge |
-| Framework | FastAPI | Lightweight, async, same as FlowRent |
-| Database | SQLite | Simple, no external dependencies |
-| Server | Uvicorn | Same as FlowRent |
+| Language | Zig (0.13+) | Minimal runtime, low memory footprint, compiles to single static binary |
+| HTTP Server | std.http.Server (Zig stdlib) | No external framework dependency, built-in async I/O |
+| Database | SQLite (C library via Zig's @cImport) | Simple, no external dependencies; Zig has first-class C interop |
+| Templating | Embedded Zig templates (comptime) | Compile-time HTML generation, no runtime overhead |
 | Container | Docker | Same as FlowRent |
 
 ### 3.4 Resource Budget
 
 | Service | RAM | Disk | CPU |
 |---------|-----|------|-----|
-| Error Tracker | 50MB | 100MB | 0.1 core |
-| Log Viewer | 50MB | 200MB | 0.1 core |
-| Metrics Collector | 30MB | 50MB | 0.1 core |
-| **Total** | **130MB** | **350MB** | **0.3 core** |
+| Error Tracker | 10MB | 100MB | 0.1 core |
+| Log Viewer | 15MB | 200MB | 0.1 core |
+| Metrics Collector | 10MB | 50MB | 0.1 core |
+| **Total** | **35MB** | **350MB** | **0.3 core** |
+
+**Note:** Zig compiles to static binaries with no runtime or garbage collector, resulting in significantly lower memory usage than interpreted languages.
 
 ---
 
@@ -556,7 +558,7 @@ View in Error Tracker: {dashboard_url}
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| DATABASE_URL | string | sqlite:///./data/errors.db | SQLite database path |
+| DATABASE_PATH | string | ./data/errors.db | SQLite database file path |
 | API_KEY | string | (required) | Shared secret for authentication |
 | POSTMARK_API_TOKEN | string | (optional) | Postmark API token for alerts |
 | POSTMARK_FROM_EMAIL | string | errors@example.com | Sender email address |
@@ -806,7 +808,7 @@ Health check endpoint.
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| DATABASE_URL | string | sqlite:///./data/logs.db | SQLite database path |
+| DATABASE_PATH | string | ./data/logs.db | SQLite database file path |
 | LOG_SOURCES | string | /var/lib/docker/containers | Docker containers directory |
 | CONTAINERS | string | (required) | Comma-separated container names to watch |
 | MAX_ENTRIES | int | 100000 | Maximum log entries to retain |
@@ -1128,7 +1130,7 @@ For histogram metrics, calculate approximate percentiles using sorted values.
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| DATABASE_URL | string | sqlite:///./data/metrics.db | SQLite database path |
+| DATABASE_PATH | string | ./data/metrics.db | SQLite database file path |
 | API_KEY | string | (required) | Shared secret for authentication |
 | RETENTION_RAW | string | 1h | Raw metrics retention |
 | RETENTION_MINUTE | string | 24h | Minute aggregates retention |
@@ -1249,12 +1251,12 @@ If enhanced log search is desired, switch to JSON logging:
 
 ### 7.5 Integration Checklist
 
-| Component | Files to Modify | Effort |
-|-----------|-----------------|--------|
-| Error Tracker | config.py, main.py, new error_client.py | Small |
-| Metrics Collector | config.py, main.py, new metrics_client.py | Medium |
-| Business Metrics | routes/bookings.py, services/email.py, scheduler.py | Small |
-| JSON Logging | main.py or logging config | Small |
+| Component | Files to Modify | Effort | Note |
+|-----------|-----------------|--------|------|
+| Error Tracker Client | config.py, main.py, new error_client.py | Small | Python client; server is Zig |
+| Metrics Collector Client | config.py, main.py, new metrics_client.py | Medium | Python client; server is Zig |
+| Business Metrics | routes/bookings.py, services/email.py, scheduler.py | Small | Python instrumentation |
+| JSON Logging | main.py or logging config | Small | Python logging config |
 
 ---
 
@@ -1270,10 +1272,19 @@ deploy/
 ├── secrets.env                  # Shared secrets
 ├── monitoring/
 │   ├── error-tracker/
+│   │   ├── src/                 # Zig source files
+│   │   ├── build.zig
+│   │   ├── build.zig.zon
 │   │   └── Dockerfile
 │   ├── log-viewer/
+│   │   ├── src/                 # Zig source files
+│   │   ├── build.zig
+│   │   ├── build.zig.zon
 │   │   └── Dockerfile
 │   └── metrics-collector/
+│       ├── src/                 # Zig source files
+│       ├── build.zig
+│       ├── build.zig.zon
 │       └── Dockerfile
 └── data/
     ├── errors/                  # Error Tracker SQLite
@@ -1299,10 +1310,10 @@ services:
     env_file:
       - secrets.env
     environment:
-      - DATABASE_URL=sqlite:///./data/errors.db
+      - DATABASE_PATH=/app/data/errors.db
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "/app/error-tracker", "--healthcheck"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -1318,13 +1329,13 @@ services:
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - ./data/logs:/app/data
     environment:
-      - DATABASE_URL=sqlite:///./data/logs.db
+      - DATABASE_PATH=/app/data/logs.db
       - CONTAINERS=rentl_prod,rentl_dev
       - MAX_ENTRIES=100000
       - POLL_INTERVAL=5
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "/app/log-viewer", "--healthcheck"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -1341,10 +1352,10 @@ services:
     env_file:
       - secrets.env
     environment:
-      - DATABASE_URL=sqlite:///./data/metrics.db
+      - DATABASE_PATH=/app/data/metrics.db
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "/app/metrics-collector", "--healthcheck"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -1356,6 +1367,8 @@ networks:
     name: flowrent_network
     external: true
 ```
+
+**Note:** Each Zig service compiles to a single static binary with no runtime dependencies. The Docker images use `scratch` or `alpine` as base image, resulting in images under 10MB.
 
 ### 8.3 Environment Variables
 
@@ -1425,6 +1438,9 @@ server {
 ### 8.7 Deployment Commands
 
 ```bash
+# Build monitoring stack (compiles Zig services inside Docker)
+docker compose -f docker-compose.monitoring.yml build
+
 # Start monitoring stack
 docker compose -f docker-compose.monitoring.yml up -d
 
@@ -1437,6 +1453,34 @@ docker compose -f docker-compose.monitoring.yml restart error-tracker
 # Stop monitoring stack
 docker compose -f docker-compose.monitoring.yml down
 ```
+
+### 8.8 Dockerfile Template (per service)
+
+```dockerfile
+# Build stage: compile Zig source to static binary
+FROM alpine:3.19 AS builder
+
+RUN apk add --no-cache zig sqlite-dev musl-dev
+
+WORKDIR /build
+COPY build.zig build.zig.zon ./
+COPY src/ src/
+
+RUN zig build -Doptimize=.ReleaseSafe
+
+# Runtime stage: minimal image with just the binary
+FROM alpine:3.19
+
+RUN apk add --no-cache sqlite-libs
+
+WORKDIR /app
+COPY --from=builder /build/zig-out/bin/<service-name> /app/<service-name>
+
+EXPOSE 8000
+CMD ["/app/<service-name>"]
+```
+
+**Note:** Each resulting Docker image is ~15MB (Alpine base + static binary + SQLite shared lib).
 
 ---
 
@@ -1480,10 +1524,10 @@ docker compose -f docker-compose.monitoring.yml down
 
 | Service | Max RAM | Max Disk | Max CPU |
 |---------|---------|----------|---------|
-| Error Tracker | 100MB | 500MB | 0.2 core |
-| Log Viewer | 100MB | 500MB | 0.2 core |
-| Metrics Collector | 100MB | 200MB | 0.2 core |
-| **Total** | **300MB** | **1.2GB** | **0.6 core** |
+| Error Tracker | 30MB | 500MB | 0.2 core |
+| Log Viewer | 30MB | 500MB | 0.2 core |
+| Metrics Collector | 30MB | 200MB | 0.2 core |
+| **Total** | **90MB** | **1.2GB** | **0.6 core** |
 
 ### 9.5 Data Retention
 
@@ -1563,7 +1607,7 @@ Each service exposes `/health` endpoint:
 | Concern | Mitigation |
 |---------|------------|
 | File permissions | 600 (owner read/write only) |
-| SQL injection | Use parameterized queries only |
+| SQL injection | Use parameterized queries via SQLite C API bind functions |
 | Data at rest | Not encrypted (acceptable for monitoring data) |
 
 ---
@@ -1624,7 +1668,10 @@ Potential improvements if requirements grow:
 
 ## Appendix B: References
 
-- FastAPI documentation: https://fastapi.tiangolo.com/
+- Zig language documentation: https://ziglang.org/documentation/master/
+- Zig standard library HTTP server: https://ziglang.org/documentation/master/std/#std.http.Server
+- SQLite C API: https://www.sqlite.org/cintro.html
 - SQLite FTS5: https://www.sqlite.org/fts5.html
+- FastAPI documentation: https://fastapi.tiangolo.com/ (FlowRent client)
 - Docker logging: https://docs.docker.com/config/containers/logging/
 - Postmark API: https://postmarkapp.com/developer
