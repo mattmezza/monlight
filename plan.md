@@ -73,12 +73,12 @@
     - ~~Trigger email alert on new error fingerprint (first occurrence only)~~
       - ~~Alert is sent asynchronously (does not block response)~~
       - ~~If Postmark is not configured, alert is skipped silently~~
-  - Error listing endpoint (`GET /api/errors`)
-    - Support query parameters: `project`, `environment`, `resolved` (default false), `limit` (default 50, max 200), `offset` (default 0)
-      - Filtering by project returns only matching errors
-      - Filtering by environment returns only matching errors
-      - Pagination works correctly (total count is accurate, offset skips correct number)
-      - Response shape matches spec: `{"errors": [...], "total": N, "limit": N, "offset": N}`
+  - ~~Error listing endpoint (`GET /api/errors`)~~
+    - ~~Support query parameters: `project`, `environment`, `resolved` (default false), `limit` (default 50, max 200), `offset` (default 0)~~
+      - ~~Filtering by project returns only matching errors~~
+      - ~~Filtering by environment returns only matching errors~~
+      - ~~Pagination works correctly (total count is accurate, offset skips correct number)~~
+      - ~~Response shape matches spec: `{"errors": [...], "total": N, "limit": N, "offset": N}`~~
   - Error detail endpoint (`GET /api/errors/{id}`)
     - Return full error details including traceback and recent occurrences
       - Existing error returns 200 with all group fields plus `occurrences` array (last 5 occurrences with request context)

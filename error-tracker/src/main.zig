@@ -7,6 +7,7 @@ const app_config = @import("config.zig");
 const auth = @import("auth");
 const rate_limit = @import("rate_limit");
 const error_ingestion = @import("error_ingestion.zig");
+const error_listing = @import("error_listing.zig");
 
 const server_port: u16 = 8000;
 const max_header_size = 8192;
@@ -108,10 +109,13 @@ pub fn handleConnection(conn: net.Server.Connection, api_key: []const u8, limite
     }
 
     // Route the request
-    if (std.mem.eql(u8, request.head.target, "/health")) {
+    const target = request.head.target;
+    if (std.mem.eql(u8, target, "/health")) {
         try handleHealth(&request);
-    } else if (std.mem.eql(u8, request.head.target, "/api/errors") and request.head.method == .POST) {
+    } else if (std.mem.eql(u8, target, "/api/errors") and request.head.method == .POST) {
         handleErrorIngestion(&request, db, cfg);
+    } else if (request.head.method == .GET and isApiErrorsPath(target)) {
+        handleErrorListing(&request, db);
     } else {
         try handleNotFound(&request);
     }
@@ -179,6 +183,31 @@ fn handleErrorIngestion(request: *std.http.Server.Request, db: *sqlite.Database,
     if (result.is_new) {
         triggerEmailAlert(cfg, &report, &result);
     }
+}
+
+/// Check if the target path matches /api/errors (with or without query string).
+fn isApiErrorsPath(target: []const u8) bool {
+    // Match exactly "/api/errors" or "/api/errors?..."
+    if (std.mem.startsWith(u8, target, "/api/errors")) {
+        const rest = target["/api/errors".len..];
+        return rest.len == 0 or rest[0] == '?';
+    }
+    return false;
+}
+
+fn handleErrorListing(request: *std.http.Server.Request, db: *sqlite.Database) void {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const params = error_listing.parseQueryParams(request.head.target);
+    const json = error_listing.queryAndFormat(allocator, db, &params) catch |err| {
+        log.err("Failed to query errors: {}", .{err});
+        sendJsonResponse(request, .internal_server_error, "{\"detail\": \"Internal server error\"}") catch {};
+        return;
+    };
+
+    sendJsonResponse(request, .ok, json) catch {};
 }
 
 /// Trigger an email alert for a new error.

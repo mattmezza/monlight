@@ -76,3 +76,13 @@
 - The Postmark email integration builds JSON payloads manually using `std.ArrayList(u8)` writer with a `writeJsonEscaped` helper that escapes `"`, `\\`, `\n`, `\r`, `\t`, and control chars below 0x20.
 - `std.http.Client` in Zig 0.13: create with `{ .allocator = allocator }`, `open(.POST, uri, .{ .server_header_buffer, .extra_headers })`, set `.transfer_encoding = .{ .content_length = len }`, then `send()` → `writeAll(payload)` → `finish()` → `wait()`.
 - Email alerting is fire-and-forget: failures are logged with `log.warn` but never propagate errors back to the HTTP response. If Postmark credentials are not configured (`null`), the alert is skipped silently with an early return.
+
+## Session 8: Error Listing Endpoint
+
+- The `error_listing.zig` module handles GET /api/errors with query parameter parsing, dynamic SQL construction, and JSON response formatting.
+- Since Zig doesn't support runtime string concatenation for SQL queries easily, the approach uses 4 separate prepared statement variants (no filters, project only, environment only, both) rather than dynamically building a single SQL string. This is verbose but safe and avoids SQL injection.
+- Query parameter parsing uses `std.mem.splitScalar` to split on `&`, then `std.mem.indexOf` to find `=` separators. No URL decoding is implemented yet (not needed for the current use case).
+- `std.fmt.parseInt(u32, value, 10)` is used for parsing numeric query params like `limit` and `offset`, with `catch continue` to skip invalid values gracefully.
+- The listing endpoint returns a two-query pattern: first a `SELECT COUNT(*)` for the total, then a `SELECT ... LIMIT ? OFFSET ?` for the paginated data. Both queries use the same filter conditions.
+- Routing in `main.zig` distinguishes GET vs POST on `/api/errors` by checking the HTTP method after matching the path prefix. The `isApiErrorsPath()` helper matches both `/api/errors` (exact) and `/api/errors?...` (with query string).
+- JSON response is built manually with `std.ArrayList(u8)` writer rather than using `std.json` serialization, to have full control over the output format and avoid needing to define Zig structs that match the exact JSON shape.
