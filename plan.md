@@ -271,116 +271,116 @@
     - ~~Write tests for SSE endpoint~~
       - ~~Tests verify SSE event format, heartbeat delivery, and max connection enforcement~~
 
-- Metrics Collector service (`metrics-collector/`)
-  - Bootstrap Zig project
-    - Create `build.zig` and `build.zig.zon` with SQLite C library dependency
-      - `zig build` succeeds and produces a binary
-    - Create `Dockerfile` (multi-stage: Alpine + Zig build → Alpine runtime with sqlite-libs)
-      - `docker build` produces a working image under 20MB
-    - Create `src/main.zig` with HTTP server skeleton listening on port 8000
-      - Server starts and responds to requests
-  - SQLite database layer
-    - Implement SQLite initialization using shared SQLite module
-      - Database file is created at configurable `DATABASE_PATH`
-      - WAL mode, busy timeout, and pragmas applied automatically by shared module
-    - Create schema migrations:
-      - Migration 1: `metrics_raw` table (id, timestamp, name, labels, value, type)
-        - Table is created on first startup
-      - Migration 2: `metrics_aggregated` table (id, bucket, resolution, name, labels, count, sum, min, max, avg, p50, p95, p99)
-        - Table is created on first startup
-      - Migration 3: All indexes: `idx_raw_timestamp`, `idx_raw_name`, `idx_raw_name_timestamp`, `idx_agg_bucket`, `idx_agg_name_resolution`, `idx_agg_name_resolution_bucket`
-        - Indexes exist and are used by query planner
-  - Configuration module
-    - Parse environment variables: `DATABASE_PATH`, `API_KEY`, `RETENTION_RAW`, `RETENTION_MINUTE`, `RETENTION_HOURLY`, `AGGREGATION_INTERVAL`, `LOG_LEVEL`
-      - All variables are read from env
-      - Missing required variables (`API_KEY`) cause a clear startup error
-      - Defaults are applied for optional variables
-  - API key authentication
-    - Use shared auth middleware configured with `API_KEY`
-      - Same acceptance criteria as Error Tracker auth
-  - Request limits
-    - Use shared rate limiting middleware (200 requests/minute) and body size enforcement (512KB max)
-      - Oversized requests return 413
-      - Rate-limited requests return 429
-  - Metrics ingestion endpoint (`POST /api/metrics`)
-    - Parse and validate JSON batch request body: array of metrics, each with name (required), type (required: counter/histogram/gauge), value (required), labels (optional object), timestamp (optional, defaults to now)
-      - Invalid JSON returns 400
-      - Missing required fields return 400
-      - Valid batch returns 202 with `{"status": "accepted", "count": N}`
-    - Buffer incoming metrics and batch-insert into `metrics_raw` table for efficiency
-      - Metrics are persisted to SQLite
-      - Batch insert is used (not one INSERT per metric)
-  - Aggregation engine
-    - Implement minute-level aggregation: every minute, query raw metrics from previous minute, group by (name, labels), compute count/sum/min/max/avg, compute p50/p95/p99 for histograms
-      - Minute aggregates are correctly computed
-      - Percentiles are calculated by sorting values and picking positional indices
-      - Non-histogram metrics have NULL percentile fields
-    - Implement hour-level aggregation: every hour, merge minute aggregates into hourly buckets
-      - Hourly count = sum of minute counts
-      - Hourly sum = sum of minute sums
-      - Hourly min = min of minute mins
-      - Hourly max = max of minute maxes
-      - Hourly avg = total sum / total count
-      - Hourly percentiles are approximated from minute percentiles
-    - Run aggregation loop on a timer (`AGGREGATION_INTERVAL` seconds) on a background thread
-      - Aggregation runs automatically in the background
-      - Uses its own SQLite connection (separate from HTTP thread)
-  - Data retention cleanup
-    - Delete raw metrics older than `RETENTION_RAW` (default 1 hour)
-      - Raw metrics older than 1 hour are deleted
-    - Delete minute aggregates older than `RETENTION_MINUTE` (default 24 hours)
-      - Minute aggregates older than 24 hours are deleted
-    - Delete hourly aggregates older than `RETENTION_HOURLY` (default 30 days)
-      - Hourly aggregates older than 30 days are deleted
-    - Run cleanup daily
-      - Cleanup executes automatically
-  - Metrics query endpoint (`GET /api/metrics`)
-    - Support query parameters: `name` (required), `period` (1h/24h/7d/30d, default 24h), `resolution` (minute/hour/auto, default auto), `labels` (format: `key:value,key2:value2`)
-      - Auto resolution selects minute for <=24h, hour for >24h
-      - Label filtering works correctly
-      - Response contains time-bucketed data with count, avg, p50, p95, p99
-  - Metrics names endpoint (`GET /api/metrics/names`)
-    - Return distinct metric names with their types
-      - Response shape: `{"metrics": [{"name": "...", "type": "..."}, ...]}`
-  - Dashboard data endpoint (`GET /api/dashboard`)
-    - Support query parameter: `period` (1h/24h/7d, default 24h)
-    - Return pre-computed dashboard data: summary (total_requests, error_rate, avg_latency_ms, p95_latency_ms), request_rate timeseries, latency timeseries, error_rate timeseries, top_endpoints table
-      - All fields are populated from aggregated data
-      - Top endpoints are sorted by request count descending
-  - Health check endpoint (`GET /health`)
-    - Return `{"status": "ok", "metrics_received_24h": N, "last_aggregation": "..."}` with 200, no auth required
-      - Returns count of metrics received in last 24h and last aggregation timestamp
-  - Web UI
-    - Create dashboard page with summary stats: total requests, error rate, avg latency, p95 latency
-      - Summary numbers are displayed prominently
-    - Add request rate chart (requests per minute over time)
-      - Chart renders with time on x-axis and request count on y-axis
-    - Add response time chart (p50, p95, p99 lines)
-      - Chart renders with three percentile lines
-    - Add error rate chart (4xx and 5xx rates over time)
-      - Chart renders showing error rates
-    - Add top endpoints table: endpoint, requests, avg_ms, error_rate
-      - Table is sorted by request count
-    - Add time range selector (1h, 24h, 7d)
-      - Selecting a range reloads the dashboard data
-    - Style all pages with embedded Tailwind CSS
-      - CSS is embedded in the binary at compile time
-      - Pages render correctly with Tailwind utility classes
-    - Include uPlot charting library (embedded via `@embedFile` from shared infrastructure) for rendering charts
-      - Charts render without external CDN dependencies
-  - Tests
-    - Write tests for metrics ingestion (batch insert, validation)
-      - Tests cover valid batches, invalid data, edge cases
-    - Write tests for minute-level aggregation (count, sum, min, max, avg, percentiles)
-      - Tests verify correct computation for each aggregate
-    - Write tests for hour-level aggregation (merging minute aggregates)
-      - Tests verify correct merging logic
-    - Write tests for retention cleanup
-      - Tests verify correct deletion at each retention tier
-    - Write tests for auto-resolution selection
-      - Tests verify minute is chosen for <=24h, hour for >24h
-    - Write tests for label filtering via json_extract
-      - Tests verify correct filtering by label key:value pairs
+- ~~Metrics Collector service (`metrics-collector/`)~~
+  - ~~Bootstrap Zig project~~
+    - ~~Create `build.zig` and `build.zig.zon` with SQLite C library dependency~~
+      - ~~`zig build` succeeds and produces a binary~~
+    - ~~Create `Dockerfile` (multi-stage: Alpine + Zig build → Alpine runtime with sqlite-libs)~~
+      - ~~`docker build` produces a working image under 20MB~~
+    - ~~Create `src/main.zig` with HTTP server skeleton listening on port 8000~~
+      - ~~Server starts and responds to requests~~
+  - ~~SQLite database layer~~
+    - ~~Implement SQLite initialization using shared SQLite module~~
+      - ~~Database file is created at configurable `DATABASE_PATH`~~
+      - ~~WAL mode, busy timeout, and pragmas applied automatically by shared module~~
+    - ~~Create schema migrations:~~
+      - ~~Migration 1: `metrics_raw` table (id, timestamp, name, labels, value, type)~~
+        - ~~Table is created on first startup~~
+      - ~~Migration 2: `metrics_aggregated` table (id, bucket, resolution, name, labels, count, sum, min, max, avg, p50, p95, p99)~~
+        - ~~Table is created on first startup~~
+      - ~~Migration 3: All indexes: `idx_raw_timestamp`, `idx_raw_name`, `idx_raw_name_timestamp`, `idx_agg_bucket`, `idx_agg_name_resolution`, `idx_agg_name_resolution_bucket`~~
+        - ~~Indexes exist and are used by query planner~~
+  - ~~Configuration module~~
+    - ~~Parse environment variables: `DATABASE_PATH`, `API_KEY`, `RETENTION_RAW`, `RETENTION_MINUTE`, `RETENTION_HOURLY`, `AGGREGATION_INTERVAL`, `LOG_LEVEL`~~
+      - ~~All variables are read from env~~
+      - ~~Missing required variables (`API_KEY`) cause a clear startup error~~
+      - ~~Defaults are applied for optional variables~~
+  - ~~API key authentication~~
+    - ~~Use shared auth middleware configured with `API_KEY`~~
+      - ~~Same acceptance criteria as Error Tracker auth~~
+  - ~~Request limits~~
+    - ~~Use shared rate limiting middleware (200 requests/minute) and body size enforcement (512KB max)~~
+      - ~~Oversized requests return 413~~
+      - ~~Rate-limited requests return 429~~
+  - ~~Metrics ingestion endpoint (`POST /api/metrics`)~~
+    - ~~Parse and validate JSON batch request body: array of metrics, each with name (required), type (required: counter/histogram/gauge), value (required), labels (optional object), timestamp (optional, defaults to now)~~
+      - ~~Invalid JSON returns 400~~
+      - ~~Missing required fields return 400~~
+      - ~~Valid batch returns 202 with `{"status": "accepted", "count": N}`~~
+    - ~~Buffer incoming metrics and batch-insert into `metrics_raw` table for efficiency~~
+      - ~~Metrics are persisted to SQLite~~
+      - ~~Batch insert is used (not one INSERT per metric)~~
+  - ~~Aggregation engine~~
+    - ~~Implement minute-level aggregation: every minute, query raw metrics from previous minute, group by (name, labels), compute count/sum/min/max/avg, compute p50/p95/p99 for histograms~~
+      - ~~Minute aggregates are correctly computed~~
+      - ~~Percentiles are calculated by sorting values and picking positional indices~~
+      - ~~Non-histogram metrics have NULL percentile fields~~
+    - ~~Implement hour-level aggregation: every hour, merge minute aggregates into hourly buckets~~
+      - ~~Hourly count = sum of minute counts~~
+      - ~~Hourly sum = sum of minute sums~~
+      - ~~Hourly min = min of minute mins~~
+      - ~~Hourly max = max of minute maxes~~
+      - ~~Hourly avg = total sum / total count~~
+      - ~~Hourly percentiles are approximated from minute percentiles~~
+    - ~~Run aggregation loop on a timer (`AGGREGATION_INTERVAL` seconds) on a background thread~~
+      - ~~Aggregation runs automatically in the background~~
+      - ~~Uses its own SQLite connection (separate from HTTP thread)~~
+  - ~~Data retention cleanup~~
+    - ~~Delete raw metrics older than `RETENTION_RAW` (default 1 hour)~~
+      - ~~Raw metrics older than 1 hour are deleted~~
+    - ~~Delete minute aggregates older than `RETENTION_MINUTE` (default 24 hours)~~
+      - ~~Minute aggregates older than 24 hours are deleted~~
+    - ~~Delete hourly aggregates older than `RETENTION_HOURLY` (default 30 days)~~
+      - ~~Hourly aggregates older than 30 days are deleted~~
+    - ~~Run cleanup daily~~
+      - ~~Cleanup executes automatically~~
+  - ~~Metrics query endpoint (`GET /api/metrics`)~~
+    - ~~Support query parameters: `name` (required), `period` (1h/24h/7d/30d, default 24h), `resolution` (minute/hour/auto, default auto), `labels` (format: `key:value,key2:value2`)~~
+      - ~~Auto resolution selects minute for <=24h, hour for >24h~~
+      - ~~Label filtering works correctly~~
+      - ~~Response contains time-bucketed data with count, avg, p50, p95, p99~~
+  - ~~Metrics names endpoint (`GET /api/metrics/names`)~~
+    - ~~Return distinct metric names with their types~~
+      - ~~Response shape: `{"metrics": [{"name": "...", "type": "..."}, ...]}`~~
+  - ~~Dashboard data endpoint (`GET /api/dashboard`)~~
+    - ~~Support query parameter: `period` (1h/24h/7d, default 24h)~~
+    - ~~Return pre-computed dashboard data: summary (total_requests, error_rate, avg_latency_ms, p95_latency_ms), request_rate timeseries, latency timeseries, error_rate timeseries, top_endpoints table~~
+      - ~~All fields are populated from aggregated data~~
+      - ~~Top endpoints are sorted by request count descending~~
+  - ~~Health check endpoint (`GET /health`)~~
+    - ~~Return `{"status": "ok", "metrics_received_24h": N, "last_aggregation": "..."}` with 200, no auth required~~
+      - ~~Returns count of metrics received in last 24h and last aggregation timestamp~~
+  - ~~Web UI~~
+    - ~~Create dashboard page with summary stats: total requests, error rate, avg latency, p95 latency~~
+      - ~~Summary numbers are displayed prominently~~
+    - ~~Add request rate chart (requests per minute over time)~~
+      - ~~Chart renders with time on x-axis and request count on y-axis~~
+    - ~~Add response time chart (p50, p95, p99 lines)~~
+      - ~~Chart renders with three percentile lines~~
+    - ~~Add error rate chart (4xx and 5xx rates over time)~~
+      - ~~Chart renders showing error rates~~
+    - ~~Add top endpoints table: endpoint, requests, avg_ms, error_rate~~
+      - ~~Table is sorted by request count~~
+    - ~~Add time range selector (1h, 24h, 7d)~~
+      - ~~Selecting a range reloads the dashboard data~~
+    - ~~Style all pages with embedded Tailwind CSS~~
+      - ~~CSS is embedded in the binary at compile time~~
+      - ~~Pages render correctly with Tailwind utility classes~~
+    - ~~Include uPlot charting library (embedded via `@embedFile` from shared infrastructure) for rendering charts~~
+      - ~~Charts render without external CDN dependencies~~
+  - ~~Tests~~
+    - ~~Write tests for metrics ingestion (batch insert, validation)~~
+      - ~~Tests cover valid batches, invalid data, edge cases~~
+    - ~~Write tests for minute-level aggregation (count, sum, min, max, avg, percentiles)~~
+      - ~~Tests verify correct computation for each aggregate~~
+    - ~~Write tests for hour-level aggregation (merging minute aggregates)~~
+      - ~~Tests verify correct merging logic~~
+    - ~~Write tests for retention cleanup~~
+      - ~~Tests verify correct deletion at each retention tier~~
+    - ~~Write tests for auto-resolution selection~~
+      - ~~Tests verify minute is chosen for <=24h, hour for >24h~~
+    - ~~Write tests for label filtering via json_extract~~
+      - ~~Tests verify correct filtering by label key:value pairs~~
 
 - Shared infrastructure (built before individual services)
   - Shared Zig modules (`shared/`)
