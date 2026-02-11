@@ -141,45 +141,45 @@
       - ~~Tests verify correct deletion behavior~~
 
 - Log Viewer service (`log-viewer/`)
-  - Bootstrap Zig project
-    - Create `build.zig` and `build.zig.zon` with SQLite C library dependency
-      - `zig build` succeeds and produces a binary
-    - Create `Dockerfile` (multi-stage: Alpine + Zig build → Alpine runtime with sqlite-libs)
-      - `docker build` produces a working image under 20MB
-    - Create `src/main.zig` with HTTP server skeleton listening on port 8000
-      - Server starts and responds to requests
-  - SQLite database layer
-    - Implement SQLite initialization using shared SQLite module
-      - Database file is created at configurable `DATABASE_PATH`
-      - WAL mode, busy timeout, and pragmas applied automatically by shared module
-    - Create schema migrations:
-      - Migration 1: `log_entries` table (id, timestamp, container, stream, level, message, raw)
-        - Table is created on first startup
-      - Migration 2: FTS5 virtual table on message field for full-text search
-        - FTS5 table is created and linked to log_entries
-        - Full-text queries return matching results
-      - Migration 3: `cursors` table (id, container_id, file_path, position, inode, updated_at) for tracking read positions
-        - Table is created on first startup
-      - Migration 4: Indexes: `idx_timestamp`, `idx_container`, `idx_level`, `idx_container_timestamp`
-        - Indexes exist and are used by query planner
-  - Configuration module
-    - Parse environment variables: `DATABASE_PATH`, `API_KEY`, `LOG_SOURCES`, `CONTAINERS`, `MAX_ENTRIES`, `POLL_INTERVAL`, `TAIL_BUFFER`, `LOG_LEVEL`
-      - All variables are read from env
-      - Missing required variables (`CONTAINERS`, `API_KEY`) cause a clear startup error
-      - Defaults are applied for optional variables
-  - API key authentication
-    - Use shared auth middleware configured with `API_KEY`
-      - All API endpoints require valid `X-API-Key` header
-      - `/health` endpoint is excluded from auth
-  - Request limits
-    - Use shared rate limiting middleware (60 requests/minute)
-      - Rate-limited requests return 429
-  - Log level extraction
-    - Implement log level parser that handles multiple formats:
-      - `[LEVEL]` pattern (e.g., `[INFO]`, `[ERROR]`)
-      - `level=LEVEL` pattern (e.g., `level=info`)
-      - `LEVEL:` at start pattern (e.g., `INFO: message`)
-      - Uvicorn format (e.g., `INFO:     127.0.0.1...`)
+  - ~~Bootstrap Zig project~~
+    - ~~Create `build.zig` and `build.zig.zon` with SQLite C library dependency~~
+      - ~~`zig build` succeeds and produces a binary~~
+    - ~~Create `Dockerfile` (multi-stage: Alpine + Zig build → Alpine runtime with sqlite-libs)~~
+      - ~~`docker build` produces a working image under 20MB~~
+    - ~~Create `src/main.zig` with HTTP server skeleton listening on port 8000~~
+      - ~~Server starts and responds to requests~~
+  - ~~SQLite database layer~~
+    - ~~Implement SQLite initialization using shared SQLite module~~
+      - ~~Database file is created at configurable `DATABASE_PATH`~~
+      - ~~WAL mode, busy timeout, and pragmas applied automatically by shared module~~
+    - ~~Create schema migrations:~~
+      - ~~Migration 1: `log_entries` table (id, timestamp, container, stream, level, message, raw)~~
+        - ~~Table is created on first startup~~
+      - ~~Migration 2: FTS5 virtual table on message field for full-text search~~
+        - ~~FTS5 table is created and linked to log_entries~~
+        - ~~Full-text queries return matching results~~
+      - ~~Migration 3: `cursors` table (id, container_id, file_path, position, inode, updated_at) for tracking read positions~~
+        - ~~Table is created on first startup~~
+      - ~~Migration 4: Indexes: `idx_timestamp`, `idx_container`, `idx_level`, `idx_container_timestamp`~~
+        - ~~Indexes exist and are used by query planner~~
+  - ~~Configuration module~~
+    - ~~Parse environment variables: `DATABASE_PATH`, `API_KEY`, `LOG_SOURCES`, `CONTAINERS`, `MAX_ENTRIES`, `POLL_INTERVAL`, `TAIL_BUFFER`, `LOG_LEVEL`~~
+      - ~~All variables are read from env~~
+      - ~~Missing required variables (`CONTAINERS`, `API_KEY`) cause a clear startup error~~
+      - ~~Defaults are applied for optional variables~~
+  - ~~API key authentication~~
+    - ~~Use shared auth middleware configured with `API_KEY`~~
+      - ~~All API endpoints require valid `X-API-Key` header~~
+      - ~~`/health` endpoint is excluded from auth~~
+  - ~~Request limits~~
+    - ~~Use shared rate limiting middleware (60 requests/minute)~~
+      - ~~Rate-limited requests return 429~~
+  - ~~Log level extraction~~
+    - ~~Implement log level parser that handles multiple formats:~~
+      - ~~`[LEVEL]` pattern (e.g., `[INFO]`, `[ERROR]`)~~
+      - ~~`level=LEVEL` pattern (e.g., `level=info`)~~
+      - ~~`LEVEL:` at start pattern (e.g., `INFO: message`)~~
+      - ~~Uvicorn format (e.g., `INFO:     127.0.0.1...`)~~
       - Default to INFO for unrecognized formats
       - Default to ERROR for stderr stream when no level detected
     - Handle both plain text log lines and JSON-formatted log lines (`{"ts":..., "level":..., "msg":...}`)
