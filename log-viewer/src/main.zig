@@ -6,6 +6,7 @@ const sqlite = @import("sqlite");
 const app_config = @import("config.zig");
 const auth = @import("auth");
 const rate_limit = @import("rate_limit");
+const ingestion = @import("ingestion.zig");
 
 const server_port: u16 = 8000;
 const max_header_size = 8192;
@@ -49,6 +50,25 @@ pub fn main() !void {
 
     // Start HTTP server
     log.info("Starting log-viewer on port {d}...", .{server_port});
+
+    // Start ingestion background thread
+    var ingestion_stop = std.atomic.Value(bool).init(false);
+    const ingestion_thread = std.Thread.spawn(.{}, ingestion.ingestionThread, .{
+        cfg.db_path_z,
+        cfg.log_sources,
+        cfg.containers,
+        cfg.poll_interval,
+        cfg.tail_buffer,
+        cfg.max_entries,
+        &ingestion_stop,
+    }) catch |err| {
+        log.err("Failed to start ingestion thread: {}", .{err});
+        std.process.exit(1);
+    };
+    defer {
+        ingestion_stop.store(true, .release);
+        ingestion_thread.join();
+    }
 
     const address = net.Address.initIp4(.{ 0, 0, 0, 0 }, server_port);
     var server = try address.listen(.{

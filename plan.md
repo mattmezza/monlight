@@ -180,35 +180,35 @@
       - ~~`level=LEVEL` pattern (e.g., `level=info`)~~
       - ~~`LEVEL:` at start pattern (e.g., `INFO: message`)~~
       - ~~Uvicorn format (e.g., `INFO:     127.0.0.1...`)~~
-      - Default to INFO for unrecognized formats
-      - Default to ERROR for stderr stream when no level detected
-    - Handle both plain text log lines and JSON-formatted log lines (`{"ts":..., "level":..., "msg":...}`)
-      - JSON logs have their level field extracted directly
-      - Plain text logs use pattern matching
-  - Docker log file ingestion
-    - Implement Docker JSON log file reader: parse `{"log": "...", "stream": "stdout|stderr", "time": "ISO8601"}` format
-      - Correctly parses Docker's JSON log format
-      - Extracts timestamp, stream, and message from each line
-    - Implement multiline log reassembly
-      - Buffer incoming lines per container
-      - Detect new log entry start by matching log level patterns or timestamp patterns at line start
-      - Continuation lines (e.g., traceback frames) are appended to the current buffered entry
-      - Flush buffered entry when a new start pattern is detected or when entry is older than 2 seconds
-      - Python tracebacks spanning multiple Docker JSON lines become a single log entry
-    - Implement file cursor tracking: save byte offset and inode per log file in cursors table
-      - After restart, ingestion resumes from last saved position (no duplicates)
-    - Detect log file rotation by comparing inode numbers
-      - When inode changes, reading starts from beginning of new file
-    - Implement polling loop that runs every `POLL_INTERVAL` seconds on a background thread
-      - New log lines are picked up within POLL_INTERVAL seconds of being written
-    - Scan `LOG_SOURCES` directory and filter to containers matching `CONTAINERS` config
-      - Only configured containers are watched
-      - Unknown containers are ignored
-  - Ring buffer cleanup
-    - Implement cleanup that deletes oldest entries when total exceeds `MAX_ENTRIES`
-      - Log count stays at or below MAX_ENTRIES + buffer
-      - Oldest logs are deleted first
-      - FTS index remains consistent after deletion
+      - ~~Default to INFO for unrecognized formats~~
+      - ~~Default to ERROR for stderr stream when no level detected~~
+    - ~~Handle both plain text log lines and JSON-formatted log lines (`{"ts":..., "level":..., "msg":...}`)~~
+      - ~~JSON logs have their level field extracted directly~~
+      - ~~Plain text logs use pattern matching~~
+  - ~~Docker log file ingestion~~
+    - ~~Implement Docker JSON log file reader: parse `{"log": "...", "stream": "stdout|stderr", "time": "ISO8601"}` format~~
+      - ~~Correctly parses Docker's JSON log format~~
+      - ~~Extracts timestamp, stream, and message from each line~~
+    - ~~Implement multiline log reassembly~~
+      - ~~Buffer incoming lines per container~~
+      - ~~Detect new log entry start by matching log level patterns or timestamp patterns at line start~~
+      - ~~Continuation lines (e.g., traceback frames) are appended to the current buffered entry~~
+      - ~~Flush buffered entry when a new start pattern is detected or when entry is older than 2 seconds~~
+      - ~~Python tracebacks spanning multiple Docker JSON lines become a single log entry~~
+    - ~~Implement file cursor tracking: save byte offset and inode per log file in cursors table~~
+      - ~~After restart, ingestion resumes from last saved position (no duplicates)~~
+    - ~~Detect log file rotation by comparing inode numbers~~
+      - ~~When inode changes, reading starts from beginning of new file~~
+    - ~~Implement polling loop that runs every `POLL_INTERVAL` seconds on a background thread~~
+      - ~~New log lines are picked up within POLL_INTERVAL seconds of being written~~
+    - ~~Scan `LOG_SOURCES` directory and filter to containers matching `CONTAINERS` config~~
+      - ~~Only configured containers are watched~~
+      - ~~Unknown containers are ignored~~
+  - ~~Ring buffer cleanup~~
+    - ~~Implement cleanup that deletes oldest entries when total exceeds `MAX_ENTRIES`~~
+      - ~~Log count stays at or below MAX_ENTRIES + buffer~~
+      - ~~Oldest logs are deleted first~~
+      - ~~FTS index remains consistent after deletion~~
   - Log query endpoint (`GET /api/logs`)
     - Support query parameters: `container`, `level`, `search` (full-text), `since`, `until`, `limit` (default 100, max 500), `offset`
       - Full-text search returns relevant results ranked appropriately
