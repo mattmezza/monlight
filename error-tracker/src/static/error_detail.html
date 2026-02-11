@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Error Detail - Error Tracker</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace; }
+    .traceback-text { white-space: pre-wrap; word-break: break-all; }
+  </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+  <div class="max-w-5xl mx-auto px-4 py-6">
+    <!-- Back link -->
+    <a href="/" class="text-blue-400 hover:text-blue-300 text-sm mb-4 inline-block">&larr; Back to errors</a>
+
+    <!-- Error Header -->
+    <div id="error-header" class="mb-6">
+      <div class="text-gray-500 text-sm">Loading...</div>
+    </div>
+
+    <!-- Traceback -->
+    <div id="traceback-section" class="mb-8 hidden">
+      <h2 class="text-sm uppercase tracking-wider text-gray-400 mb-2">Traceback</h2>
+      <div class="bg-gray-950 border border-gray-700 rounded-lg p-4 overflow-x-auto">
+        <pre id="traceback-content" class="traceback-text text-sm text-red-300"></pre>
+      </div>
+    </div>
+
+    <!-- Occurrences -->
+    <div id="occurrences-section" class="hidden">
+      <h2 class="text-sm uppercase tracking-wider text-gray-400 mb-2">Recent Occurrences</h2>
+      <div id="occurrences-list" class="space-y-3"></div>
+    </div>
+
+    <!-- Error state -->
+    <div id="error-state" class="hidden">
+      <div class="text-center py-12 text-red-400">Error not found</div>
+    </div>
+  </div>
+
+  <script>
+    const API_KEY = localStorage.getItem('api_key') || '';
+    const errorId = window.location.pathname.split('/').pop();
+
+    function hdrs() {
+      const h = { 'Content-Type': 'application/json' };
+      if (API_KEY) h['X-API-Key'] = API_KEY;
+      return h;
+    }
+
+    function esc(s) {
+      if (!s) return '';
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    function formatDate(iso) {
+      if (!iso) return '';
+      const d = new Date(iso + 'Z');
+      return d.toLocaleString();
+    }
+
+    function timeAgo(iso) {
+      if (!iso) return '';
+      const now = Date.now();
+      const then = new Date(iso + 'Z').getTime();
+      const diff = Math.floor((now - then) / 1000);
+      if (diff < 60) return diff + 's ago';
+      if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+      if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+      return Math.floor(diff / 86400) + 'd ago';
+    }
+
+    function envColor(env) {
+      switch (env) {
+        case 'production': return 'bg-red-900/40 text-red-300';
+        case 'staging': return 'bg-yellow-900/40 text-yellow-300';
+        case 'development': return 'bg-green-900/40 text-green-300';
+        default: return 'bg-gray-700 text-gray-300';
+      }
+    }
+
+    async function resolveError() {
+      const btn = document.getElementById('resolve-btn');
+      btn.disabled = true;
+      btn.textContent = 'Resolving...';
+
+      try {
+        const res = await fetch(`/api/errors/${errorId}/resolve`, {
+          method: 'POST',
+          headers: hdrs()
+        });
+        if (res.ok) {
+          btn.textContent = 'Resolved';
+          btn.className = 'px-4 py-1.5 rounded text-sm bg-gray-700 text-gray-400 cursor-not-allowed';
+          // Update status badge
+          const badge = document.getElementById('status-badge');
+          if (badge) {
+            badge.textContent = 'Resolved';
+            badge.className = 'inline-block text-xs px-2 py-0.5 rounded bg-green-900/40 text-green-300';
+          }
+        } else {
+          btn.textContent = 'Failed - Retry';
+          btn.disabled = false;
+        }
+      } catch (e) {
+        btn.textContent = 'Failed - Retry';
+        btn.disabled = false;
+        console.error('Failed to resolve:', e);
+      }
+    }
+
+    async function loadError() {
+      try {
+        const res = await fetch(`/api/errors/${errorId}`, { headers: hdrs() });
+        if (!res.ok) {
+          document.getElementById('error-header').classList.add('hidden');
+          document.getElementById('error-state').classList.remove('hidden');
+          return;
+        }
+
+        const err = await res.json();
+        document.title = `${err.exception_type}: ${err.message} - Error Tracker`;
+
+        // Render header
+        const isResolved = err.resolved;
+        document.getElementById('error-header').innerHTML = `
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <h1 class="text-xl font-bold text-red-400">${esc(err.exception_type)}</h1>
+              <p class="text-gray-300 mt-1">${esc(err.message)}</p>
+              <div class="flex flex-wrap items-center gap-3 mt-3 text-sm">
+                <span class="inline-block bg-blue-900/40 text-blue-300 text-xs px-2 py-0.5 rounded">${esc(err.project)}</span>
+                <span class="inline-block ${envColor(err.environment)} text-xs px-2 py-0.5 rounded">${esc(err.environment)}</span>
+                <span id="status-badge" class="inline-block text-xs px-2 py-0.5 rounded ${isResolved ? 'bg-green-900/40 text-green-300' : 'bg-red-900/40 text-red-300'}">
+                  ${isResolved ? 'Resolved' : 'Unresolved'}
+                </span>
+                <span class="text-gray-500">|</span>
+                <span class="text-gray-400">${err.count} occurrence${err.count !== 1 ? 's' : ''}</span>
+                <span class="text-gray-500">|</span>
+                <span class="text-gray-400" title="${esc(formatDate(err.first_seen))}">First: ${timeAgo(err.first_seen)}</span>
+                <span class="text-gray-400" title="${esc(formatDate(err.last_seen))}">Last: ${timeAgo(err.last_seen)}</span>
+                ${isResolved && err.resolved_at ? `<span class="text-gray-400" title="${esc(formatDate(err.resolved_at))}">Resolved: ${timeAgo(err.resolved_at)}</span>` : ''}
+              </div>
+            </div>
+            <div>
+              ${isResolved
+                ? '<span class="px-4 py-1.5 rounded text-sm bg-gray-700 text-gray-400">Resolved</span>'
+                : '<button id="resolve-btn" onclick="resolveError()" class="px-4 py-1.5 rounded text-sm bg-green-700 hover:bg-green-600 text-white transition-colors">Mark as Resolved</button>'
+              }
+            </div>
+          </div>
+        `;
+
+        // Render traceback
+        if (err.traceback) {
+          document.getElementById('traceback-section').classList.remove('hidden');
+          document.getElementById('traceback-content').textContent = err.traceback;
+        }
+
+        // Render occurrences
+        if (err.occurrences && err.occurrences.length > 0) {
+          document.getElementById('occurrences-section').classList.remove('hidden');
+          const list = document.getElementById('occurrences-list');
+          list.innerHTML = err.occurrences.map(occ => {
+            const headersStr = occ.request_headers ? JSON.stringify(occ.request_headers, null, 2) : null;
+            const extraStr = occ.extra ? JSON.stringify(occ.extra, null, 2) : null;
+
+            return `
+              <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
+                <div class="flex flex-wrap items-center gap-3 text-sm mb-3">
+                  <span class="text-gray-400" title="${esc(formatDate(occ.timestamp))}">${formatDate(occ.timestamp)}</span>
+                  ${occ.request_method ? `<span class="font-medium ${methodColor(occ.request_method)}">${esc(occ.request_method)}</span>` : ''}
+                  ${occ.request_url ? `<span class="text-gray-300">${esc(occ.request_url)}</span>` : ''}
+                  ${occ.user_id ? `<span class="text-gray-500">|</span><span class="text-purple-300">user: ${esc(occ.user_id)}</span>` : ''}
+                </div>
+                ${occ.traceback ? `
+                  <details class="mb-2">
+                    <summary class="text-xs text-gray-400 cursor-pointer hover:text-gray-300">Traceback</summary>
+                    <pre class="traceback-text text-xs text-red-300 mt-2 bg-gray-950 rounded p-3 overflow-x-auto">${esc(occ.traceback)}</pre>
+                  </details>
+                ` : ''}
+                ${headersStr ? `
+                  <details class="mb-2">
+                    <summary class="text-xs text-gray-400 cursor-pointer hover:text-gray-300">Request Headers</summary>
+                    <pre class="text-xs text-gray-300 mt-2 bg-gray-950 rounded p-3 overflow-x-auto">${esc(headersStr)}</pre>
+                  </details>
+                ` : ''}
+                ${extraStr ? `
+                  <details>
+                    <summary class="text-xs text-gray-400 cursor-pointer hover:text-gray-300">Extra Context</summary>
+                    <pre class="text-xs text-gray-300 mt-2 bg-gray-950 rounded p-3 overflow-x-auto">${esc(extraStr)}</pre>
+                  </details>
+                ` : ''}
+              </div>
+            `;
+          }).join('');
+        }
+
+      } catch (e) {
+        document.getElementById('error-header').innerHTML = '<div class="text-red-400">Failed to load error details</div>';
+        console.error('Failed to load error:', e);
+      }
+    }
+
+    function methodColor(m) {
+      switch (m) {
+        case 'GET': return 'text-green-400';
+        case 'POST': return 'text-blue-400';
+        case 'PUT': case 'PATCH': return 'text-yellow-400';
+        case 'DELETE': return 'text-red-400';
+        default: return 'text-gray-400';
+      }
+    }
+
+    loadError();
+  </script>
+</body>
+</html>

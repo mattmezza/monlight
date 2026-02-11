@@ -111,21 +111,21 @@
       - ~~Only resolved errors are deleted~~
       - ~~Associated `error_occurrences` records are cascade-deleted~~
       - ~~Unresolved errors are never deleted regardless of age~~
-  - Web UI
-    - Create HTML page listing unresolved errors with columns: exception_type, message (truncated), project, environment, count, first_seen, last_seen
-      - Page loads and displays error list
-      - Errors are sorted by last_seen descending
-    - Add filter controls: project dropdown, environment dropdown, resolved toggle
-      - Filters update the displayed list
-    - Add error detail view: click an error to see full traceback, and a list of recent occurrences with their individual request context
-      - Full traceback is displayed with proper formatting (monospace, preserved newlines)
-      - Occurrences are listed with timestamp, request_url, request_method, user_id
-    - Add "Mark as Resolved" button on error detail view
-      - Clicking the button marks the error as resolved and updates the UI
-    - Style all pages with embedded Tailwind CSS
-      - CSS is embedded in the binary at compile time
-      - Pages render correctly with Tailwind utility classes
-      - Log levels / error states are color-coded
+  - ~~Web UI~~
+    - ~~Create HTML page listing unresolved errors with columns: exception_type, message (truncated), project, environment, count, first_seen, last_seen~~
+      - ~~Page loads and displays error list~~
+      - ~~Errors are sorted by last_seen descending~~
+    - ~~Add filter controls: project dropdown, environment dropdown, resolved toggle~~
+      - ~~Filters update the displayed list~~
+    - ~~Add error detail view: click an error to see full traceback, and a list of recent occurrences with their individual request context~~
+      - ~~Full traceback is displayed with proper formatting (monospace, preserved newlines)~~
+      - ~~Occurrences are listed with timestamp, request_url, request_method, user_id~~
+    - ~~Add "Mark as Resolved" button on error detail view~~
+      - ~~Clicking the button marks the error as resolved and updates the UI~~
+    - ~~Style all pages with embedded Tailwind CSS~~
+      - ~~CSS is embedded in the binary at compile time~~
+      - ~~Pages render correctly with Tailwind utility classes~~
+      - ~~Log levels / error states are color-coded~~
   - Tests
     - ~~Write tests for fingerprinting algorithm (deterministic output, different inputs produce different fingerprints)~~
       - ~~Tests pass with `zig build test`~~

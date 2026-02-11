@@ -120,3 +120,15 @@
 - The retention thread sleeps in 1-second chunks rather than one long sleep, so it can check the stop flag frequently and shut down promptly.
 - Associated `error_occurrences` are cascade-deleted via the existing `FOREIGN KEY (error_id) REFERENCES errors(id) ON DELETE CASCADE` constraint — no need to manually delete them.
 - The retention module is tested with an in-memory SQLite database (`:memory:`), using the same schema setup pattern as other test modules. Tests insert errors with manually set timestamps to simulate aging.
+
+## Session 13: Web UI for Error Tracker
+
+- The Web UI is implemented as two HTML pages (`index.html` for listing, `error_detail.html` for detail view) embedded into the binary at compile time via `@embedFile("static/index.html")`.
+- HTML files live in `error-tracker/src/static/` — Zig's `@embedFile` resolves paths relative to the source file that contains it, so `web_ui.zig` uses `@embedFile("static/index.html")`.
+- Web UI routes (`GET /` and `GET /errors/{id}`) are handled **before** the auth middleware in `handleConnection`, so the HTML pages are served without requiring an API key. The JavaScript in the pages reads the API key from `localStorage` and passes it as `X-API-Key` header on fetch calls to the API endpoints.
+- The `web_ui.zig` module contains `isErrorDetailPath()` which matches `/errors/{numeric_id}` — distinct from `/api/errors/{id}` which returns JSON.
+- Tailwind CSS is loaded via CDN (`<script src="https://cdn.tailwindcss.com">`). The HTML is embedded in the binary but CSS is fetched at runtime. This avoids needing a Tailwind build pipeline in the Zig build system.
+- The pages use a dark theme (gray-900 background) with color-coded elements: red for errors/production, yellow for staging/warning counts, green for resolved/development, blue for project badges, purple for user IDs.
+- The listing page supports filtering by project (dropdown populated from `/api/projects`), environment, and resolved status. Pagination with prev/next buttons and offset tracking.
+- The detail page shows traceback in a monospace `<pre>` block, occurrences in expandable `<details>` sections for headers and extra context, and a "Mark as Resolved" button that calls `POST /api/errors/{id}/resolve`.
+- No additional build.zig changes are needed for `@embedFile` — Zig handles it automatically. The only build.zig change was adding the `web_ui_tests` target (no dependencies needed since web_ui.zig only uses std).

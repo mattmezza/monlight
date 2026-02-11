@@ -12,6 +12,7 @@ const error_detail = @import("error_detail.zig");
 const error_resolve = @import("error_resolve.zig");
 const projects_listing = @import("projects_listing.zig");
 const retention = @import("retention.zig");
+const web_ui = @import("web_ui.zig");
 
 const server_port: u16 = 8000;
 const max_header_size = 8192;
@@ -114,6 +115,18 @@ pub fn handleConnection(conn: net.Server.Connection, api_key: []const u8, limite
         log.err("Failed to receive request head: {}", .{err});
         return;
     };
+
+    // Serve web UI pages (static HTML, no auth required)
+    if (request.head.method == .GET) {
+        const target = request.head.target;
+        if (std.mem.eql(u8, target, "/") or std.mem.eql(u8, target, "/index.html")) {
+            web_ui.serveIndex(&request);
+            return;
+        } else if (web_ui.isErrorDetailPath(target)) {
+            web_ui.serveErrorDetail(&request);
+            return;
+        }
+    }
 
     // Authenticate the request (skips excluded paths like /health)
     const excluded_paths = [_][]const u8{"/health"};
