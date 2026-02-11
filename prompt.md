@@ -1,5 +1,3 @@
-Branch off main in a feature branch aptly named.
-
 Study the specs.md and plan.md files.
 Study the rest of the codebase.
 
@@ -16,3 +14,5 @@ A subsequent iteration will tackle the next section of the plan.
 
 When all tasks from a section of the plan are done, start tackling the next section's first task.
 IF no undone task is present in any of the sections of the plan (i.e. all of the tasks of all of the sections are striked through), create a PR for manual review, then exit outputting the following: `<promise>COMPLETE</promise>`
+
+NOTE: all of your work shall be done in a a branch off of main called 'loop'
