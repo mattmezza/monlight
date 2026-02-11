@@ -202,6 +202,18 @@ pub fn build(b: *std.Build) void {
 
     const run_error_detail_tests = b.addRunArtifact(error_detail_tests);
 
+    // Test step — tests for error_resolve module
+    const error_resolve_tests = b.addTest(.{
+        .root_source_file = b.path("src/error_resolve.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    error_resolve_tests.root_module.addImport("sqlite", sqlite_mod);
+    error_resolve_tests.linkSystemLibrary("sqlite3");
+    error_resolve_tests.linkLibC();
+
+    const run_error_resolve_tests = b.addRunArtifact(error_resolve_tests);
+
     const test_step = b.step("test", "Run all unit tests");
     test_step.dependOn(&run_main_tests.step);
     test_step.dependOn(&run_db_tests.step);
@@ -216,4 +228,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_error_ingestion_tests.step);
     test_step.dependOn(&run_error_listing_tests.step);
     test_step.dependOn(&run_error_detail_tests.step);
+    test_step.dependOn(&run_error_resolve_tests.step);
 }

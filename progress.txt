@@ -93,3 +93,12 @@
 - Routing in `main.zig`: within the GET `/api/errors` branch, `error_detail.extractId(target)` is checked first. If it returns an ID, the request is routed to `handleErrorDetail`; otherwise it falls through to `handleErrorListing`.
 - `isApiErrorsPath()` was updated to also match `/api/errors/` sub-paths by adding a `rest[0] == '/'` check.
 - Zig 0.13 type coercion quirk: `ArrayList(u8).toOwnedSlice()` returns `![]u8`, which does NOT implicitly coerce to `!?[]const u8` (optional + const). You must assign to an intermediate `const result: []const u8 = try buf.toOwnedSlice();` and then `return result;` — the `[]const u8` → `?[]const u8` coercion works, but `[]u8` → `?[]const u8` does not coerce through error union payloads directly.
+
+## Session 10: Error Tracker Resolve Endpoint
+
+- The `error_resolve.zig` module handles POST /api/errors/{id}/resolve — marks an error as resolved with `resolved=1` and `resolved_at` timestamp.
+- Routing for POST resolve must be checked BEFORE the GET `/api/errors/{id}` branch in `main.zig`, since `isApiErrorsPath()` would also match `/api/errors/42/resolve`. The resolve check uses `error_resolve.extractResolveId()` which specifically matches the `/api/errors/{id}/resolve` pattern.
+- The `extractResolveId` function is separate from `extractId` in `error_detail.zig` — it specifically looks for the `/resolve` suffix after the ID segment. This is cleaner than trying to make `extractId` handle both cases.
+- Idempotent resolve: if the error is already resolved, the endpoint returns 200 without modifying `resolved_at`. This avoids updating the timestamp on every call and preserves the original resolution time.
+- The resolve endpoint uses a tagged union `ResolveResult` (`.resolved` or `.not_found`) rather than an optional, making the handler code in `main.zig` clearer about which HTTP status code to return.
+- Tests for `API_KEY`-dependent modules (main.zig, auth_test.zig, rate_limit_test.zig) require setting `API_KEY=test_key_123` in the environment when running `zig build test`.

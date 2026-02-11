@@ -9,6 +9,7 @@ const rate_limit = @import("rate_limit");
 const error_ingestion = @import("error_ingestion.zig");
 const error_listing = @import("error_listing.zig");
 const error_detail = @import("error_detail.zig");
+const error_resolve = @import("error_resolve.zig");
 
 const server_port: u16 = 8000;
 const max_header_size = 8192;
@@ -115,6 +116,10 @@ pub fn handleConnection(conn: net.Server.Connection, api_key: []const u8, limite
         try handleHealth(&request);
     } else if (std.mem.eql(u8, target, "/api/errors") and request.head.method == .POST) {
         handleErrorIngestion(&request, db, cfg);
+    } else if (request.head.method == .POST and error_resolve.extractResolveId(target) != null) {
+        // POST /api/errors/{id}/resolve
+        const resolve_id = error_resolve.extractResolveId(target).?;
+        handleErrorResolve(&request, db, resolve_id);
     } else if (request.head.method == .GET and isApiErrorsPath(target)) {
         // Check if this is a detail request (GET /api/errors/{id})
         if (error_detail.extractId(target)) |error_id| {
@@ -232,6 +237,27 @@ fn handleErrorDetail(request: *std.http.Server.Request, db: *sqlite.Database, er
     } else {
         sendJsonResponse(request, .not_found, "{\"detail\": \"Error not found\"}") catch {};
     }
+}
+
+fn handleErrorResolve(request: *std.http.Server.Request, db: *sqlite.Database, error_id: i64) void {
+    const result = error_resolve.resolve(db, error_id) catch |err| {
+        log.err("Failed to resolve error: {}", .{err});
+        sendJsonResponse(request, .internal_server_error, "{\"detail\": \"Internal server error\"}") catch {};
+        return;
+    };
+
+    var resp_buf: [256]u8 = undefined;
+    const resp_json = error_resolve.formatResponse(&result, &resp_buf) catch {
+        sendJsonResponse(request, .internal_server_error, "{\"detail\": \"Internal server error\"}") catch {};
+        return;
+    };
+
+    const status: std.http.Status = switch (result) {
+        .resolved => .ok,
+        .not_found => .not_found,
+    };
+
+    sendJsonResponse(request, status, resp_json) catch {};
 }
 
 /// Trigger an email alert for a new error.

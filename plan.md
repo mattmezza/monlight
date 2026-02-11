@@ -83,11 +83,11 @@
     - ~~Return full error details including traceback and recent occurrences~~
       - ~~Existing error returns 200 with all group fields plus `occurrences` array (last 5 occurrences with request context)~~
       - ~~Non-existent ID returns 404~~
-  - Error resolve endpoint (`POST /api/errors/{id}/resolve`)
-    - Mark error as resolved, set resolved_at timestamp
-      - Returns `{"status": "resolved", "id": ...}`
-      - Already-resolved error is idempotent (returns 200)
-      - Non-existent ID returns 404
+  - ~~Error resolve endpoint (`POST /api/errors/{id}/resolve`)~~
+    - ~~Mark error as resolved, set resolved_at timestamp~~
+      - ~~Returns `{"status": "resolved", "id": ...}`~~
+      - ~~Already-resolved error is idempotent (returns 200)~~
+      - ~~Non-existent ID returns 404~~
   - Projects listing endpoint (`GET /api/projects`)
     - Return distinct project names from errors table
       - Response shape: `{"projects": ["flowrent", ...]}`
