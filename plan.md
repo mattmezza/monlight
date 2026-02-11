@@ -216,19 +216,19 @@
       - ~~Combined filters (container + level + search + time range) work together~~
       - ~~Pagination is correct~~
       - ~~Response shape: `{"logs": [...], "total": N, "limit": N, "offset": N}`~~
-  - Live tail endpoint (`GET /api/logs/tail`)
-    - Implement Server-Sent Events (SSE) stream
-      - Connection stays open and streams new log entries as they are ingested
-    - Support optional `container` and `level` query parameter filters
-      - Only matching logs are streamed
-    - Send `event: log` with JSON data for each new entry
-      - Events conform to SSE spec and can be consumed by EventSource API
-    - Implement SSE lifecycle management
-      - Maximum connection duration: 30 minutes (client must reconnect)
-      - Heartbeat: send `event: heartbeat` every 15 seconds to detect dead connections
-      - Maximum concurrent SSE connections: 5 (return 503 when exceeded)
-      - Clean up connection resources immediately on client disconnect
-      - Drop log events if client cannot keep up (don't buffer unboundedly)
+  - ~~Live tail endpoint (`GET /api/logs/tail`)~~
+    - ~~Implement Server-Sent Events (SSE) stream~~
+      - ~~Connection stays open and streams new log entries as they are ingested~~
+    - ~~Support optional `container` and `level` query parameter filters~~
+      - ~~Only matching logs are streamed~~
+    - ~~Send `event: log` with JSON data for each new entry~~
+      - ~~Events conform to SSE spec and can be consumed by EventSource API~~
+    - ~~Implement SSE lifecycle management~~
+      - ~~Maximum connection duration: 30 minutes (client must reconnect)~~
+      - ~~Heartbeat: send `event: heartbeat` every 15 seconds to detect dead connections~~
+      - ~~Maximum concurrent SSE connections: 5 (return 503 when exceeded)~~
+      - ~~Clean up connection resources immediately on client disconnect~~
+      - ~~Drop log events if client cannot keep up (don't buffer unboundedly)~~
   - ~~Containers listing endpoint (`GET /api/containers`)~~
     - ~~Return known containers with log counts~~
       - ~~Response shape: `{"containers": [{"name": "...", "log_count": N}, ...]}`~~
@@ -268,8 +268,8 @@
       - ~~Tests verify search returns correct results~~
     - Write tests for ring buffer cleanup (entries are deleted, count stays within limit)
       - Tests verify oldest entries are removed
-    - Write tests for SSE endpoint
-      - Tests verify SSE event format, heartbeat delivery, and max connection enforcement
+    - ~~Write tests for SSE endpoint~~
+      - ~~Tests verify SSE event format, heartbeat delivery, and max connection enforcement~~
 
 - Metrics Collector service (`metrics-collector/`)
   - Bootstrap Zig project

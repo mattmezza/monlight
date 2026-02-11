@@ -122,6 +122,18 @@ pub fn build(b: *std.Build) void {
 
     const run_log_query_tests = b.addRunArtifact(log_query_tests);
 
+    // Test step — tests for sse_tail.zig
+    const sse_tail_tests = b.addTest(.{
+        .root_source_file = b.path("src/sse_tail.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    sse_tail_tests.root_module.addImport("sqlite", sqlite_mod);
+    sse_tail_tests.linkSystemLibrary("sqlite3");
+    sse_tail_tests.linkLibC();
+
+    const run_sse_tail_tests = b.addRunArtifact(sse_tail_tests);
+
     const test_step = b.step("test", "Run all unit tests");
     test_step.dependOn(&run_main_tests.step);
     test_step.dependOn(&run_db_tests.step);
@@ -129,4 +141,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_log_level_tests.step);
     test_step.dependOn(&run_ingestion_tests.step);
     test_step.dependOn(&run_log_query_tests.step);
+    test_step.dependOn(&run_sse_tail_tests.step);
 }

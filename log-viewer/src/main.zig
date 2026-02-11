@@ -8,6 +8,7 @@ const auth = @import("auth");
 const rate_limit = @import("rate_limit");
 const ingestion = @import("ingestion.zig");
 const log_query = @import("log_query.zig");
+const sse_tail = @import("sse_tail.zig");
 
 const server_port: u16 = 8000;
 const max_header_size = 8192;
@@ -94,14 +95,19 @@ pub fn main() !void {
             log.err("Failed to accept connection: {}", .{err});
             continue;
         };
-        handleConnection(conn, cfg.api_key, &limiter, &db) catch |err| {
+        handleConnection(conn, cfg.api_key, &limiter, &db, cfg.db_path_z) catch |err| {
             log.err("Failed to handle connection: {}", .{err});
         };
     }
 }
 
-pub fn handleConnection(conn: net.Server.Connection, api_key: []const u8, limiter: *rate_limit.RateLimiter, db: *sqlite.Database) !void {
-    defer conn.stream.close();
+pub fn handleConnection(conn: net.Server.Connection, api_key: []const u8, limiter: *rate_limit.RateLimiter, db: *sqlite.Database, db_path: [*:0]const u8) !void {
+    // Note: for SSE connections, we transfer stream ownership to the SSE thread.
+    // For all other requests, we close the stream when done.
+    var owns_stream = true;
+    defer {
+        if (owns_stream) conn.stream.close();
+    }
 
     var buf: [max_header_size]u8 = undefined;
     var http_server = std.http.Server.init(conn, &buf);
@@ -138,7 +144,18 @@ pub fn handleConnection(conn: net.Server.Connection, api_key: []const u8, limite
 
     // API routes (GET only for log-viewer)
     if (request.head.method == .GET) {
-        if (isApiLogsPath(target)) {
+        // SSE tail endpoint — must be checked before /api/logs
+        if (isApiLogsTailPath(target)) {
+            const sse_params = sse_tail.parseSseParams(target);
+            if (sse_tail.tryStartTail(conn.stream, db_path, sse_params)) {
+                // SSE thread now owns the stream
+                owns_stream = false;
+            } else {
+                // Too many SSE connections
+                try sendJsonResponse(&request, .service_unavailable, "{\"detail\": \"Too many SSE connections\"}");
+            }
+            return;
+        } else if (isApiLogsPath(target)) {
             handleApiLogs(&request, db);
             return;
         } else if (isApiContainersPath(target)) {
@@ -190,10 +207,21 @@ fn handleApiStats(request: *std.http.Server.Request, db: *sqlite.Database) void 
     sendJsonResponse(request, .ok, body) catch {};
 }
 
+/// Check if the target path matches /api/logs/tail (with or without query string).
+fn isApiLogsTailPath(target: []const u8) bool {
+    if (std.mem.startsWith(u8, target, "/api/logs/tail")) {
+        const rest = target["/api/logs/tail".len..];
+        return rest.len == 0 or rest[0] == '?';
+    }
+    return false;
+}
+
 /// Check if the target path matches /api/logs (with or without query string).
+/// Excludes /api/logs/tail which is handled separately.
 fn isApiLogsPath(target: []const u8) bool {
     if (std.mem.startsWith(u8, target, "/api/logs")) {
         const rest = target["/api/logs".len..];
+        if (rest.len > 0 and rest[0] == '/') return false; // /api/logs/tail etc.
         return rest.len == 0 or rest[0] == '?';
     }
     return false;

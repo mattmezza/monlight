@@ -400,7 +400,7 @@ pub fn queryHealth(db: *sqlite.Database) ![]const u8 {
 }
 
 /// Escape a string for JSON output.
-fn writeJsonEscaped(writer: anytype, s: []const u8) !void {
+pub fn writeJsonEscaped(writer: anytype, s: []const u8) !void {
     for (s) |ch| {
         switch (ch) {
             '"' => try writer.writeAll("\\\""),
