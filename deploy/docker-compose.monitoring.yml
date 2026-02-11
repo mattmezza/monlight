@@ -2,7 +2,9 @@ version: "3.8"
 
 services:
   error-tracker:
-    build: ../error-tracker
+    build:
+      context: ..
+      dockerfile: error-tracker/Dockerfile
     container_name: error_tracker
     ports:
       - "5010:8000"

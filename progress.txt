@@ -12,3 +12,16 @@
 - Each service binary supports a `--healthcheck` CLI flag for Docker health checks
 - The `env_file` directive in docker-compose points to `secrets.env` (not committed; `secrets.env.example` serves as template)
 - Environment variable naming convention: service-specific keys use service name prefix (e.g., `ERROR_TRACKER_API_KEY`), but each service reads it as just `API_KEY` from its own config module
+
+## Session 2: Error Tracker Bootstrap & SQLite Layer
+
+- Zig 0.13 is installed at `/tmp/zig-linux-x86_64-0.13.0/zig` (not in PATH by default)
+- In Zig 0.13, `std.Build.Module` does NOT have a `link_library` field. C library linking must be done on the artifact (executable/test) only via `linkSystemLibrary` and `linkLibC`.
+- In Zig 0.13, `std.http.Server.Request.respond()` signature is `respond(content, options)` — content ([]const u8) comes FIRST, options struct second. This differs from some later versions.
+- The `@cImport` of `sqlite3.h` works with system-installed `sqlite-dev` package on Alpine and `libsqlite3-dev` on Debian/Ubuntu.
+- Shared modules (e.g., `shared/sqlite.zig`) are imported into services via `b.addModule("sqlite", .{ .root_source_file = b.path("../shared/sqlite.zig") })` in `build.zig`, then `exe.root_module.addImport("sqlite", sqlite_mod)`.
+- Since `build.zig` references `../shared/`, the Dockerfile must use the repo root as Docker build context, not the service directory. Updated docker-compose to use `context: ..` with `dockerfile: error-tracker/Dockerfile`.
+- SQLite `execMulti` uses an internal 8KB buffer for null-terminating SQL strings. Migration SQL must fit within this limit.
+- In-memory SQLite databases (`:memory:`) use `memory` journal mode, not WAL. Tests that check WAL pragma should account for this.
+- SQLite `EXPLAIN QUERY PLAN` returns the detail string in column index 3 — useful for verifying index usage in tests.
+- The `_meta` table pattern for schema versioning: `(key TEXT PRIMARY KEY, value TEXT)` with `schema_version` key stores the version as a text string. Migration runner compares version as `usize` integer.

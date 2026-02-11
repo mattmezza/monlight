@@ -17,27 +17,27 @@
       - ~~Contains `ERROR_TRACKER_API_KEY`, `LOG_VIEWER_API_KEY`, `METRICS_COLLECTOR_API_KEY`, `POSTMARK_API_TOKEN`, `POSTMARK_FROM_EMAIL`, `ALERT_EMAILS`~~
 
 - Error Tracker service (`error-tracker/`)
-  - Bootstrap Zig project
-    - Create `build.zig` and `build.zig.zon` with SQLite C library dependency
-      - `zig build` succeeds and produces a binary
-    - Create `Dockerfile` (multi-stage: Alpine + Zig build → Alpine runtime with sqlite-libs)
-      - `docker build` produces a working image under 20MB
-    - Create `src/main.zig` with HTTP server skeleton listening on port 8000
-      - Server starts and responds to requests
-   - SQLite database layer
-    - Implement SQLite initialization using shared SQLite module
-      - Database file is created at configurable `DATABASE_PATH`
-      - WAL mode, busy timeout, and pragmas applied automatically by shared module
-    - Create schema migrations:
-      - Migration 1: `errors` table with fields (id, fingerprint, project, environment, exception_type, message, traceback, count, first_seen, last_seen, resolved, resolved_at)
-        - Table is created on first startup
-        - All columns have correct types and defaults
-      - Migration 2: `error_occurrences` table with fields (id, error_id FK, timestamp, request_url, request_method, request_headers, user_id, extra, traceback)
-        - Table is created on first startup
-        - Foreign key references errors.id
-      - Migration 3: All indexes: `idx_fingerprint_resolved`, `idx_project_env`, `idx_last_seen`, `idx_resolved`, `idx_occurrence_error_id`
-        - Indexes are created on startup
-        - Query planner uses indexes (verified with EXPLAIN QUERY PLAN)
+  - ~~Bootstrap Zig project~~
+    - ~~Create `build.zig` and `build.zig.zon` with SQLite C library dependency~~
+      - ~~`zig build` succeeds and produces a binary~~
+    - ~~Create `Dockerfile` (multi-stage: Alpine + Zig build → Alpine runtime with sqlite-libs)~~
+      - ~~`docker build` produces a working image under 20MB~~
+    - ~~Create `src/main.zig` with HTTP server skeleton listening on port 8000~~
+      - ~~Server starts and responds to requests~~
+   - ~~SQLite database layer~~
+    - ~~Implement SQLite initialization using shared SQLite module~~
+      - ~~Database file is created at configurable `DATABASE_PATH`~~
+      - ~~WAL mode, busy timeout, and pragmas applied automatically by shared module~~
+    - ~~Create schema migrations:~~
+      - ~~Migration 1: `errors` table with fields (id, fingerprint, project, environment, exception_type, message, traceback, count, first_seen, last_seen, resolved, resolved_at)~~
+        - ~~Table is created on first startup~~
+        - ~~All columns have correct types and defaults~~
+      - ~~Migration 2: `error_occurrences` table with fields (id, error_id FK, timestamp, request_url, request_method, request_headers, user_id, extra, traceback)~~
+        - ~~Table is created on first startup~~
+        - ~~Foreign key references errors.id~~
+      - ~~Migration 3: All indexes: `idx_fingerprint_resolved`, `idx_project_env`, `idx_last_seen`, `idx_resolved`, `idx_occurrence_error_id`~~
+        - ~~Indexes are created on startup~~
+        - ~~Query planner uses indexes (verified with EXPLAIN QUERY PLAN)~~
   - Configuration module
     - Parse environment variables: `DATABASE_PATH`, `API_KEY`, `POSTMARK_API_TOKEN`, `POSTMARK_FROM_EMAIL`, `ALERT_EMAILS`, `RETENTION_DAYS`, `BASE_URL`, `LOG_LEVEL`
       - All variables are read from env
