@@ -11,6 +11,7 @@ const error_listing = @import("error_listing.zig");
 const error_detail = @import("error_detail.zig");
 const error_resolve = @import("error_resolve.zig");
 const projects_listing = @import("projects_listing.zig");
+const retention = @import("retention.zig");
 
 const server_port: u16 = 8000;
 const max_header_size = 8192;
@@ -22,6 +23,9 @@ pub const max_body_size: usize = 256 * 1024;
 const rate_limit_max_requests: usize = 100;
 /// Rate limit window in milliseconds (1 minute).
 const rate_limit_window_ms: i64 = 60_000;
+
+/// Retention cleanup interval: run once every 24 hours.
+const retention_cleanup_interval_ns: u64 = 24 * 60 * 60 * std.time.ns_per_s;
 
 pub fn main() !void {
     // Check for --healthcheck CLI flag
@@ -71,6 +75,22 @@ pub fn main() !void {
         std.process.exit(1);
     };
     defer limiter.deinit();
+
+    // Start retention cleanup background thread
+    var retention_stop = std.atomic.Value(bool).init(false);
+    const retention_thread = std.Thread.spawn(.{}, retention.retentionThread, .{
+        cfg.db_path_z,
+        cfg.retention_days,
+        retention_cleanup_interval_ns,
+        &retention_stop,
+    }) catch |err| {
+        log.err("Failed to start retention cleanup thread: {}", .{err});
+        std.process.exit(1);
+    };
+    defer {
+        retention_stop.store(true, .release);
+        retention_thread.join();
+    }
 
     // Accept loop
     while (true) {

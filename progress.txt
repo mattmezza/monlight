@@ -110,3 +110,13 @@
 - Routing for `/api/projects` must be placed BEFORE the `/api/errors` catch-all in `main.zig`, since `isApiErrorsPath()` would not match it, but ordering still matters for clarity and to avoid future conflicts with broader path matchers.
 - The `isApiProjectsPath()` helper follows the same pattern as `isApiErrorsPath()`: matches `/api/projects` exactly or `/api/projects?...` with query string.
 - The JSON response is built manually with `ArrayList(u8)` writer, consistent with the pattern established in `error_listing.zig` and `error_detail.zig`.
+
+## Session 12: Data Retention Cleanup
+
+- Retention cleanup uses a separate SQLite connection on a background thread. WAL mode supports concurrent read/write access from multiple connections, so this is safe alongside the main HTTP server thread.
+- `std.atomic.Value(bool)` is used for thread stop signaling with `.load(.acquire)` / `.store(true, .release)` ordering. This ensures the background thread sees the stop signal promptly.
+- SQLite's `strftime` with string concatenation `'-' || ? || ' days'` allows parameterized date arithmetic in DELETE queries (e.g., `datetime('now', '-' || ? || ' days')`).
+- The `std.Thread.spawn` API in Zig 0.13 takes `.{}` (spawn config options), a function pointer, and an args tuple. The function pointer must match the args tuple types exactly.
+- The retention thread sleeps in 1-second chunks rather than one long sleep, so it can check the stop flag frequently and shut down promptly.
+- Associated `error_occurrences` are cascade-deleted via the existing `FOREIGN KEY (error_id) REFERENCES errors(id) ON DELETE CASCADE` constraint — no need to manually delete them.
+- The retention module is tested with an in-memory SQLite database (`:memory:`), using the same schema setup pattern as other test modules. Tests insert errors with manually set timestamps to simulate aging.

@@ -226,6 +226,18 @@ pub fn build(b: *std.Build) void {
 
     const run_projects_listing_tests = b.addRunArtifact(projects_listing_tests);
 
+    // Test step — tests for retention module
+    const retention_tests = b.addTest(.{
+        .root_source_file = b.path("src/retention.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    retention_tests.root_module.addImport("sqlite", sqlite_mod);
+    retention_tests.linkSystemLibrary("sqlite3");
+    retention_tests.linkLibC();
+
+    const run_retention_tests = b.addRunArtifact(retention_tests);
+
     const test_step = b.step("test", "Run all unit tests");
     test_step.dependOn(&run_main_tests.step);
     test_step.dependOn(&run_db_tests.step);
@@ -242,4 +254,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_error_detail_tests.step);
     test_step.dependOn(&run_error_resolve_tests.step);
     test_step.dependOn(&run_projects_listing_tests.step);
+    test_step.dependOn(&run_retention_tests.step);
 }

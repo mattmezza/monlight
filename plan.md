@@ -91,26 +91,26 @@
   - ~~Projects listing endpoint (`GET /api/projects`)~~
     - ~~Return distinct project names from errors table~~
       - ~~Response shape: `{"projects": ["flowrent", ...]}`~~
-  - Health check endpoint (`GET /health`)
-    - Return `{"status": "ok"}` with 200, no auth required
-      - Endpoint responds without API key
-  - Email alerting
-    - Implement Postmark API HTTP client for sending email alerts
-      - Sends POST to `https://api.postmarkapp.com/email` with correct headers
-      - Uses configured `POSTMARK_API_TOKEN` and `POSTMARK_FROM_EMAIL`
-    - Format alert email with subject `[{project}] {exception_type}: {message_truncated_50_chars}` and body per spec template
-      - Subject is correctly formatted and truncated
-      - Body contains all fields: project, environment, exception_type, message, request info, traceback, dashboard link
-    - Send to all comma-separated `ALERT_EMAILS` recipients
-      - Multiple recipients each receive the alert
-    - Handle Postmark API failures gracefully (log warning, don't crash)
-      - Network error or 4xx/5xx from Postmark is logged but does not affect error ingestion
-  - Data retention cleanup
-    - Implement background job that deletes resolved errors older than `RETENTION_DAYS`
-      - Job runs periodically (e.g., daily)
-      - Only resolved errors are deleted
-      - Associated `error_occurrences` records are cascade-deleted
-      - Unresolved errors are never deleted regardless of age
+  - ~~Health check endpoint (`GET /health`)~~
+    - ~~Return `{"status": "ok"}` with 200, no auth required~~
+      - ~~Endpoint responds without API key~~
+  - ~~Email alerting~~
+    - ~~Implement Postmark API HTTP client for sending email alerts~~
+      - ~~Sends POST to `https://api.postmarkapp.com/email` with correct headers~~
+      - ~~Uses configured `POSTMARK_API_TOKEN` and `POSTMARK_FROM_EMAIL`~~
+    - ~~Format alert email with subject `[{project}] {exception_type}: {message_truncated_50_chars}` and body per spec template~~
+      - ~~Subject is correctly formatted and truncated~~
+      - ~~Body contains all fields: project, environment, exception_type, message, request info, traceback, dashboard link~~
+    - ~~Send to all comma-separated `ALERT_EMAILS` recipients~~
+      - ~~Multiple recipients each receive the alert~~
+    - ~~Handle Postmark API failures gracefully (log warning, don't crash)~~
+      - ~~Network error or 4xx/5xx from Postmark is logged but does not affect error ingestion~~
+  - ~~Data retention cleanup~~
+    - ~~Implement background job that deletes resolved errors older than `RETENTION_DAYS`~~
+      - ~~Job runs periodically (e.g., daily)~~
+      - ~~Only resolved errors are deleted~~
+      - ~~Associated `error_occurrences` records are cascade-deleted~~
+      - ~~Unresolved errors are never deleted regardless of age~~
   - Web UI
     - Create HTML page listing unresolved errors with columns: exception_type, message (truncated), project, environment, count, first_seen, last_seen
       - Page loads and displays error list
@@ -137,8 +137,8 @@
       - Tests cover auth middleware behavior
     - Write tests for rate limiting (accept under limit, reject over limit, sliding window reset)
       - Tests verify 429 response when rate limit exceeded
-    - Write tests for retention cleanup (deletes old resolved, keeps unresolved, cascades occurrences)
-      - Tests verify correct deletion behavior
+    - ~~Write tests for retention cleanup (deletes old resolved, keeps unresolved, cascades occurrences)~~
+      - ~~Tests verify correct deletion behavior~~
 
 - Log Viewer service (`log-viewer/`)
   - Bootstrap Zig project
