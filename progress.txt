@@ -36,3 +36,12 @@
 - Config struct stores a `db_path_z: [*:0]const u8` (null-terminated) alongside the regular `database_path: []const u8` slice, because SQLite's C API requires null-terminated strings. The null-terminated version is backed by a `_db_path_buf: [512]u8` field within the struct.
 - IMPORTANT: Previous feature branches are not auto-merged into main. When branching for a new task, branch off the PREVIOUS feature branch (not main) if that branch contains required code (e.g., `shared/sqlite.zig`).
 - `std.posix.getenv()` returns `?[]const u8` — an optional slice. It returns null when the env var is not set.
+
+## Session 4: Error Tracker Auth Integration Tests
+
+- Integration tests for HTTP behavior (auth, routing) require spinning up a real TCP server because `std.http.Server.Request` cannot be mocked — it requires a real connection.
+- Pattern for HTTP integration tests: create a `TestServer` struct that owns the `net.Server`, start it with a thread that accepts N connections, send raw HTTP requests, parse raw responses. Use port 0 to let the OS assign a free port (avoids conflicts in parallel test runs).
+- `handleConnection` must be `pub` in main.zig so that test files (`auth_test.zig`) can import and call it.
+- Test files that import `main.zig` (via `@import("main.zig")`) need all the same shared module imports and C library linking as `main.zig` itself in `build.zig`.
+- Zig compiler rejects `_ = self;` if `self` was already used earlier in the function — the discard is "pointless" and causes a compile error.
+- Deleting `.zig-cache/o/` partially can corrupt the build cache. If the build produces `FileNotFound`, delete the entire `.zig-cache/` directory and rebuild.

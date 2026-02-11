@@ -43,12 +43,12 @@
       - ~~All variables are read from env~~
       - ~~Missing required variables (`API_KEY`) cause a clear startup error~~
       - ~~Defaults are applied for optional variables~~
-  - API key authentication
-    - Use shared auth middleware configured with `API_KEY`
-      - Requests without `X-API-Key` header return 401 with `{"detail": "Invalid API key"}`
-      - Requests with wrong key return 401
-      - Requests with correct key pass through to handler
-      - `/health` endpoint is excluded from auth
+  - ~~API key authentication~~
+    - ~~Use shared auth middleware configured with `API_KEY`~~
+      - ~~Requests without `X-API-Key` header return 401 with `{"detail": "Invalid API key"}`~~
+      - ~~Requests with wrong key return 401~~
+      - ~~Requests with correct key pass through to handler~~
+      - ~~`/health` endpoint is excluded from auth~~
   - Request limits
     - Use shared rate limiting middleware (100 requests/minute) and body size enforcement (256KB max)
       - Oversized requests return 413

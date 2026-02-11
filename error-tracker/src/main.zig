@@ -4,6 +4,7 @@ const log = std.log;
 const database = @import("database.zig");
 const sqlite = @import("sqlite");
 const app_config = @import("config.zig");
+const auth = @import("auth");
 
 const server_port: u16 = 8000;
 const max_header_size = 8192;
@@ -54,13 +55,13 @@ pub fn main() !void {
             log.err("Failed to accept connection: {}", .{err});
             continue;
         };
-        handleConnection(conn) catch |err| {
+        handleConnection(conn, cfg.api_key) catch |err| {
             log.err("Failed to handle connection: {}", .{err});
         };
     }
 }
 
-fn handleConnection(conn: net.Server.Connection) !void {
+pub fn handleConnection(conn: net.Server.Connection, api_key: []const u8) !void {
     defer conn.stream.close();
 
     var buf: [max_header_size]u8 = undefined;
@@ -70,6 +71,12 @@ fn handleConnection(conn: net.Server.Connection) !void {
         log.err("Failed to receive request head: {}", .{err});
         return;
     };
+
+    // Authenticate the request (skips excluded paths like /health)
+    const excluded_paths = [_][]const u8{"/health"};
+    if (auth.authenticate(&request, api_key, &excluded_paths) == .rejected) {
+        return; // 401 response already sent by auth module
+    }
 
     // Route the request
     if (std.mem.eql(u8, request.head.target, "/health")) {
