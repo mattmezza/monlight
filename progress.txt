@@ -102,3 +102,11 @@
 - Idempotent resolve: if the error is already resolved, the endpoint returns 200 without modifying `resolved_at`. This avoids updating the timestamp on every call and preserves the original resolution time.
 - The resolve endpoint uses a tagged union `ResolveResult` (`.resolved` or `.not_found`) rather than an optional, making the handler code in `main.zig` clearer about which HTTP status code to return.
 - Tests for `API_KEY`-dependent modules (main.zig, auth_test.zig, rate_limit_test.zig) require setting `API_KEY=test_key_123` in the environment when running `zig build test`.
+
+## Session 11: Projects Listing Endpoint
+
+- The `projects_listing.zig` module handles GET /api/projects — returns distinct project names from the errors table as `{"projects": ["flowrent", ...]}`.
+- `Statement.deinit()` and `RowIterator.deinit()` both call `sqlite3_finalize` on the same underlying statement pointer. Calling both causes a double-free segfault. Pattern: only call `stmt.deinit()`, never `iter.deinit()` when you own the statement. This is the correct ownership pattern throughout the codebase.
+- Routing for `/api/projects` must be placed BEFORE the `/api/errors` catch-all in `main.zig`, since `isApiErrorsPath()` would not match it, but ordering still matters for clarity and to avoid future conflicts with broader path matchers.
+- The `isApiProjectsPath()` helper follows the same pattern as `isApiErrorsPath()`: matches `/api/projects` exactly or `/api/projects?...` with query string.
+- The JSON response is built manually with `ArrayList(u8)` writer, consistent with the pattern established in `error_listing.zig` and `error_detail.zig`.

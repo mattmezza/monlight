@@ -88,9 +88,9 @@
       - ~~Returns `{"status": "resolved", "id": ...}`~~
       - ~~Already-resolved error is idempotent (returns 200)~~
       - ~~Non-existent ID returns 404~~
-  - Projects listing endpoint (`GET /api/projects`)
-    - Return distinct project names from errors table
-      - Response shape: `{"projects": ["flowrent", ...]}`
+  - ~~Projects listing endpoint (`GET /api/projects`)~~
+    - ~~Return distinct project names from errors table~~
+      - ~~Response shape: `{"projects": ["flowrent", ...]}`~~
   - Health check endpoint (`GET /health`)
     - Return `{"status": "ok"}` with 200, no auth required
       - Endpoint responds without API key
