@@ -49,10 +49,10 @@
       - ~~Requests with wrong key return 401~~
       - ~~Requests with correct key pass through to handler~~
       - ~~`/health` endpoint is excluded from auth~~
-  - Request limits
-    - Use shared rate limiting middleware (100 requests/minute) and body size enforcement (256KB max)
-      - Oversized requests return 413
-      - Rate-limited requests return 429
+  - ~~Request limits~~
+    - ~~Use shared rate limiting middleware (100 requests/minute) and body size enforcement (256KB max)~~
+      - ~~Oversized requests return 413~~
+      - ~~Rate-limited requests return 429~~
   - Fingerprinting algorithm
     - Implement fingerprint generation: extract exception type + last app code location from traceback, concatenate with project, MD5 hash
       - Given the same project, exception_type, and traceback, the same fingerprint is produced

@@ -19,6 +19,11 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("../shared/auth.zig"),
     });
 
+    // Shared rate limiting module from ../shared/
+    const rate_limit_mod = b.addModule("rate_limit", .{
+        .root_source_file = b.path("../shared/rate_limit.zig"),
+    });
+
     const exe = b.addExecutable(.{
         .name = "error-tracker",
         .root_source_file = b.path("src/main.zig"),
@@ -30,6 +35,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("sqlite", sqlite_mod);
     exe.root_module.addImport("config", config_mod);
     exe.root_module.addImport("auth", auth_mod);
+    exe.root_module.addImport("rate_limit", rate_limit_mod);
 
     // Link SQLite C library
     exe.linkSystemLibrary("sqlite3");
@@ -55,6 +61,7 @@ pub fn build(b: *std.Build) void {
     main_tests.root_module.addImport("sqlite", sqlite_mod);
     main_tests.root_module.addImport("config", config_mod);
     main_tests.root_module.addImport("auth", auth_mod);
+    main_tests.root_module.addImport("rate_limit", rate_limit_mod);
     main_tests.linkSystemLibrary("sqlite3");
     main_tests.linkLibC();
 
@@ -111,6 +118,15 @@ pub fn build(b: *std.Build) void {
 
     const run_auth_tests = b.addRunArtifact(auth_tests);
 
+    // Test step — tests for shared rate_limit module
+    const rate_limit_tests = b.addTest(.{
+        .root_source_file = b.path("../shared/rate_limit.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const run_rate_limit_tests = b.addRunArtifact(rate_limit_tests);
+
     // Test step — integration tests for auth (auth_test.zig)
     const auth_integration_tests = b.addTest(.{
         .root_source_file = b.path("src/auth_test.zig"),
@@ -120,10 +136,26 @@ pub fn build(b: *std.Build) void {
     auth_integration_tests.root_module.addImport("sqlite", sqlite_mod);
     auth_integration_tests.root_module.addImport("config", config_mod);
     auth_integration_tests.root_module.addImport("auth", auth_mod);
+    auth_integration_tests.root_module.addImport("rate_limit", rate_limit_mod);
     auth_integration_tests.linkSystemLibrary("sqlite3");
     auth_integration_tests.linkLibC();
 
     const run_auth_integration_tests = b.addRunArtifact(auth_integration_tests);
+
+    // Test step — integration tests for rate limiting and body size (rate_limit_test.zig)
+    const rate_limit_integration_tests = b.addTest(.{
+        .root_source_file = b.path("src/rate_limit_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    rate_limit_integration_tests.root_module.addImport("sqlite", sqlite_mod);
+    rate_limit_integration_tests.root_module.addImport("config", config_mod);
+    rate_limit_integration_tests.root_module.addImport("auth", auth_mod);
+    rate_limit_integration_tests.root_module.addImport("rate_limit", rate_limit_mod);
+    rate_limit_integration_tests.linkSystemLibrary("sqlite3");
+    rate_limit_integration_tests.linkLibC();
+
+    const run_rate_limit_integration_tests = b.addRunArtifact(rate_limit_integration_tests);
 
     const test_step = b.step("test", "Run all unit tests");
     test_step.dependOn(&run_main_tests.step);
@@ -132,5 +164,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_sqlite_tests.step);
     test_step.dependOn(&run_shared_config_tests.step);
     test_step.dependOn(&run_auth_tests.step);
+    test_step.dependOn(&run_rate_limit_tests.step);
     test_step.dependOn(&run_auth_integration_tests.step);
+    test_step.dependOn(&run_rate_limit_integration_tests.step);
 }

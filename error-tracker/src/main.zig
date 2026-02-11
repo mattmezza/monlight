@@ -5,9 +5,18 @@ const database = @import("database.zig");
 const sqlite = @import("sqlite");
 const app_config = @import("config.zig");
 const auth = @import("auth");
+const rate_limit = @import("rate_limit");
 
 const server_port: u16 = 8000;
 const max_header_size = 8192;
+
+/// Maximum request body size in bytes (256KB for Error Tracker).
+pub const max_body_size: usize = 256 * 1024;
+
+/// Maximum requests per minute (rate limit for Error Tracker).
+const rate_limit_max_requests: usize = 100;
+/// Rate limit window in milliseconds (1 minute).
+const rate_limit_window_ms: i64 = 60_000;
 
 pub fn main() !void {
     // Check for --healthcheck CLI flag
@@ -49,19 +58,28 @@ pub fn main() !void {
 
     log.info("Error tracker listening on 0.0.0.0:{d}", .{server_port});
 
+    // Initialize rate limiter (100 requests/minute)
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    var limiter = rate_limit.RateLimiter.init(gpa.allocator(), rate_limit_max_requests, rate_limit_window_ms) catch |err| {
+        log.err("Failed to initialize rate limiter: {}", .{err});
+        std.process.exit(1);
+    };
+    defer limiter.deinit();
+
     // Accept loop
     while (true) {
         const conn = server.accept() catch |err| {
             log.err("Failed to accept connection: {}", .{err});
             continue;
         };
-        handleConnection(conn, cfg.api_key) catch |err| {
+        handleConnection(conn, cfg.api_key, &limiter) catch |err| {
             log.err("Failed to handle connection: {}", .{err});
         };
     }
 }
 
-pub fn handleConnection(conn: net.Server.Connection, api_key: []const u8) !void {
+pub fn handleConnection(conn: net.Server.Connection, api_key: []const u8, limiter: *rate_limit.RateLimiter) !void {
     defer conn.stream.close();
 
     var buf: [max_header_size]u8 = undefined;
@@ -76,6 +94,16 @@ pub fn handleConnection(conn: net.Server.Connection, api_key: []const u8) !void 
     const excluded_paths = [_][]const u8{"/health"};
     if (auth.authenticate(&request, api_key, &excluded_paths) == .rejected) {
         return; // 401 response already sent by auth module
+    }
+
+    // Rate limiting (skips excluded paths like /health)
+    if (rate_limit.checkRateLimit(&request, limiter, &excluded_paths) == .limited) {
+        return; // 429 response already sent by rate_limit module
+    }
+
+    // Body size enforcement (checks Content-Length header)
+    if (rate_limit.checkBodySize(&request, max_body_size) == .too_large) {
+        return; // 413 response already sent by rate_limit module
     }
 
     // Route the request

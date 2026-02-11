@@ -45,3 +45,13 @@
 - Test files that import `main.zig` (via `@import("main.zig")`) need all the same shared module imports and C library linking as `main.zig` itself in `build.zig`.
 - Zig compiler rejects `_ = self;` if `self` was already used earlier in the function — the discard is "pointless" and causes a compile error.
 - Deleting `.zig-cache/o/` partially can corrupt the build cache. If the build produces `FileNotFound`, delete the entire `.zig-cache/` directory and rebuild.
+
+## Session 5: Error Tracker Request Limits (Rate Limiting + Body Size)
+
+- In Zig 0.13, the HTTP 413 status code enum is `.payload_too_large`, NOT `.request_entity_too_large`. Always check `/tmp/zig-linux-x86_64-0.13.0/lib/std/http.zig` for the correct enum names.
+- The middleware pattern used across the codebase is "call-and-check": each middleware function takes `*std.http.Server.Request` plus its config, sends the error response itself if rejected, and returns an enum the caller checks. This avoids function chaining complexity.
+- When adding a new shared module (e.g., `rate_limit`), you must add `addImport` to: (1) the main executable, (2) ALL test artifacts that transitively import it (including test files that `@import("main.zig")` since main.zig now imports the new module).
+- Rate limiter uses a ring buffer of timestamps for sliding window tracking. The `max_requests` parameter doubles as the ring buffer size, keeping memory usage proportional to the limit.
+- `handleConnection` signature changes (adding parameters) require updating ALL test files that call it. Currently `auth_test.zig` and `rate_limit_test.zig` both call `main.handleConnection(...)`.
+- For integration tests of rate limiting, use a `TestServer` that owns the `RateLimiter` with a small limit (e.g., 2-3 requests) to make tests fast and deterministic. Auth tests should use a generous limit (e.g., 1000) so rate limiting doesn't interfere.
+- Body size enforcement checks the `Content-Length` header before reading the body, avoiding memory allocation for oversized requests. Requests without `Content-Length` are allowed through (they may have no body or use chunked encoding).

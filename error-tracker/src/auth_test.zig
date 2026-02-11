@@ -1,6 +1,7 @@
 const std = @import("std");
 const net = std.net;
 const main = @import("main.zig");
+const rate_limit = @import("rate_limit");
 
 const test_api_key = "test-secret-key-12345678901234";
 
@@ -35,10 +36,13 @@ const TestServer = struct {
     }
 
     fn acceptLoop(self: *TestServer, count: usize) void {
+        // Use a generous rate limit for auth tests (won't be hit)
+        var limiter = rate_limit.RateLimiter.init(std.testing.allocator, 1000, 60_000) catch return;
+        defer limiter.deinit();
         var handled: usize = 0;
         while (handled < count) {
             const conn = self.server.accept() catch continue;
-            main.handleConnection(conn, test_api_key) catch {};
+            main.handleConnection(conn, test_api_key, &limiter) catch {};
             handled += 1;
         }
     }
