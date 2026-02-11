@@ -7,6 +7,7 @@ const app_config = @import("config.zig");
 const auth = @import("auth");
 const rate_limit = @import("rate_limit");
 const ingestion = @import("ingestion.zig");
+const log_query = @import("log_query.zig");
 
 const server_port: u16 = 8000;
 const max_header_size = 8192;
@@ -100,7 +101,6 @@ pub fn main() !void {
 }
 
 pub fn handleConnection(conn: net.Server.Connection, api_key: []const u8, limiter: *rate_limit.RateLimiter, db: *sqlite.Database) !void {
-    _ = db;
     defer conn.stream.close();
 
     var buf: [max_header_size]u8 = undefined;
@@ -114,9 +114,9 @@ pub fn handleConnection(conn: net.Server.Connection, api_key: []const u8, limite
     // Route the request
     const target = request.head.target;
 
-    // Health endpoint (no auth required)
+    // Health endpoint (no auth required) — enhanced with log stats
     if (std.mem.eql(u8, target, "/health")) {
-        try handleHealth(&request);
+        handleHealth(&request, db);
         return;
     }
 
@@ -136,15 +136,85 @@ pub fn handleConnection(conn: net.Server.Connection, api_key: []const u8, limite
         return; // 413 response already sent by rate_limit module
     }
 
-    // API routes (to be implemented)
+    // API routes (GET only for log-viewer)
+    if (request.head.method == .GET) {
+        if (isApiLogsPath(target)) {
+            handleApiLogs(&request, db);
+            return;
+        } else if (isApiContainersPath(target)) {
+            handleApiContainers(&request, db);
+            return;
+        } else if (isApiStatsPath(target)) {
+            handleApiStats(&request, db);
+            return;
+        }
+    }
+
     try handleNotFound(&request);
 }
 
-fn handleHealth(request: *std.http.Server.Request) !void {
-    const body =
-        \\{"status": "ok"}
-    ;
-    try sendJsonResponse(request, .ok, body);
+fn handleHealth(request: *std.http.Server.Request, db: *sqlite.Database) void {
+    const body = log_query.queryHealth(db) catch |err| {
+        log.err("Failed to query health: {}", .{err});
+        sendJsonResponse(request, .internal_server_error, "{\"detail\": \"Internal server error\"}") catch {};
+        return;
+    };
+    sendJsonResponse(request, .ok, body) catch {};
+}
+
+fn handleApiLogs(request: *std.http.Server.Request, db: *sqlite.Database) void {
+    const params = log_query.parseQueryParams(request.head.target);
+    const body = log_query.queryLogs(db, params) catch |err| {
+        log.err("Failed to query logs: {}", .{err});
+        sendJsonResponse(request, .internal_server_error, "{\"detail\": \"Internal server error\"}") catch {};
+        return;
+    };
+    sendJsonResponse(request, .ok, body) catch {};
+}
+
+fn handleApiContainers(request: *std.http.Server.Request, db: *sqlite.Database) void {
+    const body = log_query.queryContainers(db) catch |err| {
+        log.err("Failed to query containers: {}", .{err});
+        sendJsonResponse(request, .internal_server_error, "{\"detail\": \"Internal server error\"}") catch {};
+        return;
+    };
+    sendJsonResponse(request, .ok, body) catch {};
+}
+
+fn handleApiStats(request: *std.http.Server.Request, db: *sqlite.Database) void {
+    const body = log_query.queryStats(db) catch |err| {
+        log.err("Failed to query stats: {}", .{err});
+        sendJsonResponse(request, .internal_server_error, "{\"detail\": \"Internal server error\"}") catch {};
+        return;
+    };
+    sendJsonResponse(request, .ok, body) catch {};
+}
+
+/// Check if the target path matches /api/logs (with or without query string).
+fn isApiLogsPath(target: []const u8) bool {
+    if (std.mem.startsWith(u8, target, "/api/logs")) {
+        const rest = target["/api/logs".len..];
+        return rest.len == 0 or rest[0] == '?';
+    }
+    return false;
+}
+
+/// Check if the target path matches /api/containers (with or without query string).
+fn isApiContainersPath(target: []const u8) bool {
+    if (std.mem.startsWith(u8, target, "/api/containers")) {
+        const rest = target["/api/containers".len..];
+        return rest.len == 0 or rest[0] == '?';
+    }
+    return false;
+}
+
+/// Check if the target path matches /api/stats (with or without query string).
+fn isApiStatsPath(target: []const u8) bool {
+    if (std.mem.startsWith(u8, target, "/api/stats")) {
+        const rest = target["/api/stats".len..];
+        return rest.len == 0 or rest[0] == '?';
+    }
+    return false;
 }
 
 fn handleNotFound(request: *std.http.Server.Request) !void {

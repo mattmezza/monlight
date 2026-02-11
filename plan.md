@@ -209,13 +209,13 @@
       - ~~Log count stays at or below MAX_ENTRIES + buffer~~
       - ~~Oldest logs are deleted first~~
       - ~~FTS index remains consistent after deletion~~
-  - Log query endpoint (`GET /api/logs`)
-    - Support query parameters: `container`, `level`, `search` (full-text), `since`, `until`, `limit` (default 100, max 500), `offset`
-      - Full-text search returns relevant results ranked appropriately
-      - Time range filtering works with ISO8601 timestamps
-      - Combined filters (container + level + search + time range) work together
-      - Pagination is correct
-      - Response shape: `{"logs": [...], "total": N, "limit": N, "offset": N}`
+  - ~~Log query endpoint (`GET /api/logs`)~~
+    - ~~Support query parameters: `container`, `level`, `search` (full-text), `since`, `until`, `limit` (default 100, max 500), `offset`~~
+      - ~~Full-text search returns relevant results ranked appropriately~~
+      - ~~Time range filtering works with ISO8601 timestamps~~
+      - ~~Combined filters (container + level + search + time range) work together~~
+      - ~~Pagination is correct~~
+      - ~~Response shape: `{"logs": [...], "total": N, "limit": N, "offset": N}`~~
   - Live tail endpoint (`GET /api/logs/tail`)
     - Implement Server-Sent Events (SSE) stream
       - Connection stays open and streams new log entries as they are ingested
@@ -229,15 +229,15 @@
       - Maximum concurrent SSE connections: 5 (return 503 when exceeded)
       - Clean up connection resources immediately on client disconnect
       - Drop log events if client cannot keep up (don't buffer unboundedly)
-  - Containers listing endpoint (`GET /api/containers`)
-    - Return known containers with log counts
-      - Response shape: `{"containers": [{"name": "...", "log_count": N}, ...]}`
-  - Stats endpoint (`GET /api/stats`)
-    - Return total_logs, oldest_log, newest_log, by_level counts, by_container counts
-      - All fields are populated and accurate
-  - Health check endpoint (`GET /health`)
-    - Return `{"status": "ok", "logs_indexed": N, "last_ingest": "..."}` with 200, no auth required
-      - Returns current log count and last ingestion timestamp
+  - ~~Containers listing endpoint (`GET /api/containers`)~~
+    - ~~Return known containers with log counts~~
+      - ~~Response shape: `{"containers": [{"name": "...", "log_count": N}, ...]}`~~
+  - ~~Stats endpoint (`GET /api/stats`)~~
+    - ~~Return total_logs, oldest_log, newest_log, by_level counts, by_container counts~~
+      - ~~All fields are populated and accurate~~
+  - ~~Health check endpoint (`GET /health`)~~
+    - ~~Return `{"status": "ok", "logs_indexed": N, "last_ingest": "..."}` with 200, no auth required~~
+      - ~~Returns current log count and last ingestion timestamp~~
   - Web UI
     - Create HTML page displaying log entries in a scrollable list
       - Logs are displayed with timestamp, container, level, message
@@ -264,8 +264,8 @@
       - Timeout flush works for partial entries
     - Write tests for log level extraction (all four patterns + defaults)
       - Tests cover each pattern and fallback behavior
-    - Write tests for FTS5 search queries
-      - Tests verify search returns correct results
+    - ~~Write tests for FTS5 search queries~~
+      - ~~Tests verify search returns correct results~~
     - Write tests for ring buffer cleanup (entries are deleted, count stays within limit)
       - Tests verify oldest entries are removed
     - Write tests for SSE endpoint

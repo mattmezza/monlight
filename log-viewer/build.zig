@@ -110,10 +110,23 @@ pub fn build(b: *std.Build) void {
 
     const run_ingestion_tests = b.addRunArtifact(ingestion_tests);
 
+    // Test step — tests for log_query.zig
+    const log_query_tests = b.addTest(.{
+        .root_source_file = b.path("src/log_query.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    log_query_tests.root_module.addImport("sqlite", sqlite_mod);
+    log_query_tests.linkSystemLibrary("sqlite3");
+    log_query_tests.linkLibC();
+
+    const run_log_query_tests = b.addRunArtifact(log_query_tests);
+
     const test_step = b.step("test", "Run all unit tests");
     test_step.dependOn(&run_main_tests.step);
     test_step.dependOn(&run_db_tests.step);
     test_step.dependOn(&run_config_tests.step);
     test_step.dependOn(&run_log_level_tests.step);
     test_step.dependOn(&run_ingestion_tests.step);
+    test_step.dependOn(&run_log_query_tests.step);
 }
