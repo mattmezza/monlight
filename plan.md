@@ -1,20 +1,20 @@
 # MonlightStack — Implementation Plan
 
-- Repository setup
-  - Initialize monorepo structure
-    - Create top-level directories: `error-tracker/`, `log-viewer/`, `metrics-collector/`, `clients/python/`, `deploy/`
-      - All directories exist and contain placeholder files or initial build configs
-    - Create `.gitignore` with Zig build artifacts (`zig-out/`, `zig-cache/`, `.zig-cache/`), SQLite files (`*.db`), env files (`secrets.env`), and Python artifacts (`__pycache__/`, `*.egg-info/`, `dist/`, `build/`)
-      - `.gitignore` covers all relevant patterns and is committed
-  - Set up shared deployment config
-    - Create `deploy/docker-compose.monitoring.yml` with all three services defined (error-tracker, log-viewer, metrics-collector)
-      - Each service has correct port mapping (5010:8000, 5011:8000, 5012:8000)
-      - Each service has correct volume mounts for SQLite persistence
-      - Services use `flowrent_network` external network
-      - Health checks configured for each service
-      - `env_file` references `secrets.env` where needed
-    - Create `deploy/secrets.env.example` with placeholder values for all required env vars
-      - Contains `ERROR_TRACKER_API_KEY`, `LOG_VIEWER_API_KEY`, `METRICS_COLLECTOR_API_KEY`, `POSTMARK_API_TOKEN`, `POSTMARK_FROM_EMAIL`, `ALERT_EMAILS`
+- ~~Repository setup~~
+  - ~~Initialize monorepo structure~~
+    - ~~Create top-level directories: `error-tracker/`, `log-viewer/`, `metrics-collector/`, `clients/python/`, `deploy/`~~
+      - ~~All directories exist and contain placeholder files or initial build configs~~
+    - ~~Create `.gitignore` with Zig build artifacts (`zig-out/`, `zig-cache/`, `.zig-cache/`), SQLite files (`*.db`), env files (`secrets.env`), and Python artifacts (`__pycache__/`, `*.egg-info/`, `dist/`, `build/`)~~
+      - ~~`.gitignore` covers all relevant patterns and is committed~~
+  - ~~Set up shared deployment config~~
+    - ~~Create `deploy/docker-compose.monitoring.yml` with all three services defined (error-tracker, log-viewer, metrics-collector)~~
+      - ~~Each service has correct port mapping (5010:8000, 5011:8000, 5012:8000)~~
+      - ~~Each service has correct volume mounts for SQLite persistence~~
+      - ~~Services use `flowrent_network` external network~~
+      - ~~Health checks configured for each service~~
+      - ~~`env_file` references `secrets.env` where needed~~
+    - ~~Create `deploy/secrets.env.example` with placeholder values for all required env vars~~
+      - ~~Contains `ERROR_TRACKER_API_KEY`, `LOG_VIEWER_API_KEY`, `METRICS_COLLECTOR_API_KEY`, `POSTMARK_API_TOKEN`, `POSTMARK_FROM_EMAIL`, `ALERT_EMAILS`~~
 
 - Error Tracker service (`error-tracker/`)
   - Bootstrap Zig project

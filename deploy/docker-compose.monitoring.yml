@@ -1,0 +1,71 @@
+version: "3.8"
+
+services:
+  error-tracker:
+    build: ../error-tracker
+    container_name: error_tracker
+    ports:
+      - "5010:8000"
+    volumes:
+      - ./data/errors:/app/data
+    env_file:
+      - secrets.env
+    environment:
+      - DATABASE_PATH=/app/data/errors.db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/app/error-tracker", "--healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - monitoring
+
+  log-viewer:
+    build: ../log-viewer
+    container_name: log_viewer
+    ports:
+      - "5011:8000"
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - ./data/logs:/app/data
+    env_file:
+      - secrets.env
+    environment:
+      - DATABASE_PATH=/app/data/logs.db
+      - CONTAINERS=rentl_prod,rentl_dev
+      - MAX_ENTRIES=100000
+      - POLL_INTERVAL=5
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/app/log-viewer", "--healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - monitoring
+
+  metrics-collector:
+    build: ../metrics-collector
+    container_name: metrics_collector
+    ports:
+      - "5012:8000"
+    volumes:
+      - ./data/metrics:/app/data
+    env_file:
+      - secrets.env
+    environment:
+      - DATABASE_PATH=/app/data/metrics.db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/app/metrics-collector", "--healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - monitoring
+
+networks:
+  monitoring:
+    name: flowrent_network
+    external: true

@@ -1,0 +1,14 @@
+# Progress & Learnings
+
+## Session 1: Repository Setup
+
+- The monorepo has 5 top-level service directories: `error-tracker/`, `log-viewer/`, `metrics-collector/`, `clients/python/`, `shared/`
+- Deployment config lives in `deploy/` with `docker-compose.monitoring.yml` and `secrets.env.example`
+- `deploy/data/{errors,logs,metrics}/` directories hold SQLite persistence volumes
+- The docker-compose file uses relative build paths (`../error-tracker`, etc.) since it lives in `deploy/`
+- The `.gitignore` must cover: Zig (`zig-out/`, `zig-cache/`, `.zig-cache/`), SQLite (`*.db`, `*.db-wal`, `*.db-shm`), Python (`__pycache__/`, `*.egg-info/`, etc.), env files (`secrets.env`, `.env`), and Node (`node_modules/`)
+- All three services map internal port 8000 to external ports 5010, 5011, 5012 respectively
+- Services connect via the `flowrent_network` external Docker network
+- Each service binary supports a `--healthcheck` CLI flag for Docker health checks
+- The `env_file` directive in docker-compose points to `secrets.env` (not committed; `secrets.env.example` serves as template)
+- Environment variable naming convention: service-specific keys use service name prefix (e.g., `ERROR_TRACKER_API_KEY`), but each service reads it as just `API_KEY` from its own config module

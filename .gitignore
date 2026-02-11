@@ -1,1 +1,37 @@
 .tmux-session
+
+# Zig build artifacts
+zig-out/
+zig-cache/
+.zig-cache/
+
+# SQLite database files
+*.db
+*.db-wal
+*.db-shm
+
+# Environment / secrets
+secrets.env
+.env
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Node.js (Tailwind CSS build)
+node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
