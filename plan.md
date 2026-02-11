@@ -79,10 +79,10 @@
       - ~~Filtering by environment returns only matching errors~~
       - ~~Pagination works correctly (total count is accurate, offset skips correct number)~~
       - ~~Response shape matches spec: `{"errors": [...], "total": N, "limit": N, "offset": N}`~~
-  - Error detail endpoint (`GET /api/errors/{id}`)
-    - Return full error details including traceback and recent occurrences
-      - Existing error returns 200 with all group fields plus `occurrences` array (last 5 occurrences with request context)
-      - Non-existent ID returns 404
+  - ~~Error detail endpoint (`GET /api/errors/{id}`)~~
+    - ~~Return full error details including traceback and recent occurrences~~
+      - ~~Existing error returns 200 with all group fields plus `occurrences` array (last 5 occurrences with request context)~~
+      - ~~Non-existent ID returns 404~~
   - Error resolve endpoint (`POST /api/errors/{id}/resolve`)
     - Mark error as resolved, set resolved_at timestamp
       - Returns `{"status": "resolved", "id": ...}`

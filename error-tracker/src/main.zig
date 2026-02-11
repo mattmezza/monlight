@@ -8,6 +8,7 @@ const auth = @import("auth");
 const rate_limit = @import("rate_limit");
 const error_ingestion = @import("error_ingestion.zig");
 const error_listing = @import("error_listing.zig");
+const error_detail = @import("error_detail.zig");
 
 const server_port: u16 = 8000;
 const max_header_size = 8192;
@@ -115,7 +116,12 @@ pub fn handleConnection(conn: net.Server.Connection, api_key: []const u8, limite
     } else if (std.mem.eql(u8, target, "/api/errors") and request.head.method == .POST) {
         handleErrorIngestion(&request, db, cfg);
     } else if (request.head.method == .GET and isApiErrorsPath(target)) {
-        handleErrorListing(&request, db);
+        // Check if this is a detail request (GET /api/errors/{id})
+        if (error_detail.extractId(target)) |error_id| {
+            handleErrorDetail(&request, db, error_id);
+        } else {
+            handleErrorListing(&request, db);
+        }
     } else {
         try handleNotFound(&request);
     }
@@ -185,12 +191,12 @@ fn handleErrorIngestion(request: *std.http.Server.Request, db: *sqlite.Database,
     }
 }
 
-/// Check if the target path matches /api/errors (with or without query string).
+/// Check if the target path matches /api/errors (with or without query string or sub-path).
 fn isApiErrorsPath(target: []const u8) bool {
-    // Match exactly "/api/errors" or "/api/errors?..."
+    // Match "/api/errors", "/api/errors?...", "/api/errors/...", etc.
     if (std.mem.startsWith(u8, target, "/api/errors")) {
         const rest = target["/api/errors".len..];
-        return rest.len == 0 or rest[0] == '?';
+        return rest.len == 0 or rest[0] == '?' or rest[0] == '/';
     }
     return false;
 }
@@ -208,6 +214,24 @@ fn handleErrorListing(request: *std.http.Server.Request, db: *sqlite.Database) v
     };
 
     sendJsonResponse(request, .ok, json) catch {};
+}
+
+fn handleErrorDetail(request: *std.http.Server.Request, db: *sqlite.Database, error_id: i64) void {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const json = error_detail.queryAndFormat(allocator, db, error_id) catch |err| {
+        log.err("Failed to query error detail: {}", .{err});
+        sendJsonResponse(request, .internal_server_error, "{\"detail\": \"Internal server error\"}") catch {};
+        return;
+    };
+
+    if (json) |body| {
+        sendJsonResponse(request, .ok, body) catch {};
+    } else {
+        sendJsonResponse(request, .not_found, "{\"detail\": \"Error not found\"}") catch {};
+    }
 }
 
 /// Trigger an email alert for a new error.
