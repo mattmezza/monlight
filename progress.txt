@@ -423,3 +423,21 @@
   - The Zig build cache (`zig-cache/`) can serve stale test binaries after source edits. If tests show unexpected results, delete `.zig-cache/` and rebuild.
   - Test config points upstream URLs to `http://127.0.0.1:19999` and `http://127.0.0.1:19998` (deliberately not running) to trigger connection-refused errors in the forwarding functions.
   - Browser-relay now has 14 test suites (29 build steps, 460 tests total) — the forward_test adds 5 dedicated tests plus 98 transitive tests from imported modules.
+
+## Session 34: Error Tracker Browser Error Support (Backend + UI)
+
+- What was implemented: Completed the Error Tracker modifications for browser error support. This includes:
+  1. **JS stack trace fingerprinting** (`fingerprint.zig`): Extended `extractLastLocation()` to handle Chrome/V8 (`at func (file:line:col)`), Firefox/Safari (`func@file:line:col`), and anonymous (`@file:line:col`) JS stack formats. Python format tried first (returns last match), JS format second (returns first match — throw site). Column number is stripped so same-location-different-column errors group together. Added `extractJsLocation()`, `findJsFrameAt()`, `parseFileLineCol()`, `allDigits()` helpers. 11 new tests (23 total).
+  2. **Source filter for error listing API** (`error_listing.zig`): Added `source` field to `ListParams` (accepts "browser" or "server"). Refactored query construction from combinatorial if/else branches to dynamic SQL via `buildWhereClause()` using a stack buffer (runtime string construction with `@memcpy`, null-terminated for SQLite). Source filter uses subquery: `AND id IN (SELECT error_id FROM error_occurrences WHERE request_method = 'BROWSER')`. Added `bindFilterParams()` and `whereSlice()` helpers. 7 new tests (30 total for error_listing).
+  3. **Web UI — error listing** (`index.html`): Added "Source" dropdown filter (All/Server/Browser), wired to `loadErrors()` as `source` query parameter.
+  4. **Web UI — error detail** (`error_detail.html`): Added purple color for `BROWSER` method in `methodColor()`. Added `renderBrowserContext()` function that prominently displays `page_url`, `user_agent`, and `session_id` from the `extra` field in a styled purple-tinted info bar above the occurrence details.
+  5. **Browser ingestion tests** (`error_ingestion.zig`): 3 new tests — BROWSER method accepted and stored, JS fingerprint grouping (same file:line = same error), `parseAndValidate` accepts BROWSER with extra context (uses ArenaAllocator to avoid leaks from `parseFromSliceLeaky`).
+- Files changed: `error-tracker/src/fingerprint.zig` (JS stack trace support), `error-tracker/src/error_listing.zig` (source filter + dynamic SQL refactor), `error-tracker/src/error_ingestion.zig` (browser ingestion tests), `error-tracker/src/static/index.html` (source filter dropdown), `error-tracker/src/static/error_detail.html` (BROWSER method color + browser context display), `plan.md` (struck through Error Tracker modification tasks)
+- Test results: error-tracker 35/35 steps, 393 tests passed; all other services pass (log-viewer 17/17, metrics-collector 17/17, browser-relay 29/29, Python client 121 tests)
+- **Learnings for future iterations:**
+  - Zig's `++` operator is comptime-only string concatenation. You cannot use it on runtime `[]const u8` slices. For dynamic SQL construction, use `@memcpy` into a stack buffer and create a sentinel-terminated slice with `buf[0..len :0]`.
+  - `db.prepare()` requires `[*:0]const u8` (null-terminated). When building SQL at runtime, the buffer must have a null byte at `buf[total_len] = 0` and be cast via `sql_buf[0..total_len :0]`.
+  - `sqlite.Statement.bindInt/bindText` take `self: Statement` by value (not pointer). Pass `stmt` not `&stmt`.
+  - `std.json.parseFromSliceLeaky` allocates into the provided allocator and never frees. When testing with `std.testing.allocator` (which is a GPA that detects leaks), wrap with `std.heap.ArenaAllocator` and defer `arena.deinit()`.
+  - The source filter SQL uses a subquery rather than a JOIN to avoid row duplication when an error has multiple occurrences with different request_method values.
+  - Session ID grouping (linking to other errors from same session) is deferred — currently just displayed inline.

@@ -791,3 +791,101 @@ test "formatResponse for incremented status" {
     try std.testing.expect(std.mem.indexOf(u8, json, "\"id\": 42") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"count\": 5") != null);
 }
+
+test "ingest accepts BROWSER request_method and stores occurrence" {
+    var db = try setupTestDb();
+    defer db.close();
+
+    const report = ErrorReport{
+        .project = "myapp",
+        .environment = "production",
+        .exception_type = "TypeError",
+        .message = "Cannot read property 'x' of undefined",
+        .traceback = "TypeError: Cannot read property 'x' of undefined\n    at Object.handleClick (http://example.com/app.js:42:15)",
+        .request_url = "http://example.com/dashboard",
+        .request_method = "BROWSER",
+        .request_headers = null,
+        .user_id = null,
+        .extra = "{\"user_agent\": \"Mozilla/5.0\", \"page_url\": \"http://example.com/dashboard\", \"session_id\": \"sess_abc123\"}",
+    };
+
+    const result = try ingest(&db, &report);
+    try std.testing.expectEqual(IngestResult.Status.created, result.status);
+
+    // Verify the occurrence was stored with BROWSER method
+    const stmt = try db.prepare(
+        "SELECT request_method, extra FROM error_occurrences WHERE error_id = ?;",
+    );
+    defer stmt.deinit();
+    try stmt.bindInt(1, result.id);
+    var iter = stmt.query();
+    if (iter.next()) |row| {
+        const method = row.text(0) orelse "";
+        try std.testing.expectEqualStrings("BROWSER", method);
+        const extra_val = row.text(1) orelse "";
+        try std.testing.expect(std.mem.indexOf(u8, extra_val, "session_id") != null);
+        try std.testing.expect(std.mem.indexOf(u8, extra_val, "user_agent") != null);
+    } else {
+        return error.TestUnexpectedResult;
+    }
+}
+
+test "ingest browser errors group by JS fingerprint" {
+    var db = try setupTestDb();
+    defer db.close();
+
+    // Two errors at the same JS location should be grouped
+    const report1 = ErrorReport{
+        .project = "myapp",
+        .environment = "production",
+        .exception_type = "TypeError",
+        .message = "Cannot read property 'x' of undefined",
+        .traceback = "TypeError: Cannot read property 'x' of undefined\n    at Object.handleClick (http://example.com/app.js:42:15)",
+        .request_url = null,
+        .request_method = "BROWSER",
+        .request_headers = null,
+        .user_id = null,
+        .extra = null,
+    };
+
+    const report2 = ErrorReport{
+        .project = "myapp",
+        .environment = "production",
+        .exception_type = "TypeError",
+        .message = "Cannot read property 'y' of undefined",
+        .traceback = "TypeError: Cannot read property 'y' of undefined\n    at Object.handleClick (http://example.com/app.js:42:99)",
+        .request_url = null,
+        .request_method = "BROWSER",
+        .request_headers = null,
+        .user_id = null,
+        .extra = null,
+    };
+
+    const result1 = try ingest(&db, &report1);
+    try std.testing.expectEqual(IngestResult.Status.created, result1.status);
+
+    const result2 = try ingest(&db, &report2);
+    // Same file:line (app.js:42), same type, same project — should increment
+    try std.testing.expectEqual(IngestResult.Status.incremented, result2.status);
+    try std.testing.expectEqual(result1.id, result2.id);
+}
+
+test "parseAndValidate accepts BROWSER request_method with extra" {
+    const body =
+        \\{"project":"myapp","environment":"production","exception_type":"TypeError",
+        \\"message":"null is not an object","traceback":"TypeError: null is not an object\n    at render (app.js:10:5)",
+        \\"request_method":"BROWSER","extra":{"user_agent":"Mozilla/5.0","session_id":"s123"}}
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var validation_err = ValidationError{ .detail = "" };
+    const report = parseAndValidate(allocator, body, &validation_err);
+    try std.testing.expect(report != null);
+    const r = report.?;
+    try std.testing.expectEqualStrings("BROWSER", r.request_method.?);
+    try std.testing.expect(r.extra != null);
+    try std.testing.expect(std.mem.indexOf(u8, r.extra.?, "session_id") != null);
+}

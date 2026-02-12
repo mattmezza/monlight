@@ -33,6 +33,14 @@
           <option value="development">development</option>
         </select>
       </div>
+      <div>
+        <label class="block text-xs text-gray-400 mb-1">Source</label>
+        <select id="filter-source" class="bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded px-3 py-1.5 focus:outline-none focus:border-blue-500">
+          <option value="">All sources</option>
+          <option value="server">Server</option>
+          <option value="browser">Browser</option>
+        </select>
+      </div>
       <div class="flex items-center gap-2">
         <label class="block text-xs text-gray-400">Show resolved</label>
         <input type="checkbox" id="filter-resolved" class="rounded bg-gray-800 border-gray-700 text-blue-500 focus:ring-blue-500 focus:ring-offset-gray-900">
@@ -121,11 +129,13 @@
     async function loadErrors() {
       const project = document.getElementById('filter-project').value;
       const environment = document.getElementById('filter-environment').value;
+      const source = document.getElementById('filter-source').value;
       const resolved = document.getElementById('filter-resolved').checked;
 
       const params = new URLSearchParams();
       if (project) params.set('project', project);
       if (environment) params.set('environment', environment);
+      if (source) params.set('source', source);
       if (resolved) params.set('resolved', 'true');
       params.set('limit', LIMIT);
       params.set('offset', currentOffset);
@@ -215,6 +225,7 @@
 
     document.getElementById('filter-project').addEventListener('change', () => { currentOffset = 0; loadErrors(); });
     document.getElementById('filter-environment').addEventListener('change', () => { currentOffset = 0; loadErrors(); });
+    document.getElementById('filter-source').addEventListener('change', () => { currentOffset = 0; loadErrors(); });
     document.getElementById('filter-resolved').addEventListener('change', () => { currentOffset = 0; loadErrors(); });
 
     // Initial load

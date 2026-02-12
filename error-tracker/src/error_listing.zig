@@ -6,6 +6,7 @@ const log = std.log;
 pub const ListParams = struct {
     project: ?[]const u8 = null,
     environment: ?[]const u8 = null,
+    source: ?[]const u8 = null, // "browser", "server", or null (all)
     resolved: bool = false,
     limit: u32 = 50,
     offset: u32 = 0,
@@ -31,6 +32,10 @@ pub fn parseQueryParams(target: []const u8) ListParams {
             if (value.len > 0) params.project = value;
         } else if (std.mem.eql(u8, key, "environment")) {
             if (value.len > 0) params.environment = value;
+        } else if (std.mem.eql(u8, key, "source")) {
+            if (std.mem.eql(u8, value, "browser") or std.mem.eql(u8, value, "server")) {
+                params.source = value;
+            }
         } else if (std.mem.eql(u8, key, "resolved")) {
             if (std.mem.eql(u8, value, "true") or std.mem.eql(u8, value, "1")) {
                 params.resolved = true;
@@ -62,53 +67,89 @@ const ErrorEntry = struct {
     resolved: bool,
 };
 
+/// Build a WHERE clause into a stack buffer based on active filters.
+/// Returns the number of bind parameters used (excluding resolved, which is always param 1).
+const WhereResult = struct {
+    buf: [512]u8,
+    len: usize,
+    bind_count: usize,
+};
+
+fn buildWhereClause(params: *const ListParams) WhereResult {
+    var result = WhereResult{ .buf = undefined, .len = 0, .bind_count = 0 };
+    const base = "WHERE resolved = ?";
+    @memcpy(result.buf[0..base.len], base);
+    result.len = base.len;
+
+    if (params.project != null) {
+        const frag = " AND project = ?";
+        @memcpy(result.buf[result.len .. result.len + frag.len], frag);
+        result.len += frag.len;
+        result.bind_count += 1;
+    }
+    if (params.environment != null) {
+        const frag = " AND environment = ?";
+        @memcpy(result.buf[result.len .. result.len + frag.len], frag);
+        result.len += frag.len;
+        result.bind_count += 1;
+    }
+    if (params.source) |src| {
+        if (std.mem.eql(u8, src, "browser")) {
+            const frag = " AND id IN (SELECT error_id FROM error_occurrences WHERE request_method = 'BROWSER')";
+            @memcpy(result.buf[result.len .. result.len + frag.len], frag);
+            result.len += frag.len;
+        } else if (std.mem.eql(u8, src, "server")) {
+            const frag = " AND id NOT IN (SELECT error_id FROM error_occurrences WHERE request_method = 'BROWSER')";
+            @memcpy(result.buf[result.len .. result.len + frag.len], frag);
+            result.len += frag.len;
+        }
+        // source filter uses literal values in SQL, no bind params needed
+    }
+
+    return result;
+}
+
+fn whereSlice(result: *const WhereResult) []const u8 {
+    return result.buf[0..result.len];
+}
+
+/// Bind the filter parameters to a statement. Resolved is bound at position 1,
+/// then project and environment follow in order.
+fn bindFilterParams(stmt: sqlite.Statement, params: *const ListParams) !void {
+    const resolved_val: i64 = if (params.resolved) 1 else 0;
+    try stmt.bindInt(1, resolved_val);
+    var pos: usize = 2;
+    if (params.project) |proj| {
+        try stmt.bindText(pos, proj);
+        pos += 1;
+    }
+    if (params.environment) |env| {
+        try stmt.bindText(pos, env);
+        pos += 1;
+    }
+}
+
 /// Query the total count of errors matching the given filters.
 fn queryTotalCount(db: *sqlite.Database, params: *const ListParams) !i64 {
-    // Build dynamic SQL for counting
-    // We need to dynamically construct the SQL string depending on which filters are active
-    const resolved_val: i64 = if (params.resolved) 1 else 0;
+    const where = buildWhereClause(params);
+    // Build null-terminated SQL in a stack buffer
+    var sql_buf: [600]u8 = undefined;
+    const prefix = "SELECT COUNT(*) FROM errors ";
+    const suffix = ";";
+    const ws = whereSlice(&where);
+    const total_len = prefix.len + ws.len + suffix.len;
+    @memcpy(sql_buf[0..prefix.len], prefix);
+    @memcpy(sql_buf[prefix.len .. prefix.len + ws.len], ws);
+    @memcpy(sql_buf[prefix.len + ws.len .. total_len], suffix);
+    sql_buf[total_len] = 0;
+    const sql: [*:0]const u8 = sql_buf[0..total_len :0];
 
-    if (params.project != null and params.environment != null) {
-        const stmt = try db.prepare(
-            "SELECT COUNT(*) FROM errors WHERE resolved = ? AND project = ? AND environment = ?;",
-        );
-        defer stmt.deinit();
-        try stmt.bindInt(1, resolved_val);
-        try stmt.bindText(2, params.project.?);
-        try stmt.bindText(3, params.environment.?);
-        var iter = stmt.query();
-        if (iter.next()) |row| return row.int(0);
-        return 0;
-    } else if (params.project != null) {
-        const stmt = try db.prepare(
-            "SELECT COUNT(*) FROM errors WHERE resolved = ? AND project = ?;",
-        );
-        defer stmt.deinit();
-        try stmt.bindInt(1, resolved_val);
-        try stmt.bindText(2, params.project.?);
-        var iter = stmt.query();
-        if (iter.next()) |row| return row.int(0);
-        return 0;
-    } else if (params.environment != null) {
-        const stmt = try db.prepare(
-            "SELECT COUNT(*) FROM errors WHERE resolved = ? AND environment = ?;",
-        );
-        defer stmt.deinit();
-        try stmt.bindInt(1, resolved_val);
-        try stmt.bindText(2, params.environment.?);
-        var iter = stmt.query();
-        if (iter.next()) |row| return row.int(0);
-        return 0;
-    } else {
-        const stmt = try db.prepare(
-            "SELECT COUNT(*) FROM errors WHERE resolved = ?;",
-        );
-        defer stmt.deinit();
-        try stmt.bindInt(1, resolved_val);
-        var iter = stmt.query();
-        if (iter.next()) |row| return row.int(0);
-        return 0;
-    }
+    const stmt = try db.prepare(sql);
+    defer stmt.deinit();
+    try bindFilterParams(stmt, params);
+    var iter = stmt.query();
+    if (iter.next()) |row| return row.int(0);
+    return 0;
 }
 
 /// Query errors matching the given filters with pagination.
@@ -117,55 +158,30 @@ pub fn queryAndFormat(allocator: std.mem.Allocator, db: *sqlite.Database, params
     // Get total count first
     const total = try queryTotalCount(db, params);
 
-    const resolved_val: i64 = if (params.resolved) 1 else 0;
     const limit_val: i64 = @intCast(params.limit);
     const offset_val: i64 = @intCast(params.offset);
 
-    // Build the query based on active filters
-    var stmt: sqlite.Statement = undefined;
+    const where = buildWhereClause(params);
+    // Build null-terminated SQL in a stack buffer
+    var sql_buf: [800]u8 = undefined;
+    const prefix = "SELECT id, fingerprint, project, environment, exception_type, message, count, first_seen, last_seen, resolved FROM errors ";
+    const ws = whereSlice(&where);
+    const suffix = " ORDER BY last_seen DESC LIMIT ? OFFSET ?;";
+    const total_len = prefix.len + ws.len + suffix.len;
+    @memcpy(sql_buf[0..prefix.len], prefix);
+    @memcpy(sql_buf[prefix.len .. prefix.len + ws.len], ws);
+    @memcpy(sql_buf[prefix.len + ws.len .. total_len], suffix);
+    sql_buf[total_len] = 0;
+    const sql: [*:0]const u8 = sql_buf[0..total_len :0];
 
-    if (params.project != null and params.environment != null) {
-        stmt = try db.prepare(
-            "SELECT id, fingerprint, project, environment, exception_type, message, count, first_seen, last_seen, resolved " ++
-                "FROM errors WHERE resolved = ? AND project = ? AND environment = ? " ++
-                "ORDER BY last_seen DESC LIMIT ? OFFSET ?;",
-        );
-        try stmt.bindInt(1, resolved_val);
-        try stmt.bindText(2, params.project.?);
-        try stmt.bindText(3, params.environment.?);
-        try stmt.bindInt(4, limit_val);
-        try stmt.bindInt(5, offset_val);
-    } else if (params.project != null) {
-        stmt = try db.prepare(
-            "SELECT id, fingerprint, project, environment, exception_type, message, count, first_seen, last_seen, resolved " ++
-                "FROM errors WHERE resolved = ? AND project = ? " ++
-                "ORDER BY last_seen DESC LIMIT ? OFFSET ?;",
-        );
-        try stmt.bindInt(1, resolved_val);
-        try stmt.bindText(2, params.project.?);
-        try stmt.bindInt(3, limit_val);
-        try stmt.bindInt(4, offset_val);
-    } else if (params.environment != null) {
-        stmt = try db.prepare(
-            "SELECT id, fingerprint, project, environment, exception_type, message, count, first_seen, last_seen, resolved " ++
-                "FROM errors WHERE resolved = ? AND environment = ? " ++
-                "ORDER BY last_seen DESC LIMIT ? OFFSET ?;",
-        );
-        try stmt.bindInt(1, resolved_val);
-        try stmt.bindText(2, params.environment.?);
-        try stmt.bindInt(3, limit_val);
-        try stmt.bindInt(4, offset_val);
-    } else {
-        stmt = try db.prepare(
-            "SELECT id, fingerprint, project, environment, exception_type, message, count, first_seen, last_seen, resolved " ++
-                "FROM errors WHERE resolved = ? " ++
-                "ORDER BY last_seen DESC LIMIT ? OFFSET ?;",
-        );
-        try stmt.bindInt(1, resolved_val);
-        try stmt.bindInt(2, limit_val);
-        try stmt.bindInt(3, offset_val);
-    }
+    const stmt = try db.prepare(sql);
     defer stmt.deinit();
+    try bindFilterParams(stmt, params);
+
+    // Bind LIMIT and OFFSET after filter params
+    const limit_pos: usize = 2 + where.bind_count;
+    try stmt.bindInt(limit_pos, limit_val);
+    try stmt.bindInt(limit_pos + 1, offset_val);
 
     // Build JSON response
     var json_buf = std.ArrayList(u8).init(allocator);
@@ -502,4 +518,118 @@ test "queryAndFormat filters by project and environment combined" {
     try std.testing.expect(std.mem.indexOf(u8, json, "ValueError") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "TypeError") == null);
     try std.testing.expect(std.mem.indexOf(u8, json, "KeyError") == null);
+}
+
+/// Helper to insert an error_occurrence for a given error_id with a specific request_method.
+fn insertTestOccurrence(db: *sqlite.Database, error_id: i64, request_method: []const u8) !void {
+    const stmt = try db.prepare(
+        "INSERT INTO error_occurrences (error_id, request_method, traceback) VALUES (?, ?, 'traceback...');",
+    );
+    defer stmt.deinit();
+    try stmt.bindInt(1, error_id);
+    try stmt.bindText(2, request_method);
+    _ = try stmt.exec();
+}
+
+test "parseQueryParams parses source=browser" {
+    const params = parseQueryParams("/api/errors?source=browser");
+    try std.testing.expectEqualStrings("browser", params.source.?);
+}
+
+test "parseQueryParams parses source=server" {
+    const params = parseQueryParams("/api/errors?source=server");
+    try std.testing.expectEqualStrings("server", params.source.?);
+}
+
+test "parseQueryParams rejects invalid source values" {
+    const params = parseQueryParams("/api/errors?source=invalid");
+    try std.testing.expect(params.source == null);
+}
+
+test "queryAndFormat filters by source=browser" {
+    var db = try setupTestDb();
+    defer db.close();
+
+    // Insert two errors: one with BROWSER occurrence, one with GET occurrence
+    const browser_id = try insertTestError(&db, "myapp", "prod", "TypeError", "browser error", false);
+    const server_id = try insertTestError(&db, "myapp", "prod", "ValueError", "server error", false);
+    try insertTestOccurrence(&db, browser_id, "BROWSER");
+    try insertTestOccurrence(&db, server_id, "GET");
+
+    var params = ListParams{};
+    params.source = "browser";
+    const json = try queryAndFormat(std.testing.allocator, &db, &params);
+    defer std.testing.allocator.free(json);
+
+    // Should only contain the browser error
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"total\": 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "TypeError") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "ValueError") == null);
+}
+
+test "queryAndFormat filters by source=server" {
+    var db = try setupTestDb();
+    defer db.close();
+
+    // Insert two errors: one with BROWSER occurrence, one with GET occurrence
+    const browser_id = try insertTestError(&db, "myapp", "prod", "TypeError", "browser error", false);
+    const server_id = try insertTestError(&db, "myapp", "prod", "ValueError", "server error", false);
+    try insertTestOccurrence(&db, browser_id, "BROWSER");
+    try insertTestOccurrence(&db, server_id, "GET");
+
+    var params = ListParams{};
+    params.source = "server";
+    const json = try queryAndFormat(std.testing.allocator, &db, &params);
+    defer std.testing.allocator.free(json);
+
+    // Should only contain the server error
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"total\": 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "ValueError") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "TypeError") == null);
+}
+
+test "queryAndFormat with no source filter returns all errors" {
+    var db = try setupTestDb();
+    defer db.close();
+
+    const browser_id = try insertTestError(&db, "myapp", "prod", "TypeError", "browser error", false);
+    const server_id = try insertTestError(&db, "myapp", "prod", "ValueError", "server error", false);
+    try insertTestOccurrence(&db, browser_id, "BROWSER");
+    try insertTestOccurrence(&db, server_id, "GET");
+
+    // No source filter — should return both
+    const params = ListParams{};
+    const json = try queryAndFormat(std.testing.allocator, &db, &params);
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"total\": 2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "TypeError") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "ValueError") != null);
+}
+
+test "queryAndFormat source filter combined with project filter" {
+    var db = try setupTestDb();
+    defer db.close();
+
+    // myapp: one browser, one server error
+    const b1 = try insertTestError(&db, "myapp", "prod", "TypeError", "browser error", false);
+    const s1 = try insertTestError(&db, "myapp", "prod", "ValueError", "server error", false);
+    try insertTestOccurrence(&db, b1, "BROWSER");
+    try insertTestOccurrence(&db, s1, "GET");
+
+    // otherapp: one browser error
+    const b2 = try insertTestError(&db, "otherapp", "prod", "KeyError", "other browser error", false);
+    try insertTestOccurrence(&db, b2, "BROWSER");
+
+    // Filter: source=browser AND project=myapp — should only return myapp's browser error
+    var params = ListParams{};
+    params.source = "browser";
+    params.project = "myapp";
+    const json = try queryAndFormat(std.testing.allocator, &db, &params);
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"total\": 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "TypeError") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "KeyError") == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "ValueError") == null);
 }

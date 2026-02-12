@@ -173,27 +173,27 @@
     - ~~Write tests for upstream forwarding failure handling (Error Tracker down, Metrics Collector down)~~
       - ~~Tests verify 502 responses and graceful degradation~~
 
-- Error Tracker service modifications (`error-tracker/`)
-  - Extend error ingestion to handle browser-sourced errors
-    - Accept `request_method: "BROWSER"` as a valid value (currently expects HTTP methods)
-      - Browser errors are stored and displayed like server errors
-    - Accept `extra` field containing `user_agent`, `session_id`, and arbitrary browser context
-      - Extra fields are stored in `error_occurrences` and displayed in the detail view
-    - No changes to fingerprinting algorithm (exception_type + stack location still works for JS errors)
-      - Verify fingerprinting works with deobfuscated JS stack traces
-        - JS stack frames with `file.js:line` format produce consistent fingerprints
-  - Extend Web UI for browser errors
-    - Add source filter (server / browser / all) to error listing page
-      - Filter uses `request_method = 'BROWSER'` to distinguish browser errors
-      - Default view shows all errors (both server and browser)
-    - Display browser-specific context in error detail view
-      - Show user agent, page URL, session ID when present
+- ~~Error Tracker service modifications (`error-tracker/`)~~
+  - ~~Extend error ingestion to handle browser-sourced errors~~
+    - ~~Accept `request_method: "BROWSER"` as a valid value (currently expects HTTP methods)~~
+      - ~~Browser errors are stored and displayed like server errors~~
+    - ~~Accept `extra` field containing `user_agent`, `session_id`, and arbitrary browser context~~
+      - ~~Extra fields are stored in `error_occurrences` and displayed in the detail view~~
+    - ~~No changes to fingerprinting algorithm (exception_type + stack location still works for JS errors)~~
+      - ~~Verify fingerprinting works with deobfuscated JS stack traces~~
+        - ~~JS stack frames with `file.js:line` format produce consistent fingerprints~~
+  - ~~Extend Web UI for browser errors~~
+    - ~~Add source filter (server / browser / all) to error listing page~~
+      - ~~Filter uses `request_method = 'BROWSER'` to distinguish browser errors~~
+      - ~~Default view shows all errors (both server and browser)~~
+    - ~~Display browser-specific context in error detail view~~
+      - ~~Show user agent, page URL, session ID when present~~
       - Show session ID as a grouping hint (link to other errors from same session)
-  - Tests
-    - Write tests for browser error ingestion (BROWSER method accepted, extra fields stored)
-      - Tests pass with `zig build test`
-    - Write tests for fingerprinting with JS stack traces
-      - Tests verify consistent fingerprints for typical JS stack formats
+  - ~~Tests~~
+    - ~~Write tests for browser error ingestion (BROWSER method accepted, extra fields stored)~~
+      - ~~Tests pass with `zig build test`~~
+    - ~~Write tests for fingerprinting with JS stack traces~~
+      - ~~Tests verify consistent fingerprints for typical JS stack formats~~
 
 - Metrics Collector service modifications (`metrics-collector/`)
   - Extend dashboard to show Web Vitals
