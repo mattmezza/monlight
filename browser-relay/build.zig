@@ -209,6 +209,21 @@ pub fn build(b: *std.Build) void {
 
     const run_retention_tests = b.addRunArtifact(retention_tests);
 
+    // Test step — integration tests for upstream forwarding failures (forward_test.zig)
+    const forward_tests = b.addTest(.{
+        .root_source_file = b.path("src/forward_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    forward_tests.root_module.addImport("sqlite", sqlite_mod);
+    forward_tests.root_module.addImport("config", config_mod);
+    forward_tests.root_module.addImport("auth", auth_mod);
+    forward_tests.root_module.addImport("rate_limit", rate_limit_mod);
+    forward_tests.linkSystemLibrary("sqlite3");
+    forward_tests.linkLibC();
+
+    const run_forward_tests = b.addRunArtifact(forward_tests);
+
     const test_step = b.step("test", "Run all unit tests");
     test_step.dependOn(&run_main_tests.step);
     test_step.dependOn(&run_config_tests.step);
@@ -223,4 +238,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_source_maps_tests.step);
     test_step.dependOn(&run_sourcemap_tests.step);
     test_step.dependOn(&run_retention_tests.step);
+    test_step.dependOn(&run_forward_tests.step);
+
+    // Separate step for forward tests only (for debugging)
+    const forward_test_step = b.step("test-forward", "Run upstream forwarding tests only");
+    forward_test_step.dependOn(&run_forward_tests.step);
 }

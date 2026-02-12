@@ -413,3 +413,13 @@
   - `retention.zig` imports `database.zig` for schema initialization in tests (`:memory:` databases need migration before inserting test data) — this is a file-level import, not a build.zig module import
   - `zig build test --summary all` shows the count of test suites (13 for browser-relay) and whether they ran or were cached
 
+## Session 33: Upstream Forwarding Failure Tests (browser-relay)
+
+- What was implemented: Created `browser-relay/src/forward_test.zig` with 5 integration tests verifying that the browser-relay returns proper 502 responses when upstream services (Error Tracker, Metrics Collector) are down. Tests cover: error forwarding failure (502 status + JSON body), metrics forwarding failure (502 status + JSON body), and graceful degradation with multiple sequential requests to both endpoints. Added `test-forward` build step to `browser-relay/build.zig` for isolated testing.
+- Files changed: `browser-relay/src/forward_test.zig` (new, 244 lines — 5 integration tests), `browser-relay/build.zig` (added forward_tests target + test-forward step + dependOn), `plan.md` (struck through upstream forwarding failure test tasks)
+- **Learnings for future iterations:**
+  - The browser metrics endpoint expects a JSON object `{"metrics":[...]}` with a `metrics` array, NOT a bare JSON array `[...]`. Each metric must have `name` (string), `type` (counter/histogram/gauge), and `value` (number). Optional top-level fields: `session_id`, `url`.
+  - `std.http.Client` in Zig 0.13.0 returns `error.ConnectionRefused` instantly when connecting to a non-listening port — no TCP timeout delay. This makes testing upstream failures fast.
+  - The Zig build cache (`zig-cache/`) can serve stale test binaries after source edits. If tests show unexpected results, delete `.zig-cache/` and rebuild.
+  - Test config points upstream URLs to `http://127.0.0.1:19999` and `http://127.0.0.1:19998` (deliberately not running) to trigger connection-refused errors in the forwarding functions.
+  - Browser-relay now has 14 test suites (29 build steps, 460 tests total) — the forward_test adds 5 dedicated tests plus 98 transitive tests from imported modules.

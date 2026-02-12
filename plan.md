@@ -170,8 +170,8 @@
       - ~~Tests verify full pipeline from raw stack to rewritten stack~~
     - ~~Write tests for rate limiting (accept under limit, reject over limit per public key)~~
       - ~~Tests verify 429 response when rate limit exceeded~~
-    - Write tests for upstream forwarding failure handling (Error Tracker down, Metrics Collector down)
-      - Tests verify 502 responses and graceful degradation
+    - ~~Write tests for upstream forwarding failure handling (Error Tracker down, Metrics Collector down)~~
+      - ~~Tests verify 502 responses and graceful degradation~~
 
 - Error Tracker service modifications (`error-tracker/`)
   - Extend error ingestion to handle browser-sourced errors
