@@ -8,6 +8,10 @@ const auth = @import("auth");
 const rate_limit = @import("rate_limit");
 const dsn_auth = @import("dsn_auth.zig");
 pub const cors = @import("cors.zig");
+pub const browser_errors = @import("browser_errors.zig");
+pub const browser_metrics = @import("browser_metrics.zig");
+pub const dsn_keys = @import("dsn_keys.zig");
+pub const source_maps = @import("source_maps.zig");
 
 const server_port: u16 = 8000;
 const max_header_size = 8192;
@@ -79,7 +83,6 @@ pub fn main() !void {
 
 pub fn handleConnection(conn: net.Server.Connection, admin_api_key: []const u8, limiter: *rate_limit.RateLimiter, db: *sqlite.Database, cfg: *const app_config.Config, cors_config: *const cors.CorsConfig) !void {
     defer conn.stream.close();
-    _ = cfg;
 
     var buf: [max_header_size]u8 = undefined;
     var http_server = std.http.Server.init(conn, &buf);
@@ -127,16 +130,35 @@ pub fn handleConnection(conn: net.Server.Connection, admin_api_key: []const u8, 
         if (!dsn_result.authenticated) {
             return; // 401 response already sent by dsn_auth
         }
-        // Route to browser ingestion handlers
-        // (handlers to be implemented in future tasks)
-        _ = dsn_result.project();
+        const dsn_project = dsn_result.project();
 
-        // Get CORS headers to include in response
+        // Get CORS origin for response headers
         const cors_hdrs = cors.getCorsHeaders(&request, cors_config);
-        if (cors_hdrs) |hdrs| {
-            try sendJsonResponseWithCors(&request, .not_found, "{\"detail\": \"Not found\"}", hdrs.origin);
+        const cors_origin: ?[]const u8 = if (cors_hdrs) |hdrs| hdrs.origin else null;
+
+        // Route to browser ingestion handlers
+        if (std.mem.eql(u8, path, "/api/browser/errors")) {
+            try browser_errors.handleBrowserErrorWithCors(
+                &request,
+                dsn_project,
+                cfg.error_tracker_url,
+                cfg.error_tracker_api_key,
+                cors_origin,
+            );
+        } else if (std.mem.eql(u8, path, "/api/browser/metrics")) {
+            try browser_metrics.handleBrowserMetricsWithCors(
+                &request,
+                dsn_project,
+                cfg.metrics_collector_url,
+                cfg.metrics_collector_api_key,
+                cors_origin,
+            );
         } else {
-            try handleNotFound(&request);
+            if (cors_origin) |origin| {
+                try sendJsonResponseWithCors(&request, .not_found, "{\"detail\": \"Not found\"}", origin);
+            } else {
+                try handleNotFound(&request);
+            }
         }
     } else if (isAdminPath(path)) {
         // Admin/management endpoints use admin API key auth (X-API-Key header)
@@ -145,8 +167,29 @@ pub fn handleConnection(conn: net.Server.Connection, admin_api_key: []const u8, 
             return; // 401 response already sent by auth module
         }
         // Route to admin handlers
-        // (handlers to be implemented in future tasks)
-        try handleNotFound(&request);
+        if (std.mem.eql(u8, path, "/api/dsn-keys")) {
+            if (request.head.method == .POST) {
+                try dsn_keys.handleCreateDsnKey(&request, db);
+            } else if (request.head.method == .GET) {
+                try dsn_keys.handleListDsnKeys(&request, db);
+            } else {
+                try sendJsonResponse(&request, .method_not_allowed, "{\"detail\": \"Method not allowed\"}");
+            }
+        } else if (std.mem.startsWith(u8, path, "/api/dsn-keys/")) {
+            try dsn_keys.handleDeleteDsnKey(&request, db, path);
+        } else if (std.mem.eql(u8, path, "/api/source-maps")) {
+            if (request.head.method == .POST) {
+                try source_maps.handleUploadSourceMap(&request, db);
+            } else if (request.head.method == .GET) {
+                try source_maps.handleListSourceMaps(&request, db);
+            } else {
+                try sendJsonResponse(&request, .method_not_allowed, "{\"detail\": \"Method not allowed\"}");
+            }
+        } else if (std.mem.startsWith(u8, path, "/api/source-maps/")) {
+            try source_maps.handleDeleteSourceMap(&request, db, path);
+        } else {
+            try handleNotFound(&request);
+        }
     } else {
         // Unknown path
         try handleNotFound(&request);

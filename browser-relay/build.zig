@@ -140,6 +140,48 @@ pub fn build(b: *std.Build) void {
 
     const run_cors_integration_tests = b.addRunArtifact(cors_integration_tests);
 
+    // Test step — unit tests for browser_errors.zig
+    const browser_errors_tests = b.addTest(.{
+        .root_source_file = b.path("src/browser_errors.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const run_browser_errors_tests = b.addRunArtifact(browser_errors_tests);
+
+    // Test step — unit tests for browser_metrics.zig
+    const browser_metrics_tests = b.addTest(.{
+        .root_source_file = b.path("src/browser_metrics.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const run_browser_metrics_tests = b.addRunArtifact(browser_metrics_tests);
+
+    // Test step — unit tests for dsn_keys.zig
+    const dsn_keys_tests = b.addTest(.{
+        .root_source_file = b.path("src/dsn_keys.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    dsn_keys_tests.root_module.addImport("sqlite", sqlite_mod);
+    dsn_keys_tests.linkSystemLibrary("sqlite3");
+    dsn_keys_tests.linkLibC();
+
+    const run_dsn_keys_tests = b.addRunArtifact(dsn_keys_tests);
+
+    // Test step — unit tests for source_maps.zig
+    const source_maps_tests = b.addTest(.{
+        .root_source_file = b.path("src/source_maps.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    source_maps_tests.root_module.addImport("sqlite", sqlite_mod);
+    source_maps_tests.linkSystemLibrary("sqlite3");
+    source_maps_tests.linkLibC();
+
+    const run_source_maps_tests = b.addRunArtifact(source_maps_tests);
+
     const test_step = b.step("test", "Run all unit tests");
     test_step.dependOn(&run_main_tests.step);
     test_step.dependOn(&run_config_tests.step);
@@ -148,4 +190,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_dsn_auth_integration_tests.step);
     test_step.dependOn(&run_cors_tests.step);
     test_step.dependOn(&run_cors_integration_tests.step);
+    test_step.dependOn(&run_browser_errors_tests.step);
+    test_step.dependOn(&run_browser_metrics_tests.step);
+    test_step.dependOn(&run_dsn_keys_tests.step);
+    test_step.dependOn(&run_source_maps_tests.step);
 }
