@@ -170,6 +170,7 @@ fn sseThread(ctx: SseContext) void {
                 else => {
                     log.err("SSE: poll error: {}", .{err});
                     // Continue, don't kill the connection for transient DB errors
+                    continue;
                 },
             }
         };
