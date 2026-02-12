@@ -266,114 +266,114 @@
     - ~~UMD bundle auto-initializes from `window.MonlightConfig` if present~~
       - ~~`<script>` tag usage: set `window.MonlightConfig = {dsn: "...", endpoint: "..."}` before loading the script~~
       - ~~SDK reads config, calls `init()`, and exposes the client as `window.Monlight`~~
-  - Session module (`src/session.ts`)
-    - Generate anonymous session ID (UUID v4) on first page load
-      - Store in `sessionStorage` so it persists across navigations within the same tab
-      - Generate a new session ID when a new tab is opened
-      - Never use cookies or persistent storage
-    - Expose `getSessionId()` function
-      - Returns the current session ID string
-    - Include `session_id` in all error and metric payloads
-  - Error capture module (`src/errors.ts`)
-    - Install global error handlers on `init()`:
-      - `window.addEventListener("error", handler)` for uncaught exceptions
-        - Extract error type, message, stack trace, and source file/line/col from ErrorEvent
-      - `window.addEventListener("unhandledrejection", handler)` for unhandled promise rejections
-        - Extract reason (Error object or string) from PromiseRejectionEvent
-    - Implement error deduplication
-      - Track last N error fingerprints (type + message + first stack frame) in memory
-      - Skip sending duplicate errors within a 60-second window
-      - Reset dedup cache on page navigation
-    - Build error payload and send via transport module
-      - Payload shape matches `POST /api/browser/errors` schema
-      - Include `release` from config for source map matching
-      - Include current page URL, user agent, session ID
-      - Call `beforeSend` callback if configured; drop event if callback returns null
-    - Provide `destroy()` to remove global listeners
-  - Console capture module (integrated into `src/errors.ts`)
-    - Optionally patch `console.error` and `console.warn`
-      - Enabled via config option `captureConsole` (default: false)
-      - Wrap original console methods; call original + capture the message
-    - Convert console.error calls into error reports
-      - Set `type` to "ConsoleError", `message` to the console arguments stringified
-      - Include a synthetic stack trace from `new Error().stack`
-    - Convert console.warn calls into error reports with lower severity
-      - Set `type` to "ConsoleWarning"
-    - Restore original console methods on `destroy()`
-  - Performance / Web Vitals module (`src/vitals.ts`)
-    - Measure Core Web Vitals using browser Performance APIs:
-      - **LCP** (Largest Contentful Paint): use `PerformanceObserver` with `entryType: "largest-contentful-paint"`
-        - Report final LCP value after page becomes hidden (`visibilitychange` event)
-      - **INP** (Interaction to Next Paint): use `PerformanceObserver` with `entryType: "event"` (duration ≥ 40ms)
-        - Track highest interaction duration per page, report on page hide
-      - **CLS** (Cumulative Layout Shift): use `PerformanceObserver` with `entryType: "layout-shift"` (exclude user-input)
-        - Accumulate layout shift values using session windows (gap > 1s or total > 5s starts new window)
-        - Report max session window value on page hide
-    - Measure additional performance metrics:
-      - **TTFB** (Time to First Byte): from `PerformanceNavigationTiming.responseStart`
-      - **FCP** (First Contentful Paint): from `PerformanceObserver` with `entryType: "paint"`
-      - **Page load time**: from `PerformanceNavigationTiming.loadEventEnd - navigationStart`
-    - Apply client-side sampling
-      - On `init()`, generate a random number; if > `sampleRate`, skip all performance measurement
-      - Sampling decision is per page load (consistent within a session page)
-    - Send Web Vitals as histogram metrics via the metrics transport:
-      - `web_vitals_lcp` (histogram, value in milliseconds)
-      - `web_vitals_inp` (histogram, value in milliseconds)
-      - `web_vitals_cls` (histogram, value as float, e.g. 0.05)
-      - `web_vitals_ttfb` (histogram, value in milliseconds)
-      - `web_vitals_fcp` (histogram, value in milliseconds)
-      - `page_load_time` (histogram, value in milliseconds)
-      - Labels: `page` (URL path)
-    - Provide `destroy()` to disconnect all PerformanceObservers
-  - Network monitoring module (`src/network.ts`)
-    - Intercept `fetch` API:
-      - Wrap `window.fetch` to record request start time, URL, method
-      - On response: record status code, duration
-      - On error: record failure
-      - Report failed requests (network error or status >= 500) as errors:
-        - `type`: "NetworkError"
-        - `message`: `"{method} {url} failed with status {status}"` or `"{method} {url} network error: {error_message}"`
-      - Report all requests as metrics:
-        - `browser_http_requests_total` (counter, labels: method, status, host)
-        - `browser_http_request_duration_ms` (histogram, labels: method, status, host)
-      - Restore original `fetch` on `destroy()`
-    - Intercept `XMLHttpRequest`:
-      - Wrap `XMLHttpRequest.prototype.open` and `XMLHttpRequest.prototype.send`
-      - Record method, URL, start time on `open`/`send`
-      - Record status, duration on `loadend` event
-      - Same error/metric reporting as fetch
-      - Restore original XHR methods on `destroy()`
-    - URL sanitization:
-      - Strip query parameters and fragments from reported URLs (privacy)
-      - Collapse URL path segments that look like IDs (UUIDs, numeric IDs) into `{id}` (e.g., `/api/users/123/profile` → `/api/users/{id}/profile`)
-    - Exclude monitoring endpoints from interception:
-      - Do not intercept requests to the `endpoint` URL (the Browser Relay itself)
-      - This prevents infinite loops of monitoring requests being monitored
-  - Transport module (`src/transport.ts`)
-    - Implement batched beacon transport:
-      - Buffer error and metric payloads in memory
-      - Flush on interval (every 5 seconds) or when buffer exceeds 10 items
-      - Use `navigator.sendBeacon()` for `visibilitychange`/`pagehide` flushes (reliable on page unload)
-      - Use `fetch()` with `keepalive: true` for interval-based flushes
-      - Fall back to synchronous XHR if `sendBeacon` and `fetch` are unavailable
-    - Include `X-Monlight-Key` header (public key from DSN config) in all requests
-      - Note: `sendBeacon` uses `Blob` with content type `application/json` (cannot set custom headers); for beacon, include key as query parameter `?key={dsn}`
-    - Separate error and metric payloads:
-      - Errors: POST to `{endpoint}/api/browser/errors` (sent individually, not batched, for immediate visibility)
-      - Metrics: POST to `{endpoint}/api/browser/metrics` (batched for efficiency)
-    - Handle transport failures gracefully:
-      - On failure, discard the payload (don't retry, don't queue)
-      - Log warning to console if `debug` mode is enabled
-    - Provide `flush()` and `destroy()` methods
-  - Type definitions (`src/types.ts`)
-    - Export TypeScript interfaces for all config options, payloads, and public API
-      - `MonlightConfig` interface
-      - `MonlightClient` interface
-      - `BrowserError` interface
-      - `BrowserMetric` interface
-  - Script tag integration
-    - UMD bundle self-initializes from `window.MonlightConfig`
-    - Usage example:
+  - ~~Session module (`src/session.ts`)~~
+    - ~~Generate anonymous session ID (UUID v4) on first page load~~
+      - ~~Store in `sessionStorage` so it persists across navigations within the same tab~~
+      - ~~Generate a new session ID when a new tab is opened~~
+      - ~~Never use cookies or persistent storage~~
+    - ~~Expose `getSessionId()` function~~
+      - ~~Returns the current session ID string~~
+    - ~~Include `session_id` in all error and metric payloads~~
+  - ~~Error capture module (`src/errors.ts`)~~
+    - ~~Install global error handlers on `init()`:~~
+      - ~~`window.addEventListener("error", handler)` for uncaught exceptions~~
+        - ~~Extract error type, message, stack trace, and source file/line/col from ErrorEvent~~
+      - ~~`window.addEventListener("unhandledrejection", handler)` for unhandled promise rejections~~
+        - ~~Extract reason (Error object or string) from PromiseRejectionEvent~~
+    - ~~Implement error deduplication~~
+      - ~~Track last N error fingerprints (type + message + first stack frame) in memory~~
+      - ~~Skip sending duplicate errors within a 60-second window~~
+      - ~~Reset dedup cache on page navigation~~
+    - ~~Build error payload and send via transport module~~
+      - ~~Payload shape matches `POST /api/browser/errors` schema~~
+      - ~~Include `release` from config for source map matching~~
+      - ~~Include current page URL, user agent, session ID~~
+      - ~~Call `beforeSend` callback if configured; drop event if callback returns null~~
+    - ~~Provide `destroy()` to remove global listeners~~
+  - ~~Console capture module (integrated into `src/errors.ts`)~~
+    - ~~Optionally patch `console.error` and `console.warn`~~
+      - ~~Enabled via config option `captureConsole` (default: false)~~
+      - ~~Wrap original console methods; call original + capture the message~~
+    - ~~Convert console.error calls into error reports~~
+      - ~~Set `type` to "ConsoleError", `message` to the console arguments stringified~~
+      - ~~Include a synthetic stack trace from `new Error().stack`~~
+    - ~~Convert console.warn calls into error reports with lower severity~~
+      - ~~Set `type` to "ConsoleWarning"~~
+    - ~~Restore original console methods on `destroy()`~~
+  - ~~Performance / Web Vitals module (`src/vitals.ts`)~~
+    - ~~Measure Core Web Vitals using browser Performance APIs:~~
+      - ~~**LCP** (Largest Contentful Paint): use `PerformanceObserver` with `entryType: "largest-contentful-paint"`~~
+        - ~~Report final LCP value after page becomes hidden (`visibilitychange` event)~~
+      - ~~**INP** (Interaction to Next Paint): use `PerformanceObserver` with `entryType: "event"` (duration ≥ 40ms)~~
+        - ~~Track highest interaction duration per page, report on page hide~~
+      - ~~**CLS** (Cumulative Layout Shift): use `PerformanceObserver` with `entryType: "layout-shift"` (exclude user-input)~~
+        - ~~Accumulate layout shift values using session windows (gap > 1s or total > 5s starts new window)~~
+        - ~~Report max session window value on page hide~~
+    - ~~Measure additional performance metrics:~~
+      - ~~**TTFB** (Time to First Byte): from `PerformanceNavigationTiming.responseStart`~~
+      - ~~**FCP** (First Contentful Paint): from `PerformanceObserver` with `entryType: "paint"`~~
+      - ~~**Page load time**: from `PerformanceNavigationTiming.loadEventEnd - navigationStart`~~
+    - ~~Apply client-side sampling~~
+      - ~~On `init()`, generate a random number; if > `sampleRate`, skip all performance measurement~~
+      - ~~Sampling decision is per page load (consistent within a session page)~~
+    - ~~Send Web Vitals as histogram metrics via the metrics transport:~~
+      - ~~`web_vitals_lcp` (histogram, value in milliseconds)~~
+      - ~~`web_vitals_inp` (histogram, value in milliseconds)~~
+      - ~~`web_vitals_cls` (histogram, value as float, e.g. 0.05)~~
+      - ~~`web_vitals_ttfb` (histogram, value in milliseconds)~~
+      - ~~`web_vitals_fcp` (histogram, value in milliseconds)~~
+      - ~~`page_load_time` (histogram, value in milliseconds)~~
+      - ~~Labels: `page` (URL path)~~
+    - ~~Provide `destroy()` to disconnect all PerformanceObservers~~
+  - ~~Network monitoring module (`src/network.ts`)~~
+    - ~~Intercept `fetch` API:~~
+      - ~~Wrap `window.fetch` to record request start time, URL, method~~
+      - ~~On response: record status code, duration~~
+      - ~~On error: record failure~~
+      - ~~Report failed requests (network error or status >= 500) as errors:~~
+        - ~~`type`: "NetworkError"~~
+        - ~~`message`: `"{method} {url} failed with status {status}"` or `"{method} {url} network error: {error_message}"`~~
+      - ~~Report all requests as metrics:~~
+        - ~~`browser_http_requests_total` (counter, labels: method, status, host)~~
+        - ~~`browser_http_request_duration_ms` (histogram, labels: method, status, host)~~
+      - ~~Restore original `fetch` on `destroy()`~~
+    - ~~Intercept `XMLHttpRequest`:~~
+      - ~~Wrap `XMLHttpRequest.prototype.open` and `XMLHttpRequest.prototype.send`~~
+      - ~~Record method, URL, start time on `open`/`send`~~
+      - ~~Record status, duration on `loadend` event~~
+      - ~~Same error/metric reporting as fetch~~
+      - ~~Restore original XHR methods on `destroy()`~~
+    - ~~URL sanitization:~~
+      - ~~Strip query parameters and fragments from reported URLs (privacy)~~
+      - ~~Collapse URL path segments that look like IDs (UUIDs, numeric IDs) into `{id}` (e.g., `/api/users/123/profile` → `/api/users/{id}/profile`)~~
+    - ~~Exclude monitoring endpoints from interception:~~
+      - ~~Do not intercept requests to the `endpoint` URL (the Browser Relay itself)~~
+      - ~~This prevents infinite loops of monitoring requests being monitored~~
+  - ~~Transport module (`src/transport.ts`)~~
+    - ~~Implement batched beacon transport:~~
+      - ~~Buffer error and metric payloads in memory~~
+      - ~~Flush on interval (every 5 seconds) or when buffer exceeds 10 items~~
+      - ~~Use `navigator.sendBeacon()` for `visibilitychange`/`pagehide` flushes (reliable on page unload)~~
+      - ~~Use `fetch()` with `keepalive: true` for interval-based flushes~~
+      - ~~Fall back to synchronous XHR if `sendBeacon` and `fetch` are unavailable~~
+    - ~~Include `X-Monlight-Key` header (public key from DSN config) in all requests~~
+      - ~~Note: `sendBeacon` uses `Blob` with content type `application/json` (cannot set custom headers); for beacon, include key as query parameter `?key={dsn}`~~
+    - ~~Separate error and metric payloads:~~
+      - ~~Errors: POST to `{endpoint}/api/browser/errors` (sent individually, not batched, for immediate visibility)~~
+      - ~~Metrics: POST to `{endpoint}/api/browser/metrics` (batched for efficiency)~~
+    - ~~Handle transport failures gracefully:~~
+      - ~~On failure, discard the payload (don't retry, don't queue)~~
+      - ~~Log warning to console if `debug` mode is enabled~~
+    - ~~Provide `flush()` and `destroy()` methods~~
+  - ~~Type definitions (`src/types.ts`)~~
+    - ~~Export TypeScript interfaces for all config options, payloads, and public API~~
+      - ~~`MonlightConfig` interface~~
+      - ~~`MonlightClient` interface~~
+      - ~~`BrowserError` interface~~
+      - ~~`BrowserMetric` interface~~
+  - ~~Script tag integration~~
+    - ~~UMD bundle self-initializes from `window.MonlightConfig`~~
+    - ~~Usage example:~~
       ```html
       <script>
         window.MonlightConfig = {
@@ -385,11 +385,11 @@
       </script>
       <script src="/static/monlight.min.js" defer></script>
       ```
-    - After initialization, client is accessible as `window.Monlight`
-      - `window.Monlight.captureError(new Error("test"))` works from console
-      - `window.Monlight.setUser("user-123")` works from application code
-  - npm package integration
-    - Usage example:
+    - ~~After initialization, client is accessible as `window.Monlight`~~
+      - ~~`window.Monlight.captureError(new Error("test"))` works from console~~
+      - ~~`window.Monlight.setUser("user-123")` works from application code~~
+  - ~~npm package integration~~
+    - ~~Usage example:~~
       ```js
       import { init } from "@monlight/browser";
 
@@ -402,29 +402,29 @@
       // Manual error capture
       client.captureError(new Error("Something went wrong"));
       ```
-    - Tree-shakeable: unused modules can be excluded by bundlers
+    - ~~Tree-shakeable: unused modules can be excluded by bundlers~~
   - Tests
-    - Write unit tests for session ID generation and persistence
-      - Tests verify UUID format, sessionStorage persistence, new ID per tab context
-    - Write unit tests for error capture (window.onerror, unhandledrejection, manual captureError)
-      - Tests verify correct payload construction from Error objects
-      - Tests verify deduplication suppresses repeated errors
-    - Write unit tests for console capture (console.error wrapping, restore on destroy)
-      - Tests verify console methods are wrapped and restored
-    - Write unit tests for Web Vitals collection (LCP, INP, CLS measurement)
-      - Tests mock PerformanceObserver and verify correct metric emission
-      - Tests verify sampling rate is applied
-    - Write unit tests for network interception (fetch, XHR wrapping, URL sanitization)
-      - Tests verify fetch/XHR are intercepted and metrics recorded
-      - Tests verify monitoring endpoint is excluded from interception
-      - Tests verify URL sanitization (query stripping, ID collapsing)
-    - Write unit tests for transport (batching, beacon fallback, flush on visibility change)
-      - Tests verify batching behavior and flush triggers
-      - Tests verify sendBeacon is used on page hide
-    - Write unit tests for beforeSend callback (transform event, drop event)
-      - Tests verify callback can modify or suppress events
-    - Write integration tests for full init → capture → transport pipeline
-      - Tests verify end-to-end flow from error occurrence to transport call
+    - ~~Write unit tests for session ID generation and persistence~~
+      - ~~Tests verify UUID format, sessionStorage persistence, new ID per tab context~~
+    - ~~Write unit tests for error capture (window.onerror, unhandledrejection, manual captureError)~~
+      - ~~Tests verify correct payload construction from Error objects~~
+      - ~~Tests verify deduplication suppresses repeated errors~~
+    - ~~Write unit tests for console capture (console.error wrapping, restore on destroy)~~
+      - ~~Tests verify console methods are wrapped and restored~~
+    - ~~Write unit tests for Web Vitals collection (LCP, INP, CLS measurement)~~
+      - ~~Tests mock PerformanceObserver and verify correct metric emission~~
+      - ~~Tests verify sampling rate is applied~~
+    - ~~Write unit tests for network interception (fetch, XHR wrapping, URL sanitization)~~
+      - ~~Tests verify fetch/XHR are intercepted and metrics recorded~~
+      - ~~Tests verify monitoring endpoint is excluded from interception~~
+      - ~~Tests verify URL sanitization (query stripping, ID collapsing)~~
+    - ~~Write unit tests for transport (batching, beacon fallback, flush on visibility change)~~
+      - ~~Tests verify batching behavior and flush triggers~~
+      - ~~Tests verify sendBeacon is used on page hide~~
+    - ~~Write unit tests for beforeSend callback (transform event, drop event)~~
+      - ~~Tests verify callback can modify or suppress events~~
+    - ~~Write integration tests for full init → capture → transport pipeline~~
+      - ~~Tests verify end-to-end flow from error occurrence to transport call~~
 
 - Deployment updates (`deploy/`)
   - Update `docker-compose.monitoring.yml`

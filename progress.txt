@@ -524,3 +524,25 @@
   - The no-op client returned when `enabled: false` is a plain object with arrow functions, not a MonlightClientImpl instance — this means no sub-modules are initialized at all
   - Error deduplication uses a module-level `dedupCache` Map — tests that call `captureError` multiple times with the same error within 60s will have the second call deduplicated (returns null from buildPayload)
 ---
+
+## Session 38: JS SDK Module Verification & Tests (session, errors, vitals, network, transport)
+
+- What was implemented: Verified all remaining JS SDK source modules against plan acceptance criteria and wrote comprehensive unit tests for each. Also struck through type definitions, script tag integration, and npm package integration plan items (all already implemented).
+- Files changed:
+  - `clients/js/src/session.test.ts` (new, 15 tests) — UUID v4 format, sessionStorage persistence, new ID per tab, no cookies/localStorage, crypto.randomUUID fallback
+  - `clients/js/src/errors.test.ts` (new, 38 tests) — global error/unhandledrejection handlers, manual captureError/captureMessage, setUser/addContext, deduplication (suppression + time expiry + cache clear), beforeSend (modify + drop), console.error/warn patching + restore
+  - `clients/js/src/vitals.test.ts` (new, 26 tests) — LCP/INP/CLS tracking + reporting on page hide, FCP observation, TTFB/page load time from navigation timing, sampling (sampleRate 0/0.5/1.0), destroy disconnects observers
+  - `clients/js/src/network.test.ts` (new, 22 tests) — fetch interception (counter+histogram metrics, 500+ error capture, network error, monitoring endpoint exclusion), XHR patching/restore, URL sanitization (query stripping, UUID/numeric ID collapsing)
+  - `clients/js/src/transport.test.ts` (new, 25 tests) — sendError (immediate, headers, keepalive), bufferMetric (batching at 10), flushMetrics, periodic flush (5s interval), sendBeacon on pagehide (Blob, DSN as query param), destroy (timer stop, listener removal, final flush), error handling (graceful failure, debug logging)
+  - `plan.md` — struck through: session module, error capture module, console capture module, vitals module, network module, transport module, type definitions, script tag integration, npm package integration, all test plan items
+- Test results: 164/164 tests pass across 6 test files, typecheck clean, build successful
+- **Learnings for future iterations:**
+  - jsdom does not have `PromiseRejectionEvent` — use `new Event("unhandledrejection")` with `(event as any).reason = reason` to simulate promise rejections in tests
+  - jsdom does not have `PerformanceObserver` — create a mock class that stores callbacks by entry type, then simulate entries by calling `callback({ getEntries: () => entries })`
+  - `vi.useFakeTimers()` enables `vi.advanceTimersByTime()` for testing periodic flush intervals (5s) without real delays
+  - `vi.spyOn(Math, "random").mockReturnValue(x)` controls the sampling decision in VitalsCollector constructor — use values above/below sampleRate to test inclusion/exclusion
+  - `Object.defineProperty(document, "visibilityState", { value: "hidden", writable: true, configurable: true })` is needed to simulate page visibility changes in jsdom
+  - `navigator.sendBeacon` is not available in jsdom by default — define it via `Object.defineProperty(navigator, "sendBeacon", ...)` and clean up after test
+  - When mocking `window.fetch` for network interception tests, save the original before creating the NetworkMonitor (which patches it on `install()`), and restore in afterEach
+  - The JS SDK's entire test suite (164 tests across 6 files) runs in ~1.7s — vitest with jsdom is fast
+---
