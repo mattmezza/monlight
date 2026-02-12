@@ -41,3 +41,5 @@ pytest tests/ -v
 - `caplog` fixture with `caplog.at_level(logging.WARNING, logger="monlightstack.error_client")` to verify warning logs
 - `asyncio_mode = "auto"` in pyproject.toml means async test functions are auto-detected (no `@pytest.mark.asyncio` needed)
 - When testing `MetricsClient` periodic timer, always pair `client.start()` with `client.shutdown()` in try/finally to avoid dangling timer threads
+- For testing `MonlightMiddleware`, use `MagicMock(spec=MetricsClient)` — the middleware calls `.counter()` and `.histogram()` with labels as a kwarg, so use `mock.counter.call_args.kwargs["labels"]` to inspect them
+- `MonlightMiddleware` endpoint normalization relies on `request.scope["route"]` — for unknown paths (no matching route), the raw URL path is used as fallback

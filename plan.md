@@ -510,12 +510,12 @@
       - ~~Calls `ErrorClient.report_error()` with the request and exception~~
       - ~~Logs the error locally and returns a 500 JSON response~~
       - ~~Installable via `app.add_exception_handler(Exception, handler)`~~
-    - Implement `MonlightMiddleware` — an ASGI middleware for request metrics
-      - Records request start time, processes request, records end time
-      - Emits `http_requests_total` (counter) and `http_request_duration_seconds` (histogram)
-      - Labels: method, endpoint (normalized path template from FastAPI route), status code
-      - Endpoint normalization: uses `request.scope["route"].path` if available (e.g., `/bookings/{id}` not `/bookings/123`)
-      - Installable via `app.add_middleware(MonlightMiddleware, metrics_client=client)`
+    - ~~Implement `MonlightMiddleware` — an ASGI middleware for request metrics~~
+      - ~~Records request start time, processes request, records end time~~
+      - ~~Emits `http_requests_total` (counter) and `http_request_duration_seconds` (histogram)~~
+      - ~~Labels: method, endpoint (normalized path template from FastAPI route), status code~~
+      - ~~Endpoint normalization: uses `request.scope["route"].path` if available (e.g., `/bookings/{id}` not `/bookings/123`)~~
+      - ~~Installable via `app.add_middleware(MonlightMiddleware, metrics_client=client)`~~
     - Provide setup helper: `setup_monlight(app, error_tracker_url, metrics_collector_url, api_key)` that wires up both
       - Single function call in FlowRent's `main.py` to enable all monitoring
   - Tests
