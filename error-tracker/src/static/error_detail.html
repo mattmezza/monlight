@@ -213,7 +213,7 @@
       const items = [];
       if (ctx.page_url) items.push(`<span class="text-cyan-300" title="Page URL">${esc(ctx.page_url)}</span>`);
       if (ctx.user_agent) items.push(`<span class="text-gray-400" title="User Agent">${esc(ctx.user_agent)}</span>`);
-      if (ctx.session_id) items.push(`<span class="text-amber-300" title="Session ID">session: ${esc(ctx.session_id)}</span>`);
+      if (ctx.session_id) items.push(`<a href="/?session_id=${encodeURIComponent(ctx.session_id)}" class="text-amber-300 hover:text-amber-200 underline decoration-dotted" title="View all errors from this session">session: ${esc(ctx.session_id)}</a>`);
       if (items.length === 0) return '';
       return `<div class="flex flex-wrap items-center gap-3 text-xs mb-3 bg-purple-900/20 border border-purple-800/30 rounded px-3 py-2">${items.join('<span class="text-gray-600">|</span>')}</div>`;
     }

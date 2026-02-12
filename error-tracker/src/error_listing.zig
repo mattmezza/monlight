@@ -7,6 +7,7 @@ pub const ListParams = struct {
     project: ?[]const u8 = null,
     environment: ?[]const u8 = null,
     source: ?[]const u8 = null, // "browser", "server", or null (all)
+    session_id: ?[]const u8 = null, // filter by session_id in occurrence extra JSON
     resolved: bool = false,
     limit: u32 = 50,
     offset: u32 = 0,
@@ -36,6 +37,8 @@ pub fn parseQueryParams(target: []const u8) ListParams {
             if (std.mem.eql(u8, value, "browser") or std.mem.eql(u8, value, "server")) {
                 params.source = value;
             }
+        } else if (std.mem.eql(u8, key, "session_id")) {
+            if (value.len > 0) params.session_id = value;
         } else if (std.mem.eql(u8, key, "resolved")) {
             if (std.mem.eql(u8, value, "true") or std.mem.eql(u8, value, "1")) {
                 params.resolved = true;
@@ -105,6 +108,12 @@ fn buildWhereClause(params: *const ListParams) WhereResult {
         }
         // source filter uses literal values in SQL, no bind params needed
     }
+    if (params.session_id != null) {
+        const frag = " AND id IN (SELECT error_id FROM error_occurrences WHERE json_extract(extra, '$.session_id') = ?)";
+        @memcpy(result.buf[result.len .. result.len + frag.len], frag);
+        result.len += frag.len;
+        result.bind_count += 1;
+    }
 
     return result;
 }
@@ -114,7 +123,7 @@ fn whereSlice(result: *const WhereResult) []const u8 {
 }
 
 /// Bind the filter parameters to a statement. Resolved is bound at position 1,
-/// then project and environment follow in order.
+/// then project, environment, and session_id follow in order.
 fn bindFilterParams(stmt: sqlite.Statement, params: *const ListParams) !void {
     const resolved_val: i64 = if (params.resolved) 1 else 0;
     try stmt.bindInt(1, resolved_val);
@@ -125,6 +134,10 @@ fn bindFilterParams(stmt: sqlite.Statement, params: *const ListParams) !void {
     }
     if (params.environment) |env| {
         try stmt.bindText(pos, env);
+        pos += 1;
+    }
+    if (params.session_id) |sid| {
+        try stmt.bindText(pos, sid);
         pos += 1;
     }
 }
@@ -531,6 +544,22 @@ fn insertTestOccurrence(db: *sqlite.Database, error_id: i64, request_method: []c
     _ = try stmt.exec();
 }
 
+/// Helper to insert an error_occurrence with extra JSON context.
+fn insertTestOccurrenceWithExtra(db: *sqlite.Database, error_id: i64, request_method: []const u8, extra: ?[]const u8) !void {
+    const stmt = try db.prepare(
+        "INSERT INTO error_occurrences (error_id, request_method, extra, traceback) VALUES (?, ?, ?, 'traceback...');",
+    );
+    defer stmt.deinit();
+    try stmt.bindInt(1, error_id);
+    try stmt.bindText(2, request_method);
+    if (extra) |e| {
+        try stmt.bindText(3, e);
+    } else {
+        try stmt.bindNull(3);
+    }
+    _ = try stmt.exec();
+}
+
 test "parseQueryParams parses source=browser" {
     const params = parseQueryParams("/api/errors?source=browser");
     try std.testing.expectEqualStrings("browser", params.source.?);
@@ -632,4 +661,74 @@ test "queryAndFormat source filter combined with project filter" {
     try std.testing.expect(std.mem.indexOf(u8, json, "TypeError") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "KeyError") == null);
     try std.testing.expect(std.mem.indexOf(u8, json, "ValueError") == null);
+}
+
+test "parseQueryParams parses session_id" {
+    const params = parseQueryParams("/api/errors?session_id=abc-123-def");
+    try std.testing.expectEqualStrings("abc-123-def", params.session_id.?);
+}
+
+test "parseQueryParams ignores empty session_id" {
+    const params = parseQueryParams("/api/errors?session_id=");
+    try std.testing.expect(params.session_id == null);
+}
+
+test "queryAndFormat filters by session_id" {
+    var db = try setupTestDb();
+    defer db.close();
+
+    // Insert two errors: one with session_id in extra, one without
+    const err1 = try insertTestError(&db, "myapp", "prod", "TypeError", "browser error", false);
+    const err2 = try insertTestError(&db, "myapp", "prod", "ValueError", "server error", false);
+    try insertTestOccurrenceWithExtra(&db, err1, "BROWSER", "{\"session_id\": \"sess-abc-123\"}");
+    try insertTestOccurrenceWithExtra(&db, err2, "GET", null);
+
+    var params = ListParams{};
+    params.session_id = "sess-abc-123";
+    const json = try queryAndFormat(std.testing.allocator, &db, &params);
+    defer std.testing.allocator.free(json);
+
+    // Should only contain the error with matching session_id
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"total\": 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "TypeError") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "ValueError") == null);
+}
+
+test "queryAndFormat session_id filter returns multiple errors from same session" {
+    var db = try setupTestDb();
+    defer db.close();
+
+    const err1 = try insertTestError(&db, "myapp", "prod", "TypeError", "error 1", false);
+    const err2 = try insertTestError(&db, "myapp", "prod", "ReferenceError", "error 2", false);
+    const err3 = try insertTestError(&db, "myapp", "prod", "ValueError", "other session", false);
+    try insertTestOccurrenceWithExtra(&db, err1, "BROWSER", "{\"session_id\": \"sess-shared\"}");
+    try insertTestOccurrenceWithExtra(&db, err2, "BROWSER", "{\"session_id\": \"sess-shared\"}");
+    try insertTestOccurrenceWithExtra(&db, err3, "BROWSER", "{\"session_id\": \"sess-different\"}");
+
+    var params = ListParams{};
+    params.session_id = "sess-shared";
+    const json = try queryAndFormat(std.testing.allocator, &db, &params);
+    defer std.testing.allocator.free(json);
+
+    // Should return both errors from sess-shared
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"total\": 2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "TypeError") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "ReferenceError") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "ValueError") == null);
+}
+
+test "queryAndFormat session_id with no matching errors returns empty" {
+    var db = try setupTestDb();
+    defer db.close();
+
+    const err1 = try insertTestError(&db, "myapp", "prod", "TypeError", "error 1", false);
+    try insertTestOccurrenceWithExtra(&db, err1, "BROWSER", "{\"session_id\": \"sess-abc\"}");
+
+    var params = ListParams{};
+    params.session_id = "sess-nonexistent";
+    const json = try queryAndFormat(std.testing.allocator, &db, &params);
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"total\": 0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"errors\": []") != null);
 }

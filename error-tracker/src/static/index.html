@@ -18,6 +18,11 @@
 
     <!-- Filters -->
     <div class="flex flex-wrap gap-4 mb-6 items-end">
+      <!-- Session ID filter banner -->
+      <div id="session-filter-banner" class="hidden w-full mb-2 bg-amber-900/30 border border-amber-700/40 text-amber-300 text-sm rounded px-4 py-2 flex items-center justify-between">
+        <span>Showing errors from session: <strong id="session-filter-value"></strong></span>
+        <button id="clear-session-filter" class="text-amber-400 hover:text-amber-200 text-xs underline ml-4">Clear filter</button>
+      </div>
       <div>
         <label class="block text-xs text-gray-400 mb-1">Project</label>
         <select id="filter-project" class="bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded px-3 py-1.5 focus:outline-none focus:border-blue-500">
@@ -82,6 +87,29 @@
     let currentOffset = 0;
     const LIMIT = 50;
 
+    // Read session_id filter from URL query parameters
+    const urlParams = new URLSearchParams(window.location.search);
+    let sessionIdFilter = urlParams.get('session_id') || '';
+
+    function initSessionBanner() {
+      const banner = document.getElementById('session-filter-banner');
+      if (sessionIdFilter) {
+        banner.classList.remove('hidden');
+        document.getElementById('session-filter-value').textContent = sessionIdFilter;
+      }
+    }
+
+    document.getElementById('clear-session-filter').addEventListener('click', () => {
+      sessionIdFilter = '';
+      document.getElementById('session-filter-banner').classList.add('hidden');
+      // Remove session_id from URL without reload
+      const url = new URL(window.location);
+      url.searchParams.delete('session_id');
+      window.history.replaceState({}, '', url.pathname);
+      currentOffset = 0;
+      loadErrors();
+    });
+
     function headers() {
       const h = { 'Content-Type': 'application/json' };
       if (API_KEY) h['X-API-Key'] = API_KEY;
@@ -136,6 +164,7 @@
       if (project) params.set('project', project);
       if (environment) params.set('environment', environment);
       if (source) params.set('source', source);
+      if (sessionIdFilter) params.set('session_id', sessionIdFilter);
       if (resolved) params.set('resolved', 'true');
       params.set('limit', LIMIT);
       params.set('offset', currentOffset);
@@ -229,6 +258,7 @@
     document.getElementById('filter-resolved').addEventListener('change', () => { currentOffset = 0; loadErrors(); });
 
     // Initial load
+    initSessionBanner();
     loadProjects();
     loadErrors();
   </script>
