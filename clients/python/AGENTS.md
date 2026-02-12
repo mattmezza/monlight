@@ -40,3 +40,4 @@ pytest tests/ -v
 - `httpx_mock.get_requests()` to inspect sent requests (headers are lowercased)
 - `caplog` fixture with `caplog.at_level(logging.WARNING, logger="monlightstack.error_client")` to verify warning logs
 - `asyncio_mode = "auto"` in pyproject.toml means async test functions are auto-detected (no `@pytest.mark.asyncio` needed)
+- When testing `MetricsClient` periodic timer, always pair `client.start()` with `client.shutdown()` in try/finally to avoid dangling timer threads

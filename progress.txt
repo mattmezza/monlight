@@ -182,3 +182,15 @@
   - `caplog` fixture with `caplog.at_level(logging.WARNING, logger="monlightstack.error_client")` captures log records for assertion
   - The ErrorClient was already fully implemented in session 15 as part of scaffolding — the plan tasks just needed test verification and strikethrough
 ---
+
+## Session 17: Python MetricsClient Tests & Verification
+
+- What was implemented: Verified existing MetricsClient implementation meets all acceptance criteria and wrote 42 comprehensive unit tests covering buffering (counter/histogram/gauge), flush behavior, connection failure handling, periodic timer, shutdown, configuration, and thread safety
+- Files changed: `clients/python/tests/test_metrics_client.py` (new), `plan.md` (struck through metrics client tasks)
+- **Learnings for future iterations:**
+  - MetricsClient was already fully implemented in session 15 as part of scaffolding — only needed test verification and strikethrough
+  - `MetricsClient.flush()` clears the buffer before sending (copy + clear under lock), so metrics are dropped on failure — this is intentional (no retry semantics)
+  - For testing the periodic timer, use a very short `flush_interval` (0.1s) and `time.sleep(0.5)` to verify it fires — keeps tests fast
+  - `client.start()` must always be paired with `client.shutdown()` in tests (use try/finally) to avoid dangling timer threads
+  - The MetricsClient `_buffer` list and `_lock` are easily inspectable in tests since they're instance attributes, making buffer state assertions straightforward
+---

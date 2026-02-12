@@ -492,18 +492,18 @@
       - ~~Caller is not blocked waiting for error reporting~~
     - ~~Implement PII filtering: strip sensitive headers (Authorization, Cookie), allow configurable field exclusions~~
       - ~~Authorization and Cookie headers are never sent~~
-  - Metrics client (`monlightstack/metrics_client.py`)
-    - Implement `MetricsClient` class with `counter(name, labels=None, value=1)`, `histogram(name, labels=None, value)`, `gauge(name, labels=None, value)` methods
-      - Each method buffers a metric in memory
-    - Implement in-memory buffer with periodic flush: `flush()` sends buffered metrics as batch POST to `{base_url}/api/metrics`
-      - Flush sends all buffered metrics in a single HTTP request
-      - Buffer is cleared after successful flush
-    - Implement configurable flush interval with background task (threading or asyncio)
-      - Metrics are automatically flushed every N seconds (configurable, default 10)
-    - Implement `shutdown()` method that flushes remaining metrics
-      - On shutdown, all buffered metrics are sent before process exits
-    - Handle connection failures gracefully (log warning, drop metrics)
-      - Network errors do not crash the application
+  - ~~Metrics client (`monlightstack/metrics_client.py`)~~
+    - ~~Implement `MetricsClient` class with `counter(name, labels=None, value=1)`, `histogram(name, labels=None, value)`, `gauge(name, labels=None, value)` methods~~
+      - ~~Each method buffers a metric in memory~~
+    - ~~Implement in-memory buffer with periodic flush: `flush()` sends buffered metrics as batch POST to `{base_url}/api/metrics`~~
+      - ~~Flush sends all buffered metrics in a single HTTP request~~
+      - ~~Buffer is cleared after successful flush~~
+    - ~~Implement configurable flush interval with background task (threading or asyncio)~~
+      - ~~Metrics are automatically flushed every N seconds (configurable, default 10)~~
+    - ~~Implement `shutdown()` method that flushes remaining metrics~~
+      - ~~On shutdown, all buffered metrics are sent before process exits~~
+    - ~~Handle connection failures gracefully (log warning, drop metrics)~~
+      - ~~Network errors do not crash the application~~
   - FastAPI integration helpers (`monlightstack/integrations/fastapi.py`)
     - Implement `MonlightExceptionHandler` — a global exception handler for FastAPI
       - Catches all unhandled exceptions (excluding HTTPException and RequestValidationError)
