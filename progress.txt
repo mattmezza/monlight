@@ -297,5 +297,17 @@
   - The backup script was already created in a previous session but not committed — always check `git status` for uncommitted files before implementing
   - SQLite `.backup` command is the correct way to back up WAL-mode databases — it creates a consistent snapshot even while the database is in use
   - The `*.db` pattern in `.gitignore` already covers backup .db files, so the `deploy/backups/` directory contents are automatically ignored
-  - `bash -n script.sh` validates bash syntax without executing the script — useful as a quick quality check for shell scripts
+   - `bash -n script.sh` validates bash syntax without executing the script — useful as a quick quality check for shell scripts
+---
+
+## Session 25: Upgrade Script (deploy/upgrade.sh)
+
+- What was implemented: Created `deploy/upgrade.sh` — an upgrade script that pulls latest code, rebuilds Docker images, and restarts MonlightStack services one at a time with health verification after each restart. Includes pre-upgrade backup, rollback image tagging, and detailed rollback instructions on failure.
+- Files changed: `deploy/upgrade.sh` (new), `plan.md` (struck through upgrade script task)
+- **Learnings for future iterations:**
+  - The upgrade script follows the same style/conventions as `backup.sh`: `set -euo pipefail`, `log()/warn()/die()` helpers, `SCRIPT_DIR` pattern, associative arrays for service config
+  - `docker compose up -d --no-deps <service>` recreates only the specified service without restarting its dependencies
+  - `git pull --ff-only` is safer than `git pull` for automated scripts — it fails on merge conflicts rather than opening an editor
+  - Pre-upgrade image tagging (`docker tag <image>:latest <image>:rollback`) provides a fast rollback path without needing to rebuild
+  - Health checks poll `/health` on each service's external port (5010, 5011, 5012) — these endpoints require no API key
 ---

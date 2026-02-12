@@ -568,10 +568,10 @@
     - ~~Retains last 7 daily backups (deletes older ones)~~
     - ~~Optionally uploads to S3 (commented out by default, with instructions)~~
     - ~~Script is executable and documented~~
-  - Create upgrade script or document (`deploy/upgrade.sh`)
-    - Pulls latest code, builds images, restarts services one at a time
-    - Verifies health after each service restart
-    - Documents rollback procedure (re-tag previous image, restart)
+  - ~~Create upgrade script or document (`deploy/upgrade.sh`)~~
+    - ~~Pulls latest code, builds images, restarts services one at a time~~
+    - ~~Verifies health after each service restart~~
+    - ~~Documents rollback procedure (re-tag previous image, restart)~~
   - Verify deployment config completeness
     - `docker-compose.monitoring.yml` includes `LOG_VIEWER_API_KEY` in secrets.env references
     - All three services have `LOG_LEVEL` environment variable documented
