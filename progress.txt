@@ -145,6 +145,7 @@
 - **Total across all services**: error-tracker ~40 tests, log-viewer ~82 tests, metrics-collector ~60 tests. All passing with the single known config test exception per service.
 
 ## Codebase Patterns
+- All three Zig services read `API_KEY` (not prefixed). In docker-compose, map from `secrets.env` prefixed vars: `API_KEY=${ERROR_TRACKER_API_KEY}`
 - `setup_monlight()` is the recommended single-call entry point for wiring up both error tracking and metrics in FastAPI apps
 - When testing with `httpx_mock` and `MetricsClient` shutdown flush, add `@pytest.mark.httpx_mock(can_send_already_matched_responses=True)` and mock the metrics endpoint too
 - Python client package lives at `clients/python/` with `monlightstack/` as the importable package
@@ -310,4 +311,15 @@
   - `git pull --ff-only` is safer than `git pull` for automated scripts — it fails on merge conflicts rather than opening an editor
   - Pre-upgrade image tagging (`docker tag <image>:latest <image>:rollback`) provides a fast rollback path without needing to rebuild
   - Health checks poll `/health` on each service's external port (5010, 5011, 5012) — these endpoints require no API key
+---
+
+## Session 26: Verify Deployment Config Completeness
+
+- What was implemented: Updated `deploy/docker-compose.monitoring.yml` to fix three deployment config gaps: (1) mapped service-specific API keys from `secrets.env` (e.g., `LOG_VIEWER_API_KEY`) to the `API_KEY` env var each service reads, (2) added `LOG_LEVEL` env var with `${LOG_LEVEL:-info}` default to all three services, (3) added `deploy.resources.limits.memory: 30M` to all three services. Also removed obsolete `version: "3.8"` field and documented `LOG_LEVEL` in `secrets.env.example`.
+- Files changed: `deploy/docker-compose.monitoring.yml`, `deploy/secrets.env.example`, `plan.md`
+- **Learnings for future iterations:**
+  - All three Zig services read `API_KEY` (not prefixed names) from their environment, but `secrets.env` uses prefixed names (`ERROR_TRACKER_API_KEY`, `LOG_VIEWER_API_KEY`, `METRICS_COLLECTOR_API_KEY`). The docker-compose `environment` section maps them: `API_KEY=${LOG_VIEWER_API_KEY}`
+  - For Docker Compose v2 (non-Swarm), use `deploy.resources.limits.memory` for memory limits — this works with `docker compose` CLI even without Swarm mode
+  - The `${VAR:-default}` syntax in docker-compose environment values allows providing defaults while still supporting override from secrets.env or host environment
+  - The obsolete `version: "3.8"` field produces warnings in modern Docker Compose — omit it
 ---

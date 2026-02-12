@@ -126,7 +126,7 @@
       - ~~CSS is embedded in the binary at compile time~~
       - ~~Pages render correctly with Tailwind utility classes~~
       - ~~Log levels / error states are color-coded~~
-  - Tests
+  - ~~Tests~~
     - ~~Write tests for fingerprinting algorithm (deterministic output, different inputs produce different fingerprints)~~
       - ~~Tests pass with `zig build test`~~
     - ~~Write tests for error ingestion logic (create, increment, reopen)~~
@@ -504,7 +504,7 @@
       - ~~On shutdown, all buffered metrics are sent before process exits~~
     - ~~Handle connection failures gracefully (log warning, drop metrics)~~
       - ~~Network errors do not crash the application~~
-  - FastAPI integration helpers (`monlightstack/integrations/fastapi.py`)
+  - ~~FastAPI integration helpers (`monlightstack/integrations/fastapi.py`)~~
     - ~~Implement `MonlightExceptionHandler` — a global exception handler for FastAPI~~
       - ~~Catches all unhandled exceptions (excluding HTTPException and RequestValidationError)~~
       - ~~Calls `ErrorClient.report_error()` with the request and exception~~
@@ -572,7 +572,7 @@
     - ~~Pulls latest code, builds images, restarts services one at a time~~
     - ~~Verifies health after each service restart~~
     - ~~Documents rollback procedure (re-tag previous image, restart)~~
-  - Verify deployment config completeness
-    - `docker-compose.monitoring.yml` includes `LOG_VIEWER_API_KEY` in secrets.env references
-    - All three services have `LOG_LEVEL` environment variable documented
-    - Memory limits are set via `deploy` section in docker-compose (30MB per service)
+  - ~~Verify deployment config completeness~~
+    - ~~`docker-compose.monitoring.yml` includes `LOG_VIEWER_API_KEY` in secrets.env references~~
+    - ~~All three services have `LOG_LEVEL` environment variable documented~~
+    - ~~Memory limits are set via `deploy` section in docker-compose (30MB per service)~~
