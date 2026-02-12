@@ -32,3 +32,11 @@ pytest tests/ -v
 - `httpx` - HTTP client (async + sync)
 - `starlette` / `fastapi` - Required only for the FastAPI integration module
 - `pytest`, `pytest-asyncio`, `pytest-httpx` - Testing dependencies (in `[dev]` extra)
+
+## Testing Patterns
+- Use `pytest-httpx` fixture `httpx_mock` to intercept HTTP calls (works for both async and sync)
+- `httpx_mock.add_response(status_code=..., json=...)` for success cases
+- `httpx_mock.add_exception(httpx.ConnectError(...))` for failure simulation
+- `httpx_mock.get_requests()` to inspect sent requests (headers are lowercased)
+- `caplog` fixture with `caplog.at_level(logging.WARNING, logger="monlightstack.error_client")` to verify warning logs
+- `asyncio_mode = "auto"` in pyproject.toml means async test functions are auto-detected (no `@pytest.mark.asyncio` needed)

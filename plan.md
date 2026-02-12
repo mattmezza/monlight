@@ -482,16 +482,16 @@
     - ~~Create package directory structure: `monlightstack/error_client.py`, `monlightstack/metrics_client.py`, `monlightstack/integrations/fastapi.py`, `monlightstack/__init__.py`~~
       - ~~Package imports work: `from monlightstack import ErrorClient, MetricsClient`~~
       - ~~FastAPI integration imports work: `from monlightstack.integrations.fastapi import MonlightMiddleware, MonlightExceptionHandler`~~
-  - Error client (`monlightstack/error_client.py`)
-    - Implement `ErrorClient` class with `report_error(exception, request_context=None)` method
-      - Sends POST to `{base_url}/api/errors` with correct JSON body and `X-API-Key` header
-      - Extracts exception_type, message, traceback from Python exception object
-      - Optionally extracts request_url, request_method, request_headers from request context
-    - Implement fire-and-forget behavior: use async HTTP with 5-second timeout, no retries
-      - Connection failures are caught and logged (warning level), never raised
-      - Caller is not blocked waiting for error reporting
-    - Implement PII filtering: strip sensitive headers (Authorization, Cookie), allow configurable field exclusions
-      - Authorization and Cookie headers are never sent
+  - ~~Error client (`monlightstack/error_client.py`)~~
+    - ~~Implement `ErrorClient` class with `report_error(exception, request_context=None)` method~~
+      - ~~Sends POST to `{base_url}/api/errors` with correct JSON body and `X-API-Key` header~~
+      - ~~Extracts exception_type, message, traceback from Python exception object~~
+      - ~~Optionally extracts request_url, request_method, request_headers from request context~~
+    - ~~Implement fire-and-forget behavior: use async HTTP with 5-second timeout, no retries~~
+      - ~~Connection failures are caught and logged (warning level), never raised~~
+      - ~~Caller is not blocked waiting for error reporting~~
+    - ~~Implement PII filtering: strip sensitive headers (Authorization, Cookie), allow configurable field exclusions~~
+      - ~~Authorization and Cookie headers are never sent~~
   - Metrics client (`monlightstack/metrics_client.py`)
     - Implement `MetricsClient` class with `counter(name, labels=None, value=1)`, `histogram(name, labels=None, value)`, `gauge(name, labels=None, value)` methods
       - Each method buffers a metric in memory

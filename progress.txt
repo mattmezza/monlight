@@ -149,6 +149,7 @@
 - Use `pip install -e ".[dev]"` in a venv to install with all dev dependencies (pytest, fastapi, etc.)
 - The Python client uses `httpx` for both async and sync HTTP calls
 - `pyproject.toml` uses `setuptools.build_meta` backend (not the newer `setuptools.backends._legacy`)
+- Use `pytest-httpx` for mocking HTTP calls: `httpx_mock.add_response()` / `httpx_mock.add_exception()` / `httpx_mock.get_requests()`
 - Tests live in `clients/python/tests/` and are configured via `[tool.pytest.ini_options]` in pyproject.toml
 - The `MonlightExceptionHandler` expects `ErrorClient` to be stored at `request.app.state.monlight_error_client` — use `setup_monlight()` to wire it up
 - Shared infrastructure (http.zig, json.zig, html.zig, shutdown.zig, log.zig) was implemented inline in each service's main.zig rather than as separate shared modules — the functionality exists but not as separate reusable files
@@ -169,4 +170,15 @@
   - Python 3.11 is available at system level via pyenv
   - The `.venv/` directory is already in `.gitignore`
   - `pytest-asyncio` with `asyncio_mode = "auto"` in pyproject.toml avoids needing `@pytest.mark.asyncio` on every async test
+---
+
+## Session 16: Python Error Client Tests & Verification
+
+- What was implemented: Verified existing ErrorClient implementation and wrote 31 comprehensive unit tests covering payload formatting, PII filtering, HTTP behavior, fire-and-forget error handling, and sync variant
+- Files changed: `clients/python/tests/test_error_client.py` (new), `plan.md` (struck through error client tasks)
+- **Learnings for future iterations:**
+  - `pytest-httpx` provides `httpx_mock` fixture that intercepts both async and sync httpx calls — use `httpx_mock.add_response()` for success cases, `httpx_mock.add_exception()` for failure simulation
+  - `httpx_mock.get_requests()` returns list of captured requests; headers are lowercased in the request object (e.g., `requests[0].headers["x-api-key"]`)
+  - `caplog` fixture with `caplog.at_level(logging.WARNING, logger="monlightstack.error_client")` captures log records for assertion
+  - The ErrorClient was already fully implemented in session 15 as part of scaffolding — the plan tasks just needed test verification and strikethrough
 ---
