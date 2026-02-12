@@ -426,30 +426,30 @@
     - ~~Write integration tests for full init → capture → transport pipeline~~
       - ~~Tests verify end-to-end flow from error occurrence to transport call~~
 
-- Deployment updates (`deploy/`)
-  - Update `docker-compose.monitoring.yml`
-    - Add `browser-relay` service definition
-      - Port mapping: 5013:8000
-      - Volume mount for SQLite persistence: `./data/browser-relay:/app/data`
-      - Environment variables: `DATABASE_PATH`, `ADMIN_API_KEY`, `ERROR_TRACKER_URL` (http://error-tracker:8000), `ERROR_TRACKER_API_KEY`, `METRICS_COLLECTOR_URL` (http://metrics-collector:8000), `METRICS_COLLECTOR_API_KEY`, `CORS_ORIGINS`
-      - `env_file` references `secrets.env`
-      - Health check configured
-      - Connected to `flowrent_network`
-      - Depends on `error-tracker` and `metrics-collector` services
-  - Update `secrets.env.example`
-    - Add `BROWSER_RELAY_ADMIN_API_KEY` placeholder
-    - Add `CORS_ORIGINS` placeholder (e.g., `https://rentyourbikevalencia.com,https://www.rentyourbikevalencia.com`)
-  - Update nginx config documentation
-    - Add browser relay proxy section:
-      - `/browser-relay/` → `http://127.0.0.1:5013/`
-      - Note: this endpoint must be publicly accessible (no basic auth) for browser SDK to reach it
-      - TLS termination at nginx
-  - Update `deploy/backup.sh`
-    - Add browser relay database backup (source maps are valuable)
-      - `sqlite3 /path/to/data/browser-relay/browser-relay.db ".backup $BACKUP_DIR/browser-relay-$DATE.db"`
-  - Update `deploy/upgrade.sh`
-    - Add browser-relay to the rolling restart sequence
-    - Add health check: `curl http://localhost:5013/health`
+- ~~Deployment updates (`deploy/`)~~
+  - ~~Update `docker-compose.monitoring.yml`~~
+    - ~~Add `browser-relay` service definition~~
+      - ~~Port mapping: 5013:8000~~
+      - ~~Volume mount for SQLite persistence: `./data/browser-relay:/app/data`~~
+      - ~~Environment variables: `DATABASE_PATH`, `ADMIN_API_KEY`, `ERROR_TRACKER_URL` (http://error-tracker:8000), `ERROR_TRACKER_API_KEY`, `METRICS_COLLECTOR_URL` (http://metrics-collector:8000), `METRICS_COLLECTOR_API_KEY`, `CORS_ORIGINS`~~
+      - ~~`env_file` references `secrets.env`~~
+      - ~~Health check configured~~
+      - ~~Connected to `flowrent_network`~~
+      - ~~Depends on `error-tracker` and `metrics-collector` services~~
+  - ~~Update `secrets.env.example`~~
+    - ~~Add `BROWSER_RELAY_ADMIN_API_KEY` placeholder~~
+    - ~~Add `CORS_ORIGINS` placeholder (e.g., `https://rentyourbikevalencia.com,https://www.rentyourbikevalencia.com`)~~
+  - ~~Update nginx config documentation~~
+    - ~~Add browser relay proxy section:~~
+      - ~~`/browser-relay/` → `http://127.0.0.1:5013/`~~
+      - ~~Note: this endpoint must be publicly accessible (no basic auth) for browser SDK to reach it~~
+      - ~~TLS termination at nginx~~
+  - ~~Update `deploy/backup.sh`~~
+    - ~~Add browser relay database backup (source maps are valuable)~~
+      - ~~`sqlite3 /path/to/data/browser-relay/browser-relay.db ".backup $BACKUP_DIR/browser-relay-$DATE.db"`~~
+  - ~~Update `deploy/upgrade.sh`~~
+    - ~~Add browser-relay to the rolling restart sequence~~
+    - ~~Add health check: `curl http://localhost:5013/health`~~
 
 - End-to-end validation
   - Extend `docker-compose.test.yml` or smoke test script

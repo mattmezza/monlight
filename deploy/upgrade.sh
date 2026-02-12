@@ -42,6 +42,7 @@
 #     error-tracker:     5010
 #     log-viewer:        5011
 #     metrics-collector: 5012
+#     browser-relay:     5013
 #
 
 set -euo pipefail
@@ -65,9 +66,10 @@ declare -A PORT_MAP=(
     [error-tracker]=5010
     [log-viewer]=5011
     [metrics-collector]=5012
+    [browser-relay]=5013
 )
 
-ALL_SERVICES=("error-tracker" "log-viewer" "metrics-collector")
+ALL_SERVICES=("error-tracker" "log-viewer" "metrics-collector" "browser-relay")
 
 # -------------------------------------------------------------------
 # Helpers

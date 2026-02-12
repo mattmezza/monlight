@@ -544,5 +544,20 @@
   - `Object.defineProperty(document, "visibilityState", { value: "hidden", writable: true, configurable: true })` is needed to simulate page visibility changes in jsdom
   - `navigator.sendBeacon` is not available in jsdom by default — define it via `Object.defineProperty(navigator, "sendBeacon", ...)` and clean up after test
   - When mocking `window.fetch` for network interception tests, save the original before creating the NetworkMonitor (which patches it on `install()`), and restore in afterEach
-  - The JS SDK's entire test suite (164 tests across 6 files) runs in ~1.7s — vitest with jsdom is fast
+   - The JS SDK's entire test suite (164 tests across 6 files) runs in ~1.7s — vitest with jsdom is fast
 ---
+
+## Session 39: Deployment Updates for Browser Relay
+
+- What was implemented: Updated all deployment configuration files to include the browser-relay service:
+  1. **docker-compose.monitoring.yml**: Added `browser-relay` service — port 5013:8000, SQLite volume (`./data/browser-relay:/app/data`), 7 environment variables (DATABASE_PATH, ADMIN_API_KEY, ERROR_TRACKER_URL/API_KEY, METRICS_COLLECTOR_URL/API_KEY, CORS_ORIGINS, LOG_LEVEL), env_file, health check (`--healthcheck`), 30M memory limit, depends_on error-tracker and metrics-collector (condition: service_healthy), flowrent_network.
+  2. **secrets.env.example**: Added `BROWSER_RELAY_ADMIN_API_KEY` placeholder and commented `CORS_ORIGINS` example.
+  3. **nginx.conf.example** (new): Created example nginx reverse proxy config with all 4 service location blocks. Browser relay endpoint (`/browser-relay/`) is explicitly marked as public (no basic auth) — other services use `auth_basic`.
+  4. **backup.sh**: Added `browser-relay` to DB_MAP (`browser-relay/browser-relay.db`) and default TARGETS array. Updated header comment.
+  5. **upgrade.sh**: Added `browser-relay` to PORT_MAP (port 5013) and ALL_SERVICES array. Updated service ports documentation in header comment.
+- Files changed: `deploy/docker-compose.monitoring.yml`, `deploy/secrets.env.example`, `deploy/nginx.conf.example` (new), `deploy/backup.sh`, `deploy/upgrade.sh`, `plan.md`
+- **Learnings for future iterations:**
+  - The `depends_on` with `condition: service_healthy` ensures browser-relay starts only after its upstream services (error-tracker, metrics-collector) pass their health checks — critical since browser-relay forwards to them immediately on startup
+  - Browser-relay uses `ADMIN_API_KEY` (not `API_KEY`) — the compose environment mapping is `ADMIN_API_KEY=${BROWSER_RELAY_ADMIN_API_KEY}` rather than the `API_KEY=${SERVICE_API_KEY}` pattern used by the other three services
+  - The nginx config is an example snippet (not a full nginx.conf) — users add these location blocks to their existing server block. Browser relay is the only endpoint without basic auth since browsers can't send basic auth headers
+
