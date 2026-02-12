@@ -34,14 +34,14 @@
     - ~~Implement admin API key authentication for management endpoints (source map upload, DSN key management)~~
       - ~~Uses shared auth middleware with `ADMIN_API_KEY` via `X-API-Key` header~~
       - ~~`/health` endpoint is excluded from auth~~
-  - CORS handling
-    - Implement CORS middleware for browser ingestion endpoints
-      - Read allowed origins from `CORS_ORIGINS` env var (comma-separated)
-      - Respond with `Access-Control-Allow-Origin` matching the request origin (if in allowed list)
-      - Respond with `Access-Control-Allow-Headers: X-Monlight-Key, Content-Type`
-      - Respond with `Access-Control-Allow-Methods: POST, OPTIONS`
-      - Preflight `OPTIONS` requests return 204 with CORS headers
-      - Non-matching origins are rejected (no CORS headers sent)
+  - ~~CORS handling~~
+    - ~~Implement CORS middleware for browser ingestion endpoints~~
+      - ~~Read allowed origins from `CORS_ORIGINS` env var (comma-separated)~~
+      - ~~Respond with `Access-Control-Allow-Origin` matching the request origin (if in allowed list)~~
+      - ~~Respond with `Access-Control-Allow-Headers: X-Monlight-Key, Content-Type`~~
+      - ~~Respond with `Access-Control-Allow-Methods: POST, OPTIONS`~~
+      - ~~Preflight `OPTIONS` requests return 204 with CORS headers~~
+      - ~~Non-matching origins are rejected (no CORS headers sent)~~
   - Request limits
     - Use shared rate limiting middleware (300 requests/minute per public key)
       - Rate-limited requests return 429

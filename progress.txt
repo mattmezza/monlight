@@ -367,5 +367,18 @@
   - `DsnAuthResult` struct packs both `authenticated: bool` and the project name buffer together, so the caller gets a self-contained result without dangling pointer concerns.
   - Path-based auth dispatch in `main.zig` strips query parameters before matching (`std.mem.indexOfScalar(u8, target, '?')`) to ensure `/api/browser/errors?foo=bar` routes correctly.
   - Integration tests use `TestServer` pattern with OS-assigned port (port 0) — same pattern as auth_test.zig and rate_limit_test.zig in other services.
-  - The browser-relay uses `ADMIN_API_KEY` (from config) for admin endpoints, distinct from the `API_KEY` used by the other three services. The config module reads `ADMIN_API_KEY` env var.
+   - The browser-relay uses `ADMIN_API_KEY` (from config) for admin endpoints, distinct from the `API_KEY` used by the other three services. The config module reads `ADMIN_API_KEY` env var.
+---
+
+## Session 29: Browser Relay CORS Middleware
+
+- What was implemented: Created `cors.zig` module with CORS middleware for browser ingestion endpoints, `cors_test.zig` with 10 integration tests covering preflight OPTIONS, normal POST CORS headers, disallowed/missing origins, no-CORS-configured scenario, and CORS-only-on-browser-paths behavior. Integrated CORS into `main.zig` with path-based dispatch: OPTIONS preflight returns 204 before auth, allowed origins get `Access-Control-Allow-Origin` on responses, non-matching origins silently continue without CORS headers.
+- Files changed: `browser-relay/src/cors.zig` (new), `browser-relay/src/cors_test.zig` (new), `browser-relay/src/main.zig` (modified — added cors import, handleCors dispatch, sendJsonResponseWithCors), `browser-relay/src/dsn_auth_test.zig` (modified — fixed use-after-free bug in HttpResponse), `browser-relay/build.zig` (modified — added cors test targets), `plan.md` (struck through CORS handling task)
+- **Learnings for future iterations:**
+  - **Use-after-free in test helpers**: `sendRequest()` returning `HttpResponse` with `raw: []const u8` slices pointing into a stack-local `response_buf` is undefined behavior — the buffer is freed when `sendRequest` returns. Fix: embed the `_buf: [4096]u8` inside the HttpResponse struct with `total_read`/`body_offset` fields, and use methods `raw()` / `body()` to derive slices from the owned buffer. This bug existed in `dsn_auth_test.zig` too but was masked because those tests mostly checked `status_code` (a value type).
+  - **Header parsing with `": "` vs `:`**: When parsing HTTP headers from raw response bytes, always split on `": "` (colon-space), not just `:`. Headers like `access-control-allow-origin` contain hyphens (not colons), but `indexOfScalar(u8, line, ':')` finds the first colon in the VALUE portion (e.g., `https:`) and splits incorrectly.
+  - **CorsConfig uses inline arrays** (`[max_origins][max_origin_len]u8`) to avoid heap allocation — origins are parsed from a comma-separated env var string at startup. Max 32 origins, each up to 256 bytes.
+  - **CORS preflight vs normal flow**: OPTIONS preflight returns 204 with all CORS headers BEFORE DSN auth is checked (browsers send preflight without credentials). Normal requests check CORS after auth, and include `Access-Control-Allow-Origin` in the response if the origin is allowed.
+  - **`getCorsHeaders()` is separate from `handleCors()`**: `handleCors` handles the OPTIONS preflight case (sends 204), while `getCorsHeaders` is used by normal response paths to get the CORS headers to include. This separation avoids duplicating origin-matching logic.
+  - **Zig 0.13 `std.http.Server.Request.respond()` extra_headers**: The `extra_headers` field accepts `&.{ .{ .name = "...", .value = "..." } }` — an array of anonymous struct literals. Multiple headers are supported.
 ---

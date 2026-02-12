@@ -116,10 +116,36 @@ pub fn build(b: *std.Build) void {
 
     const run_dsn_auth_integration_tests = b.addRunArtifact(dsn_auth_integration_tests);
 
+    // Test step — tests for cors.zig
+    const cors_tests = b.addTest(.{
+        .root_source_file = b.path("src/cors.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const run_cors_tests = b.addRunArtifact(cors_tests);
+
+    // Test step — integration tests for CORS (cors_test.zig)
+    const cors_integration_tests = b.addTest(.{
+        .root_source_file = b.path("src/cors_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    cors_integration_tests.root_module.addImport("sqlite", sqlite_mod);
+    cors_integration_tests.root_module.addImport("config", config_mod);
+    cors_integration_tests.root_module.addImport("auth", auth_mod);
+    cors_integration_tests.root_module.addImport("rate_limit", rate_limit_mod);
+    cors_integration_tests.linkSystemLibrary("sqlite3");
+    cors_integration_tests.linkLibC();
+
+    const run_cors_integration_tests = b.addRunArtifact(cors_integration_tests);
+
     const test_step = b.step("test", "Run all unit tests");
     test_step.dependOn(&run_main_tests.step);
     test_step.dependOn(&run_config_tests.step);
     test_step.dependOn(&run_db_tests.step);
     test_step.dependOn(&run_dsn_auth_tests.step);
     test_step.dependOn(&run_dsn_auth_integration_tests.step);
+    test_step.dependOn(&run_cors_tests.step);
+    test_step.dependOn(&run_cors_integration_tests.step);
 }
