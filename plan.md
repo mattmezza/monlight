@@ -553,14 +553,14 @@
     - ~~Optionally publish to PyPI on tagged releases~~
       - ~~Package version matches git tag~~
 
-- End-to-end validation
-  - Create a `docker-compose.test.yml` or script that starts all three services and runs smoke tests
-    - All three services start and respond to `/health`
-    - Error Tracker accepts a POST to `/api/errors` and returns 201
-    - Log Viewer starts ingesting logs (or handles empty log directory gracefully)
-    - Metrics Collector accepts a POST to `/api/metrics` and returns 202
-    - Web UIs are accessible and render HTML
-    - Graceful shutdown works (send SIGTERM, verify clean exit within 10 seconds)
+- ~~End-to-end validation~~
+  - ~~Create a `docker-compose.test.yml` or script that starts all three services and runs smoke tests~~
+    - ~~All three services start and respond to `/health`~~
+    - ~~Error Tracker accepts a POST to `/api/errors` and returns 201~~
+    - ~~Log Viewer starts ingesting logs (or handles empty log directory gracefully)~~
+    - ~~Metrics Collector accepts a POST to `/api/metrics` and returns 202~~
+    - ~~Web UIs are accessible and render HTML~~
+    - ~~Graceful shutdown works (send SIGTERM, verify clean exit within 10 seconds)~~
 
 - Deployment and operations (`deploy/`)
   - Create backup script (`deploy/backup.sh`)

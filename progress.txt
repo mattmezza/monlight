@@ -164,8 +164,7 @@
 - Tests live in `clients/python/tests/` and are configured via `[tool.pytest.ini_options]` in pyproject.toml
 - The `MonlightExceptionHandler` expects `ErrorClient` to be stored at `request.app.state.monlight_error_client` — use `setup_monlight()` to wire it up
 - Shared infrastructure (http.zig, json.zig, html.zig, shutdown.zig, log.zig) was implemented inline in each service's main.zig rather than as separate shared modules — the functionality exists but not as separate reusable files
-
-## Session 15: Python Client Package Scaffolding
+- E2e smoke tests live in `deploy/`: run `docker compose -f docker-compose.test.yml up --build -d` then `./smoke-test.sh`. Uses ports 15010-15012 to avoid production conflicts.
 
 - Created `clients/python/pyproject.toml` with setuptools build backend, httpx dependency, and optional fastapi/dev dependency groups
 - Created package directory structure: `monlightstack/__init__.py`, `error_client.py`, `metrics_client.py`, `integrations/__init__.py`, `integrations/fastapi.py`
@@ -271,4 +270,21 @@
   - Tag convention `python-v*` (e.g., `python-v0.1.0`) distinguishes Python client releases from potential Zig service releases, allowing independent versioning.
   - Testing across Python 3.10/3.11/3.12 ensures compatibility with the `requires-python = ">=3.10"` constraint in pyproject.toml.
   - All 121 Python client tests pass locally — the test job in CI should produce the same results.
+---
+
+## Session 23: End-to-End Validation
+
+- What was implemented: Created `deploy/docker-compose.test.yml` and `deploy/smoke-test.sh` for end-to-end smoke testing of all three MonlightStack services. The compose file uses isolated ports (15010-15012) and a dedicated `monlight_e2e_test` network (not the production `flowrent_network`). The smoke test script covers all 6 acceptance criteria: health checks, error ingestion (create + duplicate), log viewer with empty log directory, metrics ingestion, web UI accessibility, and graceful shutdown via SIGTERM.
+- Files changed:
+  - `deploy/docker-compose.test.yml` (new) — test compose configuration with isolated ports, volumes, and network
+  - `deploy/smoke-test.sh` (new) — comprehensive smoke test script with pass/fail tracking
+  - `plan.md` — struck through end-to-end validation task
+- **Learnings for future iterations:**
+  - Docker daemon is not available in this development environment — e2e tests must be run manually on a machine with Docker
+  - The `version` field in docker-compose files is obsolete and produces warnings; omit it for cleaner output
+  - For e2e tests, use high port numbers (15xxx) to avoid conflicts with production services (5xxx)
+  - Log Viewer gracefully handles empty/missing LOG_SOURCES — it retries every poll interval without crashing
+  - The `docker compose config --quiet` command validates compose file syntax without requiring a running daemon
+  - Use `docker kill --signal=SIGTERM` (not `docker stop`) to test graceful shutdown behavior, since `docker stop` sends SIGTERM then waits before SIGKILL
+  - All three services implement `--healthcheck` CLI flag that connects to localhost:8000 and checks for 200 response
 ---

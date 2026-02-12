@@ -1,0 +1,87 @@
+# End-to-end smoke test configuration.
+# Usage: docker compose -f docker-compose.test.yml up --build -d
+# Then run: ./smoke-test.sh
+# Cleanup: docker compose -f docker-compose.test.yml down -v
+
+services:
+  error-tracker:
+    build:
+      context: ..
+      dockerfile: error-tracker/Dockerfile
+    container_name: e2e_error_tracker
+    ports:
+      - "15010:8000"
+    volumes:
+      - error-tracker-data:/app/data
+    environment:
+      - API_KEY=test_api_key_e2e_12345
+      - DATABASE_PATH=/app/data/errors.db
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "/app/error-tracker", "--healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - e2e_test
+
+  log-viewer:
+    build:
+      context: ..
+      dockerfile: log-viewer/Dockerfile
+    container_name: e2e_log_viewer
+    ports:
+      - "15011:8000"
+    volumes:
+      - log-viewer-data:/app/data
+      - empty-log-sources:/var/lib/docker/containers:ro
+    environment:
+      - API_KEY=test_api_key_e2e_12345
+      - DATABASE_PATH=/app/data/logs.db
+      - CONTAINERS=test_container
+      - LOG_SOURCES=/var/lib/docker/containers
+      - MAX_ENTRIES=1000
+      - POLL_INTERVAL=2
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "/app/log-viewer", "--healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - e2e_test
+
+  metrics-collector:
+    build:
+      context: ..
+      dockerfile: metrics-collector/Dockerfile
+    container_name: e2e_metrics_collector
+    ports:
+      - "15012:8000"
+    volumes:
+      - metrics-collector-data:/app/data
+    environment:
+      - API_KEY=test_api_key_e2e_12345
+      - DATABASE_PATH=/app/data/metrics.db
+      - AGGREGATION_INTERVAL=10
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "/app/metrics-collector", "--healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - e2e_test
+
+volumes:
+  error-tracker-data:
+  log-viewer-data:
+  metrics-collector-data:
+  empty-log-sources:
+
+networks:
+  e2e_test:
+    name: monlight_e2e_test
