@@ -228,21 +228,21 @@
       - ~~Tests verify `web_vitals` section is omitted (backward compatible)~~
 
 - JavaScript SDK (`clients/js/`)
-  - Package scaffolding
-    - Create `package.json` with package metadata, build scripts, and dev dependencies
-      - Package name: `@monlight/browser`
-      - Package is buildable with `npm run build`
-    - Create `tsconfig.json` for TypeScript compilation
-      - Target: ES2020, module: ESNext
-    - Set up build pipeline (TypeScript → bundled JS)
-      - Use `esbuild` for bundling (fast, produces small output)
-      - Build produces:
-        - `dist/monlight.min.js` — UMD bundle for script tag usage (self-initializing via `window.MonlightConfig`)
-        - `dist/monlight.esm.js` — ES module for npm import
-        - `dist/monlight.d.ts` — TypeScript declarations
-      - Total bundle size under 5KB gzipped
-    - Create directory structure: `src/core.ts`, `src/errors.ts`, `src/metrics.ts`, `src/network.ts`, `src/vitals.ts`, `src/session.ts`, `src/transport.ts`, `src/types.ts`
-      - All source files compile without errors
+  - ~~Package scaffolding~~
+    - ~~Create `package.json` with package metadata, build scripts, and dev dependencies~~
+      - ~~Package name: `@monlight/browser`~~
+      - ~~Package is buildable with `npm run build`~~
+    - ~~Create `tsconfig.json` for TypeScript compilation~~
+      - ~~Target: ES2020, module: ESNext~~
+    - ~~Set up build pipeline (TypeScript → bundled JS)~~
+      - ~~Use `esbuild` for bundling (fast, produces small output)~~
+      - ~~Build produces:~~
+        - ~~`dist/monlight.min.js` — UMD bundle for script tag usage (self-initializing via `window.MonlightConfig`)~~
+        - ~~`dist/monlight.esm.js` — ES module for npm import~~
+        - ~~`dist/monlight.d.ts` — TypeScript declarations~~
+      - ~~Total bundle size under 5KB gzipped~~
+    - ~~Create directory structure: `src/core.ts`, `src/errors.ts`, `src/metrics.ts`, `src/network.ts`, `src/vitals.ts`, `src/session.ts`, `src/transport.ts`, `src/types.ts`~~
+      - ~~All source files compile without errors~~
   - Core module (`src/core.ts`)
     - Implement `init(config)` function
       - Config options:

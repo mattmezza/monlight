@@ -166,6 +166,7 @@
 - The `MonlightExceptionHandler` expects `ErrorClient` to be stored at `request.app.state.monlight_error_client` — use `setup_monlight()` to wire it up
 - Shared infrastructure (http.zig, json.zig, html.zig, shutdown.zig, log.zig) was implemented inline in each service's main.zig rather than as separate shared modules — the functionality exists but not as separate reusable files
 - E2e smoke tests live in `deploy/`: run `docker compose -f docker-compose.test.yml up --build -d` then `./smoke-test.sh`. Uses ports 15010-15012 to avoid production conflicts.
+- JS SDK lives at `clients/js/`, buildable with `npm run build`. Uses esbuild for bundling, vitest + jsdom for testing, TypeScript for type safety. Entry point: `src/core.ts`, public API: `init(config)` → `MonlightClient`.
 
 - Created `clients/python/pyproject.toml` with setuptools build backend, httpx dependency, and optional fastapi/dev dependency groups
 - Created package directory structure: `monlight/__init__.py`, `error_client.py`, `metrics_client.py`, `integrations/__init__.py`, `integrations/fastapi.py`
@@ -479,3 +480,34 @@
   - CLS values (typically 0.01-0.25) are ~10000x smaller than LCP values (typically 1000-5000ms). The frontend scales CLS by 1000 for the trend chart to make all three series visible on the same y-axis.
   - The `writeWebVitalField` helper writes nullable float values with 4 decimal places — same pattern as `writeNullableFloat` in `metrics_query.zig` but with `.4` precision instead of `.6`.
 
+## Session 36: JavaScript SDK Package Scaffolding
+
+- What was implemented: Created the `clients/js/` directory with complete package scaffolding for the `@monlight/browser` SDK. This includes package.json (with esbuild, TypeScript, vitest dev dependencies), tsconfig.json (ES2020 target, ESNext module), build.mjs (esbuild pipeline producing UMD + ESM bundles + TypeScript declarations), vitest.config.ts, and all 8 source modules with full TypeScript implementations.
+- Files changed:
+  - `clients/js/package.json` (new) — Package metadata, scripts, dependencies
+  - `clients/js/package-lock.json` (new) — Locked dependency versions
+  - `clients/js/tsconfig.json` (new) — TypeScript configuration
+  - `clients/js/build.mjs` (new) — esbuild build script producing UMD, ESM, and .d.ts
+  - `clients/js/vitest.config.ts` (new) — Test runner config with jsdom environment
+  - `clients/js/src/types.ts` (new) — TypeScript interfaces: MonlightConfig, MonlightClient, BrowserError, BrowserMetric, ResolvedConfig
+  - `clients/js/src/session.ts` (new) — Session ID generation (UUID v4, sessionStorage persistence)
+  - `clients/js/src/transport.ts` (new) — Batched beacon transport with sendBeacon fallback
+  - `clients/js/src/errors.ts` (new) — Error capture with deduplication, console patching, global handlers
+  - `clients/js/src/metrics.ts` (new) — Metrics convenience wrapper (counter, histogram, gauge)
+  - `clients/js/src/vitals.ts` (new) — Web Vitals collection (LCP, INP, CLS, FCP, TTFB, page load time)
+  - `clients/js/src/network.ts` (new) — Fetch/XHR interception with URL sanitization
+  - `clients/js/src/core.ts` (new) — init() function, MonlightClient implementation, UMD auto-init
+  - `plan.md` — Struck through Package scaffolding tasks
+- Build output:
+  - `dist/monlight.min.js` — 13KB raw, 3.9KB gzipped (UMD/IIFE)
+  - `dist/monlight.esm.js` — 13KB raw, 3.7KB gzipped (ESM)
+  - `dist/core.d.ts` + supporting .d.ts — TypeScript declarations
+- **Learnings for future iterations:**
+  - Node.js 21.0.0 and npm 10.2.0 are available in the dev environment
+  - `esbuild` produces very small bundles — 3.9KB gzipped for the full SDK with all modules
+  - TypeScript `tsc --emitDeclarationOnly` generates one .d.ts per source file. For a single entry point, `package.json` `types` field points to `dist/core.d.ts` which re-exports the public types
+  - The `noUnusedLocals` and `noUnusedParameters` tsconfig options catch dead code early — classes storing config for future use need to actually reference it
+  - `vitest` with `jsdom` environment provides browser-like globals (window, document, etc.) for testing
+  - The UMD bundle uses `format: "iife"` with `globalName: "MonlightSDK"` — the auto-init from `window.MonlightConfig` runs as part of module evaluation
+  - `sendBeacon` cannot set custom headers, so the DSN key is passed as a query parameter `?key={dsn}` when using beacon transport
+---

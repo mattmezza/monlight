@@ -1,0 +1,33 @@
+{
+  "name": "@monlight/browser",
+  "version": "0.1.0",
+  "description": "Lightweight browser monitoring SDK for error tracking, Web Vitals, and network metrics",
+  "main": "dist/monlight.min.js",
+  "module": "dist/monlight.esm.js",
+  "types": "dist/core.d.ts",
+  "files": [
+    "dist/"
+  ],
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "monitoring",
+    "error-tracking",
+    "web-vitals",
+    "performance",
+    "browser"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "^0.20.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.2.0",
+    "jsdom": "^24.0.0"
+  },
+  "sideEffects": false
+}
