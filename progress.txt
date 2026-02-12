@@ -356,3 +356,16 @@
   - Browser relay uses `ADMIN_API_KEY` (not `API_KEY`) for management endpoints — distinct from the service API key pattern used by the other three services. DSN public keys are a separate auth mechanism for browser-side ingestion.
   - The `@intCast` is needed when converting the `i64` return from `config_mod.getInt()` to `usize` for `max_body_size` and `rate_limit`.
 ---
+
+## Session 28: Browser Relay DSN Auth & Admin Auth
+
+- What was implemented: Created `dsn_auth.zig` module for DSN public key authentication (X-Monlight-Key header → dsn_keys table lookup → project name resolution), `dsn_auth_test.zig` with 14 integration tests covering auth routing and separation, and updated `main.zig` with path-based auth dispatch: `/health` (no auth), `/api/browser/*` (DSN auth), `/api/source-maps*` and `/api/dsn-keys*` (admin API key auth), unknown paths (404, no auth).
+- Files changed: `browser-relay/src/dsn_auth.zig` (new), `browser-relay/src/dsn_auth_test.zig` (new), `browser-relay/src/main.zig` (modified), `browser-relay/build.zig` (modified), `plan.md` (struck through DSN auth tasks)
+- **Learnings for future iterations:**
+  - SQLite `row.text()` returns a pointer to internal statement memory that becomes invalid after `stmt.deinit()`. Always copy the string data into a local buffer (e.g., `[100]u8`) before finalizing the statement.
+  - The `lookupProject()` helper uses a `[100]u8` buffer and returns a `?[]const u8` slice into that buffer — the caller must use it before the buffer goes out of scope.
+  - `DsnAuthResult` struct packs both `authenticated: bool` and the project name buffer together, so the caller gets a self-contained result without dangling pointer concerns.
+  - Path-based auth dispatch in `main.zig` strips query parameters before matching (`std.mem.indexOfScalar(u8, target, '?')`) to ensure `/api/browser/errors?foo=bar` routes correctly.
+  - Integration tests use `TestServer` pattern with OS-assigned port (port 0) — same pattern as auth_test.zig and rate_limit_test.zig in other services.
+  - The browser-relay uses `ADMIN_API_KEY` (from config) for admin endpoints, distinct from the `API_KEY` used by the other three services. The config module reads `ADMIN_API_KEY` env var.
+---

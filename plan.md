@@ -26,14 +26,14 @@
       - ~~All variables are read from env~~
       - ~~Missing required variables (`ADMIN_API_KEY`, `ERROR_TRACKER_URL`, `ERROR_TRACKER_API_KEY`, `METRICS_COLLECTOR_URL`, `METRICS_COLLECTOR_API_KEY`) cause a clear startup error~~
       - ~~Defaults are applied for optional variables~~
-  - DSN / public key authentication
-    - Implement public key validation for browser ingestion endpoints
-      - Requests must include `X-Monlight-Key` header with a valid public key from `dsn_keys` table
-      - Invalid or missing key returns 401 with `{"detail": "Invalid DSN key"}`
-      - Public key lookup resolves to a project name (used to tag ingested data)
-    - Implement admin API key authentication for management endpoints (source map upload, DSN key management)
-      - Uses shared auth middleware with `ADMIN_API_KEY` via `X-API-Key` header
-      - `/health` endpoint is excluded from auth
+  - ~~DSN / public key authentication~~
+    - ~~Implement public key validation for browser ingestion endpoints~~
+      - ~~Requests must include `X-Monlight-Key` header with a valid public key from `dsn_keys` table~~
+      - ~~Invalid or missing key returns 401 with `{"detail": "Invalid DSN key"}`~~
+      - ~~Public key lookup resolves to a project name (used to tag ingested data)~~
+    - ~~Implement admin API key authentication for management endpoints (source map upload, DSN key management)~~
+      - ~~Uses shared auth middleware with `ADMIN_API_KEY` via `X-API-Key` header~~
+      - ~~`/health` endpoint is excluded from auth~~
   - CORS handling
     - Implement CORS middleware for browser ingestion endpoints
       - Read allowed origins from `CORS_ORIGINS` env var (comma-separated)
