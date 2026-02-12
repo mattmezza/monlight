@@ -440,4 +440,42 @@
   - `sqlite.Statement.bindInt/bindText` take `self: Statement` by value (not pointer). Pass `stmt` not `&stmt`.
   - `std.json.parseFromSliceLeaky` allocates into the provided allocator and never frees. When testing with `std.testing.allocator` (which is a GPA that detects leaks), wrap with `std.heap.ArenaAllocator` and defer `arena.deinit()`.
   - The source filter SQL uses a subquery rather than a JOIN to avoid row duplication when an error has multiple occurrences with different request_method values.
-  - Session ID grouping (linking to other errors from same session) is deferred — currently just displayed inline.
+  - Session ID grouping (linking to other errors from same session) is deferred — currently just displayed inline. **UPDATE: implemented in next session.**
+
+## Session 7 — Session ID grouping filter
+- **Task:** Show session ID as a grouping hint (link to other errors from same session)
+- **Implementation:**
+  1. **Backend — session_id filter** (`error_listing.zig`): Added `session_id` field to `ListParams`, parsed from query params. Added WHERE clause using `json_extract(extra, '$.session_id') = ?` subquery on `error_occurrences` table (same pattern as source filter). Updated `bindFilterParams()` to bind session_id after project and environment. Added `insertTestOccurrenceWithExtra()` test helper. 5 new tests: parse session_id, ignore empty, filter returns matching errors, multiple errors from same session, no matches returns empty.
+  2. **Error detail UI** (`error_detail.html`): Changed session ID display from static `<span>` to clickable `<a>` link pointing to `/?session_id=<value>`. Styled with dotted underline and hover color, with descriptive title attribute.
+  3. **Error listing UI** (`index.html`): Added amber session filter banner (hidden by default) that appears when `session_id` URL param is present. Shows "Showing errors from session: <id>" with a "Clear filter" button. `loadErrors()` passes session_id to API. `initSessionBanner()` called on startup.
+- Files changed: `error-tracker/src/error_listing.zig`, `error-tracker/src/static/error_detail.html`, `error-tracker/src/static/index.html`, `plan.md`
+- Test results: 35/35 steps, 246/246 tests passed
+- **Learnings for future iterations:**
+   - SQLite's `json_extract()` works well for filtering on fields inside JSON columns — same approach used for labels in metrics-collector.
+   - The subquery pattern `id IN (SELECT error_id FROM error_occurrences WHERE ...)` keeps the main query clean and avoids JOIN row duplication.
+   - `encodeURIComponent()` in JS is important when passing session IDs as URL parameters since they may contain special characters.
+
+## Session 35: Metrics Collector — Web Vitals Dashboard Extension
+
+- What was implemented: Extended the metrics-collector dashboard to show Web Vitals data when browser metrics exist. This includes:
+  1. **Backend — `buildDashboardJson()` in `main.zig`**: Added conditional `web_vitals` section to the dashboard JSON response. First queries `metrics_raw` for `web_vitals_lcp/inp/cls` metrics with `json_extract(labels, '$.source') = 'browser'`. If data exists, emits three sub-sections:
+     - `summary`: per-vital AVG value, count, and rating (good/needs-improvement/poor based on Google thresholds: LCP <2500/<4000, INP <200/<500, CLS <0.1/<0.25)
+     - `timeseries`: time-bucketed averages for all three vitals (minute resolution for 1h/24h, hour resolution for 7d/30d)
+     - `by_page`: per-page breakdown with LCP/INP/CLS averages and page view counts, sorted by views descending, limited to 20 pages
+  2. **Frontend — `index.html`**: Added Web Vitals UI section (hidden when no data):
+     - Three summary cards showing LCP (ms), INP (ms), CLS with color-coded values and pill ratings
+     - uPlot trend chart showing LCP, INP, CLS over time (CLS scaled x1000 for visibility alongside ms-scale metrics)
+     - Page performance breakdown table with color-coded values per Google thresholds
+  3. **Tests**: 3 new tests in `main.zig`:
+     - `buildDashboardJson without web vitals data` — verifies `web_vitals` key is absent
+     - `buildDashboardJson with web vitals data` — verifies full section with summary/timeseries/by_page
+     - `buildDashboardJson web vitals ratings are correct` — verifies poor LCP (5000ms), needs-improvement INP (350ms), good CLS (0.05)
+- Files changed: `metrics-collector/src/main.zig` (Web Vitals queries + `writeWebVitalField` helper + 3 tests), `metrics-collector/src/static/index.html` (Web Vitals UI section + CSS + JS rendering functions), `plan.md` (struck through Metrics Collector Web Vitals tasks), `progress.txt`
+- Test results: 17/17 build steps, 27/27 tests passed (was 4/4, now 26/26 in main test suite + 1 in web_ui)
+- **Learnings for future iterations:**
+  - SQLite's `json_extract(labels, '$.source')` works directly on the TEXT column containing JSON — no need to parse/index JSON separately
+  - The `metrics_aggregated` table has p50/p95/p99 but NOT p75. For Web Vitals timeseries, we use AVG from `metrics_raw` as a practical approximation. True p75 would require either adding a p75 column to aggregation or computing at query time with NTILE window functions.
+  - Conditional aggregation with `CASE WHEN name='web_vitals_lcp' THEN value END` allows querying all three vitals in a single SQL query per time bucket, avoiding 3x query overhead.
+  - CLS values (typically 0.01-0.25) are ~10000x smaller than LCP values (typically 1000-5000ms). The frontend scales CLS by 1000 for the trend chart to make all three series visible on the same y-axis.
+  - The `writeWebVitalField` helper writes nullable float values with 4 decimal places — same pattern as `writeNullableFloat` in `metrics_query.zig` but with `.4` precision instead of `.6`.
+

@@ -23,6 +23,15 @@
         .type-histogram { background: #3b1f4f; color: #c084fc; }
         .type-gauge { background: #1a3a2a; color: #4ade80; }
         .loading { color: #64748b; font-style: italic; }
+        .vital-card { text-align: center; }
+        .vital-value { font-size: 1.75rem; font-weight: 700; }
+        .vital-unit { font-size: 0.75rem; color: #94a3b8; }
+        .vital-rating { font-size: 0.65rem; padding: 2px 8px; border-radius: 9999px; text-transform: uppercase; font-weight: 600; display: inline-block; margin-top: 4px; }
+        .rating-good { background: #14532d; color: #4ade80; }
+        .rating-needs-improvement { background: #713f12; color: #facc15; }
+        .rating-poor { background: #7f1d1d; color: #f87171; }
+        .rating-unknown { background: #334155; color: #94a3b8; }
+        .section-title { font-size: 1rem; font-weight: 600; color: #e2e8f0; margin-bottom: 0.75rem; border-bottom: 1px solid #334155; padding-bottom: 0.5rem; }
     </style>
 </head>
 <body class="min-h-screen p-6">
@@ -93,6 +102,49 @@
                 <p class="loading p-4">Loading...</p>
             </div>
         </div>
+
+        <!-- Web Vitals Section (hidden until data available) -->
+        <div id="webVitalsSection" style="display: none;" class="mt-6">
+            <h2 class="section-title">Web Vitals</h2>
+
+            <!-- Web Vitals Summary Cards -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div class="card p-4 vital-card">
+                    <div class="stat-label">Largest Contentful Paint</div>
+                    <div class="vital-value" id="lcpValue">--</div>
+                    <div class="vital-unit">ms</div>
+                    <div class="vital-rating rating-unknown" id="lcpRating">--</div>
+                </div>
+                <div class="card p-4 vital-card">
+                    <div class="stat-label">Interaction to Next Paint</div>
+                    <div class="vital-value" id="inpValue">--</div>
+                    <div class="vital-unit">ms</div>
+                    <div class="vital-rating rating-unknown" id="inpRating">--</div>
+                </div>
+                <div class="card p-4 vital-card">
+                    <div class="stat-label">Cumulative Layout Shift</div>
+                    <div class="vital-value" id="clsValue">--</div>
+                    <div class="vital-unit">&nbsp;</div>
+                    <div class="vital-rating rating-unknown" id="clsRating">--</div>
+                </div>
+            </div>
+
+            <!-- Web Vitals Trend Chart -->
+            <div class="card p-4 mb-6">
+                <h3 class="text-sm font-semibold text-gray-300 mb-3">Web Vitals Trend</h3>
+                <div class="chart-container" id="webVitalsChart">
+                    <p class="loading p-4">Loading chart...</p>
+                </div>
+            </div>
+
+            <!-- Page Performance Breakdown -->
+            <div class="card p-4">
+                <h3 class="text-sm font-semibold text-gray-300 mb-3">Page Performance</h3>
+                <div id="pagePerformance">
+                    <p class="loading p-4">Loading...</p>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -112,6 +164,7 @@
                     document.getElementById('totalDatapoints').textContent = data.summary?.total_datapoints?.toLocaleString() || '0';
                     document.getElementById('distinctMetrics').textContent = data.summary?.distinct_metrics?.toLocaleString() || '0';
                     renderTopMetrics(data.top_metrics || []);
+                    renderWebVitals(data.web_vitals);
                 }
             } catch (e) {
                 console.error('Dashboard load failed:', e);
@@ -298,6 +351,119 @@
                 console.error('Latency chart load failed:', e);
                 container.innerHTML = '<p class="loading p-4">Failed to load chart</p>';
             }
+        }
+
+        function renderWebVitals(webVitals) {
+            const section = document.getElementById('webVitalsSection');
+            if (!webVitals) {
+                section.style.display = 'none';
+                return;
+            }
+            section.style.display = 'block';
+
+            // Summary cards
+            const summary = webVitals.summary || {};
+            renderVitalCard('lcp', summary.lcp, 'ms', v => v.toFixed(0));
+            renderVitalCard('inp', summary.inp, 'ms', v => v.toFixed(0));
+            renderVitalCard('cls', summary.cls, '', v => v.toFixed(3));
+
+            // Trend chart
+            renderWebVitalsChart(webVitals.timeseries || []);
+
+            // Page breakdown
+            renderPagePerformance(webVitals.by_page || []);
+        }
+
+        function renderVitalCard(id, data, unit, formatter) {
+            const valueEl = document.getElementById(id + 'Value');
+            const ratingEl = document.getElementById(id + 'Rating');
+
+            if (!data || data.avg === null) {
+                valueEl.textContent = '--';
+                ratingEl.textContent = '--';
+                ratingEl.className = 'vital-rating rating-unknown';
+                return;
+            }
+
+            valueEl.textContent = formatter(data.avg);
+            const rating = data.rating || 'unknown';
+            ratingEl.textContent = rating.replace('-', ' ');
+            ratingEl.className = 'vital-rating rating-' + rating;
+
+            // Color the value based on rating
+            const colors = { good: '#4ade80', 'needs-improvement': '#facc15', poor: '#f87171' };
+            valueEl.style.color = colors[rating] || '#38bdf8';
+        }
+
+        let webVitalsChartInstance = null;
+        function renderWebVitalsChart(timeseries) {
+            const container = document.getElementById('webVitalsChart');
+            if (timeseries.length === 0) {
+                container.innerHTML = '<p class="loading p-4">No Web Vitals data for selected period</p>';
+                if (webVitalsChartInstance) { webVitalsChartInstance.destroy(); webVitalsChartInstance = null; }
+                return;
+            }
+
+            container.innerHTML = '';
+            if (webVitalsChartInstance) webVitalsChartInstance.destroy();
+
+            const timestamps = timeseries.map(d => new Date(d.bucket).getTime() / 1000);
+            const lcp = timeseries.map(d => d.lcp);
+            const inp = timeseries.map(d => d.inp);
+            const cls = timeseries.map(d => d.cls != null ? d.cls * 1000 : null); // scale CLS for visibility
+
+            const opts = {
+                width: container.clientWidth,
+                height: 220,
+                series: [
+                    {},
+                    { label: 'LCP (ms)', stroke: '#38bdf8', width: 2 },
+                    { label: 'INP (ms)', stroke: '#c084fc', width: 2 },
+                    { label: 'CLS (x1000)', stroke: '#4ade80', width: 2, dash: [4, 4] },
+                ],
+                axes: [
+                    { stroke: '#64748b', grid: { stroke: '#1e293b' } },
+                    { stroke: '#64748b', grid: { stroke: '#1e293b' } },
+                ],
+                scales: { x: { time: true } },
+            };
+
+            webVitalsChartInstance = new uPlot(opts, [timestamps, lcp, inp, cls], container);
+        }
+
+        function renderPagePerformance(pages) {
+            const container = document.getElementById('pagePerformance');
+            if (pages.length === 0) {
+                container.innerHTML = '<p class="text-gray-500 p-4">No page data available</p>';
+                return;
+            }
+
+            let html = '<div class="overflow-x-auto"><table class="w-full text-sm">';
+            html += '<thead><tr class="text-gray-400 text-left border-b border-gray-700">';
+            html += '<th class="pb-2 pr-4">Page</th><th class="pb-2 pr-4 text-right">LCP (ms)</th>';
+            html += '<th class="pb-2 pr-4 text-right">INP (ms)</th><th class="pb-2 pr-4 text-right">CLS</th>';
+            html += '<th class="pb-2 text-right">Views</th>';
+            html += '</tr></thead><tbody>';
+
+            pages.forEach(p => {
+                html += '<tr class="metric-row">';
+                html += `<td class="py-2 pr-4 font-medium">${escapeHtml(p.page || '/')}</td>`;
+                html += `<td class="py-2 pr-4 text-right ${vitalColor(p.lcp, 2500, 4000)}">${p.lcp != null ? p.lcp.toFixed(0) : '--'}</td>`;
+                html += `<td class="py-2 pr-4 text-right ${vitalColor(p.inp, 200, 500)}">${p.inp != null ? p.inp.toFixed(0) : '--'}</td>`;
+                html += `<td class="py-2 pr-4 text-right ${vitalColor(p.cls, 0.1, 0.25)}">${p.cls != null ? p.cls.toFixed(3) : '--'}</td>`;
+                html += `<td class="py-2 text-right text-gray-300">${(p.page_views || 0).toLocaleString()}</td>`;
+                html += '</tr>';
+            });
+
+            html += '</tbody></table></div>';
+            container.innerHTML = html;
+        }
+
+        function vitalColor(value, goodMax, poorMin) {
+            if (value == null) return 'text-gray-500';
+            if (value < goodMax) return 'text-green-400';
+            if (value < poorMin) return 'text-yellow-400';
+            return 'text-red-400';
         }
 
         function escapeHtml(str) {

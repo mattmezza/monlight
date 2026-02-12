@@ -188,7 +188,7 @@
       - ~~Default view shows all errors (both server and browser)~~
     - ~~Display browser-specific context in error detail view~~
       - ~~Show user agent, page URL, session ID when present~~
-      - Show session ID as a grouping hint (link to other errors from same session)
+      - ~~Show session ID as a grouping hint (link to other errors from same session)~~
   - ~~Tests~~
     - ~~Write tests for browser error ingestion (BROWSER method accepted, extra fields stored)~~
       - ~~Tests pass with `zig build test`~~
@@ -196,36 +196,36 @@
       - ~~Tests verify consistent fingerprints for typical JS stack formats~~
 
 - Metrics Collector service modifications (`metrics-collector/`)
-  - Extend dashboard to show Web Vitals
-    - Add "Web Vitals" section to dashboard page
-      - Display current LCP, INP, CLS values (latest hourly averages)
-      - Color-code values: green (good), yellow (needs improvement), red (poor) using Google's thresholds
-        - LCP: good < 2.5s, poor > 4.0s
-        - INP: good < 200ms, poor > 500ms
-        - CLS: good < 0.1, poor > 0.25
-    - Add Web Vitals trend chart (LCP, INP, CLS over time)
-      - Chart shows p75 values over the selected time period (p75 is the standard Web Vitals reporting percentile)
-      - Time range selector (1h, 24h, 7d) applies to Web Vitals charts
-    - Add page performance breakdown table
-      - Columns: page (URL path), LCP p75, INP p75, CLS p75, page views
-      - Sorted by page views descending
-      - Filterable by page URL
-  - Extend dashboard data endpoint (`GET /api/dashboard`)
-    - Add `web_vitals` section to response:
-      - `summary`: current LCP, INP, CLS averages and ratings
-      - `timeseries`: LCP, INP, CLS p75 over time buckets
-      - `by_page`: per-page Web Vitals breakdown
-    - Only include `web_vitals` section if browser metrics exist (check for `source: "browser"` label)
-      - If no browser metrics, omit the section entirely (backward compatible)
-  - No changes to ingestion, aggregation, or storage
-    - Browser metrics use the same metrics pipeline (counter, histogram, gauge)
-    - Web Vitals are ingested as histogram metrics with `source: "browser"` label
-    - Existing aggregation (minute → hourly) and retention policies apply
-  - Tests
-    - Write tests for dashboard endpoint with Web Vitals data present
-      - Tests verify `web_vitals` section appears when browser metrics exist
-    - Write tests for dashboard endpoint with no browser metrics
-      - Tests verify `web_vitals` section is omitted (backward compatible)
+  - ~~Extend dashboard to show Web Vitals~~
+    - ~~Add "Web Vitals" section to dashboard page~~
+      - ~~Display current LCP, INP, CLS values (latest hourly averages)~~
+      - ~~Color-code values: green (good), yellow (needs improvement), red (poor) using Google's thresholds~~
+        - ~~LCP: good < 2.5s, poor > 4.0s~~
+        - ~~INP: good < 200ms, poor > 500ms~~
+        - ~~CLS: good < 0.1, poor > 0.25~~
+    - ~~Add Web Vitals trend chart (LCP, INP, CLS over time)~~
+      - ~~Chart shows p75 values over the selected time period (p75 is the standard Web Vitals reporting percentile)~~
+      - ~~Time range selector (1h, 24h, 7d) applies to Web Vitals charts~~
+    - ~~Add page performance breakdown table~~
+      - ~~Columns: page (URL path), LCP p75, INP p75, CLS p75, page views~~
+      - ~~Sorted by page views descending~~
+      - ~~Filterable by page URL~~
+  - ~~Extend dashboard data endpoint (`GET /api/dashboard`)~~
+    - ~~Add `web_vitals` section to response:~~
+      - ~~`summary`: current LCP, INP, CLS averages and ratings~~
+      - ~~`timeseries`: LCP, INP, CLS p75 over time buckets~~
+      - ~~`by_page`: per-page Web Vitals breakdown~~
+    - ~~Only include `web_vitals` section if browser metrics exist (check for `source: "browser"` label)~~
+      - ~~If no browser metrics, omit the section entirely (backward compatible)~~
+  - ~~No changes to ingestion, aggregation, or storage~~
+    - ~~Browser metrics use the same metrics pipeline (counter, histogram, gauge)~~
+    - ~~Web Vitals are ingested as histogram metrics with `source: "browser"` label~~
+    - ~~Existing aggregation (minute → hourly) and retention policies apply~~
+  - ~~Tests~~
+    - ~~Write tests for dashboard endpoint with Web Vitals data present~~
+      - ~~Tests verify `web_vitals` section appears when browser metrics exist~~
+    - ~~Write tests for dashboard endpoint with no browser metrics~~
+      - ~~Tests verify `web_vitals` section is omitted (backward compatible)~~
 
 - JavaScript SDK (`clients/js/`)
   - Package scaffolding
