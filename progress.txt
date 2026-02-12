@@ -382,3 +382,24 @@
   - **`getCorsHeaders()` is separate from `handleCors()`**: `handleCors` handles the OPTIONS preflight case (sends 204), while `getCorsHeaders` is used by normal response paths to get the CORS headers to include. This separation avoids duplicating origin-matching logic.
   - **Zig 0.13 `std.http.Server.Request.respond()` extra_headers**: The `extra_headers` field accepts `&.{ .{ .name = "...", .value = "..." } }` — an array of anonymous struct literals. Multiple headers are supported.
 ---
+
+## Session 30: Source Map Deobfuscation Integration
+
+- What was implemented: Integrated the existing `sourcemap.deobfuscateStackTrace()` engine into the browser error ingestion pipeline. When a browser error report includes a `release` field, the handler now attempts to deobfuscate the stack trace using source maps stored in the database before forwarding to the error tracker. If deobfuscation fails or no source maps are found, the raw stack trace is used as-is (graceful fallback).
+- Files changed: `browser-relay/src/browser_errors.zig` (added `sourcemap.zig` and `sqlite` imports, added `db` parameter to both `handleBrowserError` and `handleBrowserErrorWithCors`, added deobfuscation logic between parse/validate and buildPayload), `browser-relay/src/main.zig` (pass `db` to `handleBrowserErrorWithCors` call), `browser-relay/build.zig` (added `sqlite_mod` import, `linkSystemLibrary("sqlite3")`, `linkLibC()` to `browser_errors_tests` target), `plan.md` (struck through source map deobfuscation integration sub-task lines 56-61)
+- **Learnings for future iterations:**
+  - **Mutable copy of value type struct**: `BrowserErrorFields` is returned by value from `parseAndValidate`. To replace `.stack` with a deobfuscated version, we create `var final_fields = fields;` and mutate `final_fields.stack`. This avoids changing the `parseAndValidate` API or adding a separate parameter to `buildPayload`.
+  - **Arena allocator for deobfuscation**: The deobfuscated stack trace is allocated in a dedicated `deobfuscation_arena` with `defer deinit()`. This ensures the memory lives long enough to be written into the payload buffer by `buildPayload`, then is freed when the function returns.
+  - **Error handling with labeled blocks**: The `catch |err| blk: { log.warn(...); break :blk null; }` pattern allows graceful fallback — if `deobfuscateStackTrace` returns an error, we log a warning and fall back to the raw stack trace by setting `deobfuscated_stack = null`.
+  - **Build dependency propagation**: When a standalone test target (`browser_errors_tests`) starts importing a module that transitively imports `sqlite`, the build target needs `addImport("sqlite", sqlite_mod)` + `linkSystemLibrary("sqlite3")` + `linkLibC()`, even if the tests themselves don't directly use sqlite.
+---
+
+## Session 31: Verify & Strike Through Already-Implemented Plan Items
+
+- What was implemented: Verified that the source map deobfuscation module (JS stack trace parser, VLQ decoder, stack trace rewriting), health check endpoint, and related test plan items were already fully implemented in sourcemap.zig but not struck through in plan.md. Struck through all verified items.
+- Files changed: `plan.md` (struck through: source map deobfuscation module + 3 sub-tasks, health check endpoint, source map parsing tests, stack trace parsing tests, stack trace rewriting tests)
+- **Learnings for future iterations:**
+  - The sourcemap.zig module (1064 lines) contains the full deobfuscation pipeline: Base64 VLQ decoder, source map JSON parser, JS stack trace parser (Chrome/Firefox/Safari), stack trace rewriter, and database-backed source map cache — all with 22 unit tests
+  - When previous sessions implement features but forget to strike through plan items, subsequent sessions should verify and clean up the plan rather than re-implementing
+  - The browser-relay health check endpoint (`/health`) is handled before auth middleware in main.zig, so it works without any API key
+---

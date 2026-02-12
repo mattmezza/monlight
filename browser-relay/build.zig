@@ -146,6 +146,9 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    browser_errors_tests.root_module.addImport("sqlite", sqlite_mod);
+    browser_errors_tests.linkSystemLibrary("sqlite3");
+    browser_errors_tests.linkLibC();
 
     const run_browser_errors_tests = b.addRunArtifact(browser_errors_tests);
 
@@ -182,6 +185,18 @@ pub fn build(b: *std.Build) void {
 
     const run_source_maps_tests = b.addRunArtifact(source_maps_tests);
 
+    // Test step — unit tests for sourcemap.zig (deobfuscation module)
+    const sourcemap_tests = b.addTest(.{
+        .root_source_file = b.path("src/sourcemap.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    sourcemap_tests.root_module.addImport("sqlite", sqlite_mod);
+    sourcemap_tests.linkSystemLibrary("sqlite3");
+    sourcemap_tests.linkLibC();
+
+    const run_sourcemap_tests = b.addRunArtifact(sourcemap_tests);
+
     const test_step = b.step("test", "Run all unit tests");
     test_step.dependOn(&run_main_tests.step);
     test_step.dependOn(&run_config_tests.step);
@@ -194,4 +209,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_browser_metrics_tests.step);
     test_step.dependOn(&run_dsn_keys_tests.step);
     test_step.dependOn(&run_source_maps_tests.step);
+    test_step.dependOn(&run_sourcemap_tests.step);
 }

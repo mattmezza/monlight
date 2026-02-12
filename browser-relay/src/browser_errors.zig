@@ -1,5 +1,7 @@
 const std = @import("std");
 const log = std.log;
+const sourcemap = @import("sourcemap.zig");
+const sqlite = @import("sqlite");
 
 /// Maximum size for the transformed payload buffer.
 const max_payload_size = 64 * 1024;
@@ -281,6 +283,7 @@ pub fn handleBrowserError(
     project: []const u8,
     error_tracker_url: []const u8,
     error_tracker_api_key: []const u8,
+    db: *sqlite.Database,
 ) !?[]const u8 {
     // Read the request body
     const reader = try request.reader();
@@ -308,9 +311,33 @@ pub fn handleBrowserError(
     // Extract context JSON if present
     const context_json = extractContextJson(body);
 
+    // Attempt source map deobfuscation if release is provided
+    var deobfuscated_stack: ?[]const u8 = null;
+    var deobfuscation_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer deobfuscation_arena.deinit();
+
+    if (fields.release != null and fields.stack != null) {
+        deobfuscated_stack = sourcemap.deobfuscateStackTrace(
+            deobfuscation_arena.allocator(),
+            fields.stack.?,
+            project,
+            fields.release.?,
+            db,
+        ) catch |err| blk: {
+            log.warn("Source map deobfuscation failed: {}, using raw stack trace", .{err});
+            break :blk null;
+        };
+    }
+
+    // Use deobfuscated stack if available, otherwise use original fields
+    var final_fields = fields;
+    if (deobfuscated_stack) |stack| {
+        final_fields.stack = stack;
+    }
+
     // Build transformed payload
     var payload_buf: [max_payload_size]u8 = undefined;
-    const payload = buildPayload(&payload_buf, fields, project, context_json) catch {
+    const payload = buildPayload(&payload_buf, final_fields, project, context_json) catch {
         try sendResponse(request, .internal_server_error, "{\"detail\": \"Failed to build payload\"}", null);
         return null;
     };
@@ -352,6 +379,7 @@ pub fn handleBrowserErrorWithCors(
     error_tracker_url: []const u8,
     error_tracker_api_key: []const u8,
     cors_origin: ?[]const u8,
+    db: *sqlite.Database,
 ) !void {
     // Read the request body
     const reader = try request.reader();
@@ -386,9 +414,33 @@ pub fn handleBrowserErrorWithCors(
     // Extract context JSON if present
     const context_json = extractContextJson(body);
 
+    // Attempt source map deobfuscation if release is provided
+    var deobfuscated_stack: ?[]const u8 = null;
+    var deobfuscation_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer deobfuscation_arena.deinit();
+
+    if (fields.release != null and fields.stack != null) {
+        deobfuscated_stack = sourcemap.deobfuscateStackTrace(
+            deobfuscation_arena.allocator(),
+            fields.stack.?,
+            project,
+            fields.release.?,
+            db,
+        ) catch |err| blk: {
+            log.warn("Source map deobfuscation failed: {}, using raw stack trace", .{err});
+            break :blk null;
+        };
+    }
+
+    // Use deobfuscated stack if available, otherwise use original fields
+    var final_fields = fields;
+    if (deobfuscated_stack) |stack| {
+        final_fields.stack = stack;
+    }
+
     // Build transformed payload
     var payload_buf: [max_payload_size]u8 = undefined;
-    const payload = buildPayload(&payload_buf, fields, project, context_json) catch {
+    const payload = buildPayload(&payload_buf, final_fields, project, context_json) catch {
         try sendResponse(request, .internal_server_error, "{\"detail\": \"Failed to build payload\"}", cors_origin);
         return;
     };

@@ -42,134 +42,134 @@
       - ~~Respond with `Access-Control-Allow-Methods: POST, OPTIONS`~~
       - ~~Preflight `OPTIONS` requests return 204 with CORS headers~~
       - ~~Non-matching origins are rejected (no CORS headers sent)~~
-  - Request limits
-    - Use shared rate limiting middleware (300 requests/minute per public key)
-      - Rate-limited requests return 429
-    - Use shared body size enforcement (64KB max for browser payloads)
-      - Oversized requests return 413
-  - Browser error ingestion endpoint (`POST /api/browser/errors`)
-    - Parse and validate JSON request body:
-      - Required fields: `type` (string, e.g. "Error", "TypeError"), `message` (string), `stack` (string)
-      - Optional fields: `url` (page URL), `user_agent` (string), `session_id` (string), `context` (object with arbitrary metadata), `release` (string for source map matching), `timestamp` (ISO8601, defaults to server time)
-      - Invalid JSON returns 400
-      - Missing required fields return 400 with descriptive error
-    - If `release` is provided, attempt source map deobfuscation of stack trace
-      - Parse stack frames from the JS stack trace string
-      - For each frame, look up source map by (project, release, file_url)
-      - If found, map minified line:column to original file:line:column using source map
-      - Replace stack trace with deobfuscated version
-      - If source map not found, use the raw stack trace as-is
-    - Transform browser error into Error Tracker payload format:
-      - Map `type` → `exception_type`
-      - Map `message` → `message`
-      - Map deobfuscated `stack` → `traceback`
-      - Map `url` → `request_url`
-      - Set `request_method` to `"BROWSER"`
-      - Set `project` from DSN key lookup
-      - Set `environment` from `context.environment` if present, else `"prod"`
-      - Pack `user_agent`, `session_id`, and remaining `context` fields into `extra`
-    - Forward transformed payload to Error Tracker via HTTP POST to `{ERROR_TRACKER_URL}/api/errors`
-      - Include `X-API-Key: {ERROR_TRACKER_API_KEY}` header
-      - Timeout: 5 seconds
-      - On success, return the Error Tracker response to the browser (201 or 200)
-      - On Error Tracker failure, log warning and return 502 with `{"detail": "Upstream error"}`
-  - Browser metrics ingestion endpoint (`POST /api/browser/metrics`)
-    - Parse and validate JSON request body:
-      - Required fields: `metrics` (array of metric objects)
-      - Each metric object: `name` (required string), `type` (required: "counter", "histogram", "gauge"), `value` (required number)
-      - Optional per-metric fields: `labels` (object), `timestamp` (ISO8601)
-      - Optional top-level fields: `session_id` (string), `url` (string, page URL)
-      - Invalid JSON returns 400
-      - Missing required fields return 400 with descriptive error
-    - Enrich metric labels:
-      - Add `project` label from DSN key lookup
-      - Add `source: "browser"` label to distinguish from server-side metrics
-      - If `session_id` provided, add `session_id` label
-      - If `url` provided, add `page` label (URL path only, strip query params and fragment)
-    - Transform into Metrics Collector payload format and forward via HTTP POST to `{METRICS_COLLECTOR_URL}/api/metrics`
-      - Include `X-API-Key: {METRICS_COLLECTOR_API_KEY}` header
-      - Timeout: 5 seconds
-      - On success, return 202 with `{"status": "accepted", "count": N}`
-      - On Metrics Collector failure, log warning and return 502 with `{"detail": "Upstream error"}`
-  - Source map upload endpoint (`POST /api/source-maps`)
-    - Authenticate with admin API key (`X-API-Key` header)
-    - Parse multipart form or JSON body with fields:
-      - `project` (required string)
-      - `release` (required string, version identifier e.g. "1.2.3" or git SHA)
-      - `file_url` (required string, the URL the minified JS is served from, e.g. "/static/app.min.js")
-      - `map_content` (required string, the source map JSON content)
-    - Validate source map is valid JSON with `version`, `sources`, `mappings` fields
-      - Invalid source map returns 400 with `{"detail": "Invalid source map format"}`
-    - Store in `source_maps` table (upsert on project+release+file_url)
-      - Return 201 with `{"status": "uploaded", "project": "...", "release": "...", "file_url": "..."}`
-  - Source map list endpoint (`GET /api/source-maps`)
-    - Authenticate with admin API key
-    - Support query parameters: `project` (optional filter)
-    - Return list of uploaded source maps (without map_content, just metadata)
-      - Response shape: `{"source_maps": [{"id": N, "project": "...", "release": "...", "file_url": "...", "uploaded_at": "..."}], "total": N}`
-  - Source map delete endpoint (`DELETE /api/source-maps/{id}`)
-    - Authenticate with admin API key
-    - Delete source map by ID
-      - Return 200 with `{"status": "deleted"}`
-      - Non-existent ID returns 404
-  - Source map deobfuscation module
-    - Implement JavaScript stack trace parser
-      - Parse common stack trace formats:
-        - Chrome/V8: `    at functionName (file.js:line:col)`
-        - Firefox: `functionName@file.js:line:col`
-        - Safari: `functionName@file.js:line:col`
-      - Extract file URL, line number, column number from each frame
-    - Implement source map decoder (VLQ-encoded mappings)
-      - Parse source map JSON (version 3 format)
-      - Decode Base64 VLQ-encoded `mappings` field
-      - Build lookup table: (generated_line, generated_col) → (original_file, original_line, original_col, original_name)
-      - Support `sources`, `names`, and `sourcesContent` fields
-    - Implement stack trace rewriting
-      - For each parsed frame, query source map lookup
-      - Replace minified file:line:col with original file:line:col
-      - Preserve function name from source map `names` if available
-      - Return rewritten stack trace as string
-  - DSN key management endpoints
-    - `POST /api/dsn-keys` — Create a new DSN key
-      - Authenticate with admin API key
-      - Required field: `project` (string)
-      - Generate random 32-character hex public key
-      - Insert into `dsn_keys` table with `active=true`
-      - Return 201 with `{"public_key": "...", "project": "..."}`
-    - `GET /api/dsn-keys` — List all DSN keys
-      - Authenticate with admin API key
-      - Return list of DSN keys with project, active status, created_at
-      - Response shape: `{"keys": [{"id": N, "public_key": "...", "project": "...", "active": true, "created_at": "..."}]}`
-    - `DELETE /api/dsn-keys/{id}` — Deactivate a DSN key
-      - Authenticate with admin API key
-      - Set `active=false` (soft delete, so existing references break gracefully)
-      - Return 200 with `{"status": "deactivated"}`
-      - Non-existent ID returns 404
-  - Health check endpoint (`GET /health`)
-    - Return `{"status": "ok"}` with 200, no auth required
-      - Endpoint responds without any API key
+  - ~~Request limits~~
+    - ~~Use shared rate limiting middleware (300 requests/minute per public key)~~
+      - ~~Rate-limited requests return 429~~
+    - ~~Use shared body size enforcement (64KB max for browser payloads)~~
+      - ~~Oversized requests return 413~~
+  - ~~Browser error ingestion endpoint (`POST /api/browser/errors`)~~
+    - ~~Parse and validate JSON request body:~~
+      - ~~Required fields: `type` (string, e.g. "Error", "TypeError"), `message` (string), `stack` (string)~~
+      - ~~Optional fields: `url` (page URL), `user_agent` (string), `session_id` (string), `context` (object with arbitrary metadata), `release` (string for source map matching), `timestamp` (ISO8601, defaults to server time)~~
+      - ~~Invalid JSON returns 400~~
+      - ~~Missing required fields return 400 with descriptive error~~
+    - ~~If `release` is provided, attempt source map deobfuscation of stack trace~~
+      - ~~Parse stack frames from the JS stack trace string~~
+      - ~~For each frame, look up source map by (project, release, file_url)~~
+      - ~~If found, map minified line:column to original file:line:column using source map~~
+      - ~~Replace stack trace with deobfuscated version~~
+      - ~~If source map not found, use the raw stack trace as-is~~
+    - ~~Transform browser error into Error Tracker payload format:~~
+      - ~~Map `type` → `exception_type`~~
+      - ~~Map `message` → `message`~~
+      - ~~Map deobfuscated `stack` → `traceback`~~
+      - ~~Map `url` → `request_url`~~
+      - ~~Set `request_method` to `"BROWSER"`~~
+      - ~~Set `project` from DSN key lookup~~
+      - ~~Set `environment` from `context.environment` if present, else `"prod"`~~
+      - ~~Pack `user_agent`, `session_id`, and remaining `context` fields into `extra`~~
+    - ~~Forward transformed payload to Error Tracker via HTTP POST to `{ERROR_TRACKER_URL}/api/errors`~~
+      - ~~Include `X-API-Key: {ERROR_TRACKER_API_KEY}` header~~
+      - ~~Timeout: 5 seconds~~
+      - ~~On success, return the Error Tracker response to the browser (201 or 200)~~
+      - ~~On Error Tracker failure, log warning and return 502 with `{"detail": "Upstream error"}`~~
+  - ~~Browser metrics ingestion endpoint (`POST /api/browser/metrics`)~~
+    - ~~Parse and validate JSON request body:~~
+      - ~~Required fields: `metrics` (array of metric objects)~~
+      - ~~Each metric object: `name` (required string), `type` (required: "counter", "histogram", "gauge"), `value` (required number)~~
+      - ~~Optional per-metric fields: `labels` (object), `timestamp` (ISO8601)~~
+      - ~~Optional top-level fields: `session_id` (string), `url` (string, page URL)~~
+      - ~~Invalid JSON returns 400~~
+      - ~~Missing required fields return 400 with descriptive error~~
+    - ~~Enrich metric labels:~~
+      - ~~Add `project` label from DSN key lookup~~
+      - ~~Add `source: "browser"` label to distinguish from server-side metrics~~
+      - ~~If `session_id` provided, add `session_id` label~~
+      - ~~If `url` provided, add `page` label (URL path only, strip query params and fragment)~~
+    - ~~Transform into Metrics Collector payload format and forward via HTTP POST to `{METRICS_COLLECTOR_URL}/api/metrics`~~
+      - ~~Include `X-API-Key: {METRICS_COLLECTOR_API_KEY}` header~~
+      - ~~Timeout: 5 seconds~~
+      - ~~On success, return 202 with `{"status": "accepted", "count": N}`~~
+      - ~~On Metrics Collector failure, log warning and return 502 with `{"detail": "Upstream error"}`~~
+  - ~~Source map upload endpoint (`POST /api/source-maps`)~~
+    - ~~Authenticate with admin API key (`X-API-Key` header)~~
+    - ~~Parse multipart form or JSON body with fields:~~
+      - ~~`project` (required string)~~
+      - ~~`release` (required string, version identifier e.g. "1.2.3" or git SHA)~~
+      - ~~`file_url` (required string, the URL the minified JS is served from, e.g. "/static/app.min.js")~~
+      - ~~`map_content` (required string, the source map JSON content)~~
+    - ~~Validate source map is valid JSON with `version`, `sources`, `mappings` fields~~
+      - ~~Invalid source map returns 400 with `{"detail": "Invalid source map format"}`~~
+    - ~~Store in `source_maps` table (upsert on project+release+file_url)~~
+      - ~~Return 201 with `{"status": "uploaded", "project": "...", "release": "...", "file_url": "..."}`~~
+  - ~~Source map list endpoint (`GET /api/source-maps`)~~
+    - ~~Authenticate with admin API key~~
+    - ~~Support query parameters: `project` (optional filter)~~
+    - ~~Return list of uploaded source maps (without map_content, just metadata)~~
+      - ~~Response shape: `{"source_maps": [{"id": N, "project": "...", "release": "...", "file_url": "...", "uploaded_at": "..."}], "total": N}`~~
+  - ~~Source map delete endpoint (`DELETE /api/source-maps/{id}`)~~
+    - ~~Authenticate with admin API key~~
+    - ~~Delete source map by ID~~
+      - ~~Return 200 with `{"status": "deleted"}`~~
+      - ~~Non-existent ID returns 404~~
+  - ~~Source map deobfuscation module~~
+    - ~~Implement JavaScript stack trace parser~~
+      - ~~Parse common stack trace formats:~~
+        - ~~Chrome/V8: `    at functionName (file.js:line:col)`~~
+        - ~~Firefox: `functionName@file.js:line:col`~~
+        - ~~Safari: `functionName@file.js:line:col`~~
+      - ~~Extract file URL, line number, column number from each frame~~
+    - ~~Implement source map decoder (VLQ-encoded mappings)~~
+      - ~~Parse source map JSON (version 3 format)~~
+      - ~~Decode Base64 VLQ-encoded `mappings` field~~
+      - ~~Build lookup table: (generated_line, generated_col) → (original_file, original_line, original_col, original_name)~~
+      - ~~Support `sources`, `names`, and `sourcesContent` fields~~
+    - ~~Implement stack trace rewriting~~
+      - ~~For each parsed frame, query source map lookup~~
+      - ~~Replace minified file:line:col with original file:line:col~~
+      - ~~Preserve function name from source map `names` if available~~
+      - ~~Return rewritten stack trace as string~~
+  - ~~DSN key management endpoints~~
+    - ~~`POST /api/dsn-keys` — Create a new DSN key~~
+      - ~~Authenticate with admin API key~~
+      - ~~Required field: `project` (string)~~
+      - ~~Generate random 32-character hex public key~~
+      - ~~Insert into `dsn_keys` table with `active=true`~~
+      - ~~Return 201 with `{"public_key": "...", "project": "..."}`~~
+    - ~~`GET /api/dsn-keys` — List all DSN keys~~
+      - ~~Authenticate with admin API key~~
+      - ~~Return list of DSN keys with project, active status, created_at~~
+      - ~~Response shape: `{"keys": [{"id": N, "public_key": "...", "project": "...", "active": true, "created_at": "..."}]}`~~
+    - ~~`DELETE /api/dsn-keys/{id}` — Deactivate a DSN key~~
+      - ~~Authenticate with admin API key~~
+      - ~~Set `active=false` (soft delete, so existing references break gracefully)~~
+      - ~~Return 200 with `{"status": "deactivated"}`~~
+      - ~~Non-existent ID returns 404~~
+  - ~~Health check endpoint (`GET /health`)~~
+    - ~~Return `{"status": "ok"}` with 200, no auth required~~
+      - ~~Endpoint responds without any API key~~
   - Data retention cleanup
     - Implement background job that deletes source maps older than configurable retention period (default 90 days)
       - Job runs periodically (e.g., daily)
       - Only source maps beyond retention are deleted
       - DSN keys are never auto-deleted
   - Tests
-    - Write tests for DSN key validation (valid key resolves to project, invalid key rejected, deactivated key rejected)
-      - Tests pass with `zig build test`
-    - Write tests for CORS middleware (allowed origin, disallowed origin, preflight OPTIONS)
-      - Tests cover all CORS scenarios
-    - Write tests for browser error payload transformation (field mapping, environment extraction, extra packing)
-      - Tests verify correct transformation to Error Tracker format
-    - Write tests for browser metrics enrichment (label injection, URL path extraction, project tagging)
-      - Tests verify correct label enrichment
-    - Write tests for source map parsing (VLQ decoding, mapping lookup)
-      - Tests verify correct line:col mapping with known source maps
-    - Write tests for stack trace parsing (Chrome, Firefox, Safari formats)
-      - Tests cover all three major browser formats
-    - Write tests for stack trace rewriting (end-to-end: minified stack → deobfuscated stack)
-      - Tests verify full pipeline from raw stack to rewritten stack
-    - Write tests for rate limiting (accept under limit, reject over limit per public key)
-      - Tests verify 429 response when rate limit exceeded
+    - ~~Write tests for DSN key validation (valid key resolves to project, invalid key rejected, deactivated key rejected)~~
+      - ~~Tests pass with `zig build test`~~
+    - ~~Write tests for CORS middleware (allowed origin, disallowed origin, preflight OPTIONS)~~
+      - ~~Tests cover all CORS scenarios~~
+    - ~~Write tests for browser error payload transformation (field mapping, environment extraction, extra packing)~~
+      - ~~Tests verify correct transformation to Error Tracker format~~
+    - ~~Write tests for browser metrics enrichment (label injection, URL path extraction, project tagging)~~
+      - ~~Tests verify correct label enrichment~~
+    - ~~Write tests for source map parsing (VLQ decoding, mapping lookup)~~
+      - ~~Tests verify correct line:col mapping with known source maps~~
+    - ~~Write tests for stack trace parsing (Chrome, Firefox, Safari formats)~~
+      - ~~Tests cover all three major browser formats~~
+    - ~~Write tests for stack trace rewriting (end-to-end: minified stack → deobfuscated stack)~~
+      - ~~Tests verify full pipeline from raw stack to rewritten stack~~
+    - ~~Write tests for rate limiting (accept under limit, reject over limit per public key)~~
+      - ~~Tests verify 429 response when rate limit exceeded~~
     - Write tests for upstream forwarding failure handling (Error Tracker down, Metrics Collector down)
       - Tests verify 502 responses and graceful degradation
 

@@ -144,6 +144,7 @@ pub fn handleConnection(conn: net.Server.Connection, admin_api_key: []const u8, 
                 cfg.error_tracker_url,
                 cfg.error_tracker_api_key,
                 cors_origin,
+                db,
             );
         } else if (std.mem.eql(u8, path, "/api/browser/metrics")) {
             try browser_metrics.handleBrowserMetricsWithCors(
