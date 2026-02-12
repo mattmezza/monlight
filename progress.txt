@@ -509,5 +509,18 @@
   - The `noUnusedLocals` and `noUnusedParameters` tsconfig options catch dead code early — classes storing config for future use need to actually reference it
   - `vitest` with `jsdom` environment provides browser-like globals (window, document, etc.) for testing
   - The UMD bundle uses `format: "iife"` with `globalName: "MonlightSDK"` — the auto-init from `window.MonlightConfig` runs as part of module evaluation
-  - `sendBeacon` cannot set custom headers, so the DSN key is passed as a query parameter `?key={dsn}` when using beacon transport
+   - `sendBeacon` cannot set custom headers, so the DSN key is passed as a query parameter `?key={dsn}` when using beacon transport
+---
+
+## Session 37: JS SDK Core Module Verification & Tests
+
+- What was implemented: Verified that the `core.ts` module (init(), MonlightClient, UMD auto-init) fully meets all acceptance criteria from the plan. Wrote 38 comprehensive unit tests covering: config validation (missing/empty dsn and endpoint throw errors), successful initialization, default config values, trailing slash stripping, enabled:false no-op client, beforeSend callback, MonlightClient methods (captureError, captureMessage, setUser, addContext, destroy), destroy cleanup (event listeners, console restoration), UMD auto-initialization pattern, sub-module initialization verification (error/visibilitychange/pagehide listeners, console patching), and sampleRate 0 behavior.
+- Files changed: `clients/js/src/core.test.ts` (new, 38 tests), `plan.md` (struck through Core module tasks)
+- Test results: 38/38 tests pass, typecheck passes, build succeeds, bundle 3.9KB gzipped
+- **Learnings for future iterations:**
+  - vitest with jsdom provides `window`, `document`, `sessionStorage`, `console` globals automatically — no extra setup needed
+  - The auto-init code in core.ts runs on module load, so re-importing in tests doesn't re-trigger it (module cache). Test the auto-init pattern by simulating what the code does rather than trying to re-import
+  - `vi.spyOn(window, "addEventListener")` captures listener registrations and can be checked for specific event types (error, unhandledrejection, pagehide, visibilitychange)
+  - The no-op client returned when `enabled: false` is a plain object with arrow functions, not a MonlightClientImpl instance — this means no sub-modules are initialized at all
+  - Error deduplication uses a module-level `dedupCache` Map — tests that call `captureError` multiple times with the same error within 60s will have the second call deduplicated (returns null from buildPayload)
 ---

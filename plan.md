@@ -243,29 +243,29 @@
       - ~~Total bundle size under 5KB gzipped~~
     - ~~Create directory structure: `src/core.ts`, `src/errors.ts`, `src/metrics.ts`, `src/network.ts`, `src/vitals.ts`, `src/session.ts`, `src/transport.ts`, `src/types.ts`~~
       - ~~All source files compile without errors~~
-  - Core module (`src/core.ts`)
-    - Implement `init(config)` function
-      - Config options:
-        - `dsn` (required string): public key for authentication
-        - `endpoint` (required string): Browser Relay URL (e.g., "https://monitoring.example.com")
-        - `release` (optional string): app version for source map matching
-        - `environment` (optional string, default "prod")
-        - `sampleRate` (optional number, 0.0-1.0, default 1.0): sampling rate for performance data
-        - `debug` (optional boolean, default false): enable console debug logging
-        - `beforeSend` (optional callback): transform or drop events before sending
-        - `enabled` (optional boolean, default true): master kill switch
-      - Validate required config fields, throw Error if missing
-      - Initialize all sub-modules (errors, metrics, network, vitals, session)
-      - Return a `MonlightClient` instance
-    - Implement `MonlightClient` class with methods:
-      - `captureError(error: Error, context?: object)` — manually report an error
-      - `captureMessage(message: string, level?: string)` — report a message as an error
-      - `setUser(userId: string)` — associate a user ID with subsequent events
-      - `addContext(key: string, value: any)` — add persistent context to all events
-      - `destroy()` — tear down all listeners and flush pending data
-    - UMD bundle auto-initializes from `window.MonlightConfig` if present
-      - `<script>` tag usage: set `window.MonlightConfig = {dsn: "...", endpoint: "..."}` before loading the script
-      - SDK reads config, calls `init()`, and exposes the client as `window.Monlight`
+  - ~~Core module (`src/core.ts`)~~
+    - ~~Implement `init(config)` function~~
+      - ~~Config options:~~
+        - ~~`dsn` (required string): public key for authentication~~
+        - ~~`endpoint` (required string): Browser Relay URL (e.g., "https://monitoring.example.com")~~
+        - ~~`release` (optional string): app version for source map matching~~
+        - ~~`environment` (optional string, default "prod")~~
+        - ~~`sampleRate` (optional number, 0.0-1.0, default 1.0): sampling rate for performance data~~
+        - ~~`debug` (optional boolean, default false): enable console debug logging~~
+        - ~~`beforeSend` (optional callback): transform or drop events before sending~~
+        - ~~`enabled` (optional boolean, default true): master kill switch~~
+      - ~~Validate required config fields, throw Error if missing~~
+      - ~~Initialize all sub-modules (errors, metrics, network, vitals, session)~~
+      - ~~Return a `MonlightClient` instance~~
+    - ~~Implement `MonlightClient` class with methods:~~
+      - ~~`captureError(error: Error, context?: object)` — manually report an error~~
+      - ~~`captureMessage(message: string, level?: string)` — report a message as an error~~
+      - ~~`setUser(userId: string)` — associate a user ID with subsequent events~~
+      - ~~`addContext(key: string, value: any)` — add persistent context to all events~~
+      - ~~`destroy()` — tear down all listeners and flush pending data~~
+    - ~~UMD bundle auto-initializes from `window.MonlightConfig` if present~~
+      - ~~`<script>` tag usage: set `window.MonlightConfig = {dsn: "...", endpoint: "..."}` before loading the script~~
+      - ~~SDK reads config, calls `init()`, and exposes the client as `window.Monlight`~~
   - Session module (`src/session.ts`)
     - Generate anonymous session ID (UUID v4) on first page load
       - Store in `sessionStorage` so it persists across navigations within the same tab
