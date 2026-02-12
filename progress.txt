@@ -155,6 +155,15 @@
 - Tests live in `clients/python/tests/` and are configured via `[tool.pytest.ini_options]` in pyproject.toml
 - The `MonlightExceptionHandler` expects `ErrorClient` to be stored at `request.app.state.monlight_error_client` — use `setup_monlight()` to wire it up
 - Shared infrastructure (http.zig, json.zig, html.zig, shutdown.zig, log.zig) was implemented inline in each service's main.zig rather than as separate shared modules — the functionality exists but not as separate reusable files
+- Config tests for "API_KEY is missing" are environment-aware: they check if API_KEY is set, and verify the appropriate behavior (success or error). In CI, set `API_KEY=test_key_ci_12345` and `CONTAINERS=test_container` for all Zig tests.
+- Docker builds for all services require repo root as build context (not the service directory) because Dockerfiles copy from `shared/`. Use `context: ..` + `dockerfile: <service>/Dockerfile` in docker-compose.
+- Use `pip install -e ".[dev]"` in a venv to install with all dev dependencies (pytest, fastapi, etc.)
+- The Python client uses `httpx` for both async and sync HTTP calls
+- `pyproject.toml` uses `setuptools.build_meta` backend (not the newer `setuptools.backends._legacy`)
+- Use `pytest-httpx` for mocking HTTP calls: `httpx_mock.add_response()` / `httpx_mock.add_exception()` / `httpx_mock.get_requests()`
+- Tests live in `clients/python/tests/` and are configured via `[tool.pytest.ini_options]` in pyproject.toml
+- The `MonlightExceptionHandler` expects `ErrorClient` to be stored at `request.app.state.monlight_error_client` — use `setup_monlight()` to wire it up
+- Shared infrastructure (http.zig, json.zig, html.zig, shutdown.zig, log.zig) was implemented inline in each service's main.zig rather than as separate shared modules — the functionality exists but not as separate reusable files
 
 ## Session 15: Python Client Package Scaffolding
 
@@ -229,4 +238,23 @@
   - When testing with `httpx_mock` and MetricsClient that flushes on shutdown, you need to mock the metrics POST endpoint too (otherwise teardown fails with "unexpected request")
   - Use `@pytest.mark.httpx_mock(can_send_already_matched_responses=True)` when a test may trigger the same mock multiple times (e.g., error report + metrics flush both need HTTP mocks)
   - `patch.object(MetricsClient, "start")` effectively prevents the timer from running in tests while still verifying `start()` was called
+---
+
+## Session 21: CI/CD Workflow for Zig Services
+
+- What was implemented: Created GitHub Actions workflow (`.github/workflows/zig-services.yml`) for all three Zig services with test, Docker build, image size verification, and GHCR push stages. Also fixed a known test issue across all three services where the `config.test.load fails when API_KEY is missing` test was not environment-aware.
+- Files changed:
+  - `.github/workflows/zig-services.yml` (new) — CI/CD workflow with matrix strategy for 3 services
+  - `error-tracker/src/config.zig` — Made config test environment-aware
+  - `log-viewer/src/config.zig` — Made config test environment-aware
+  - `metrics-collector/src/config.zig` — Made config test environment-aware
+  - `deploy/docker-compose.monitoring.yml` — Fixed build context for log-viewer and metrics-collector (was `build: ../log-viewer`, now uses `context: ..` + `dockerfile:` to ensure `shared/` directory is accessible)
+  - `plan.md` — Struck through CI/CD Zig workflow task and Python client test tasks
+- **Learnings for future iterations:**
+  - The config tests that check "API_KEY is missing" must be environment-aware since CI sets `API_KEY` for other tests. Solution: check `std.posix.getenv("API_KEY")` and verify the appropriate behavior (success vs error).
+  - `goto-bus-stop/setup-zig@v2` is the recommended GitHub Action for installing Zig in CI workflows.
+  - Docker builds for all three services require `context: .` (repo root) because they `COPY shared/` — using shorthand `build: ../service` only sets context to the service directory and won't find `shared/`.
+  - The workflow uses `docker/build-push-action@v5` with GHA cache (`cache-from: type=gha`, `cache-to: type=gha,mode=max`) for efficient Docker layer caching.
+  - Image size check builds the image locally with `docker build -t size-check` since the build-push action may not leave images locally on PRs.
+  - The `hashFiles` function in GitHub Actions cache keys supports glob patterns for cache invalidation on source changes.
 ---

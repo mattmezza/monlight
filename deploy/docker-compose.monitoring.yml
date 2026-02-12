@@ -24,7 +24,9 @@ services:
       - monitoring
 
   log-viewer:
-    build: ../log-viewer
+    build:
+      context: ..
+      dockerfile: log-viewer/Dockerfile
     container_name: log_viewer
     ports:
       - "5011:8000"
@@ -48,7 +50,9 @@ services:
       - monitoring
 
   metrics-collector:
-    build: ../metrics-collector
+    build:
+      context: ..
+      dockerfile: metrics-collector/Dockerfile
     container_name: metrics_collector
     ports:
       - "5012:8000"

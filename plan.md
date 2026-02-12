@@ -518,33 +518,33 @@
       - ~~Installable via `app.add_middleware(MonlightMiddleware, metrics_client=client)`~~
     - ~~Provide setup helper: `setup_monlight(app, error_tracker_url, metrics_collector_url, api_key)` that wires up both~~
       - ~~Single function call in FlowRent's `main.py` to enable all monitoring~~
-  - Tests
-    - Write unit tests for error client (payload formatting, PII filtering, timeout handling)
-      - Tests pass with `pytest`
-    - Write unit tests for metrics client (buffering, flush, counter/histogram/gauge)
-      - Tests pass with `pytest`
-    - Write integration tests that send to a mock HTTP server and verify payloads
-      - Tests verify correct HTTP requests are made
-    - Write tests for FastAPI exception handler (catches exceptions, skips HTTPException, calls ErrorClient)
-      - Tests use a test FastAPI app
-    - Write tests for FastAPI middleware (records timing, normalizes endpoints, emits correct metrics)
-      - Tests use a test FastAPI app with parameterized routes
+  - ~~Tests~~
+    - ~~Write unit tests for error client (payload formatting, PII filtering, timeout handling)~~
+      - ~~Tests pass with `pytest`~~
+    - ~~Write unit tests for metrics client (buffering, flush, counter/histogram/gauge)~~
+      - ~~Tests pass with `pytest`~~
+    - ~~Write integration tests that send to a mock HTTP server and verify payloads~~
+      - ~~Tests verify correct HTTP requests are made~~
+    - ~~Write tests for FastAPI exception handler (catches exceptions, skips HTTPException, calls ErrorClient)~~
+      - ~~Tests use a test FastAPI app~~
+    - ~~Write tests for FastAPI middleware (records timing, normalizes endpoints, emits correct metrics)~~
+      - ~~Tests use a test FastAPI app with parameterized routes~~
 
 - CI/CD (`.github/workflows/`)
-  - Create workflow for Zig services
-    - Trigger on push to main and pull requests
-      - Workflow runs on PR creation and merges to main
-    - Run `zig build test` for each service (and shared modules)
-      - All tests pass in CI
-    - Build Docker images for each service
-      - Docker build succeeds in CI environment
-    - Verify Docker image size is under 20MB for each service
-      - CI step runs `docker image inspect --format='{{.Size}}'` and fails if size exceeds 20MB
-    - Push images to GitHub Container Registry (ghcr.io) on main branch only
-      - Images are tagged with commit SHA and `latest`
-      - Images are pushed only from main, not from PRs
-    - Cache Zig build artifacts to speed up CI
-      - Subsequent builds are faster due to caching
+  - ~~Create workflow for Zig services~~
+    - ~~Trigger on push to main and pull requests~~
+      - ~~Workflow runs on PR creation and merges to main~~
+    - ~~Run `zig build test` for each service (and shared modules)~~
+      - ~~All tests pass in CI~~
+    - ~~Build Docker images for each service~~
+      - ~~Docker build succeeds in CI environment~~
+    - ~~Verify Docker image size is under 20MB for each service~~
+      - ~~CI step runs `docker image inspect --format='{{.Size}}'` and fails if size exceeds 20MB~~
+    - ~~Push images to GitHub Container Registry (ghcr.io) on main branch only~~
+      - ~~Images are tagged with commit SHA and `latest`~~
+      - ~~Images are pushed only from main, not from PRs~~
+    - ~~Cache Zig build artifacts to speed up CI~~
+      - ~~Subsequent builds are faster due to caching~~
   - Create workflow for Python client
     - Trigger on push to main and pull requests (when `clients/python/` changes)
       - Workflow runs only when Python client files change
