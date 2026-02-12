@@ -382,106 +382,106 @@
     - ~~Write tests for label filtering via json_extract~~
       - ~~Tests verify correct filtering by label key:value pairs~~
 
-- Shared infrastructure (built before individual services)
-  - Shared Zig modules (`shared/`)
-    - Decide on shared vs. independent approach for common code
-      - Create a `shared/` directory with reusable Zig modules referenced by each service's `build.zig`
-      - Modules are importable via `build.zig` dependency path
-    - HTTP server and router module (`shared/http.zig`)
-      - Implement a thin router on top of `std.http.Server` that supports:
-        - Path registration with method dispatch (GET, POST)
-        - Path parameter extraction (e.g., `/api/errors/{id}` → extracts `id`)
-        - Middleware chain (auth, rate limiting, body size enforcement)
-        - Static file serving (for embedded CSS/JS assets)
-      - Router matches registered routes and dispatches to handler functions
-      - Unmatched routes return 404 with `{"detail": "Not found"}`
-      - Method not allowed returns 405
-    - JSON module (`shared/json.zig`)
-      - Implement JSON parsing and serialization helpers on top of `std.json`
-        - Parse JSON request bodies into Zig structs with optional field support
-        - Serialize Zig structs/values to JSON response bodies
-        - Handle malformed JSON gracefully (return 400, don't crash)
-        - Support nested objects, arrays, nullable fields
-      - Provide helper for JSON error responses: `json_error(status, detail)`
-    - HTML templating module (`shared/html.zig`)
-      - Implement a simple runtime HTML template engine (comptime generation is impractical for dynamic content)
-        - Templates are HTML strings with `{{variable}}` placeholders
-        - Template strings are embedded in the binary via `@embedFile`
-        - Support iteration (`{{#each items}}...{{/each}}`) and conditionals (`{{#if condition}}...{{/if}}`)
-        - HTML-escape all variable output by default to prevent XSS
-      - Template rendering produces a complete HTML string for the HTTP response
-    - SQLite module (`shared/sqlite.zig`)
-      - Implement SQLite connection wrapper via `@cImport` of sqlite3.h
-        - Open database at configurable path
-        - Execute `PRAGMA journal_mode=WAL;`, `PRAGMA busy_timeout=5000;`, `PRAGMA synchronous=NORMAL;`, `PRAGMA foreign_keys=ON;` on connection open
-        - Provide prepared statement helpers with parameter binding (prevents SQL injection)
-        - Provide query helpers that return rows as iterators
-        - Handle SQLite errors with descriptive error messages (log and/or return to caller)
-      - Implement schema migration runner
-        - Create `_meta` table on first run: `CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT);`
-        - Read `schema_version` from `_meta` (default "0")
-        - Accept an ordered list of migration SQL strings
-        - Execute migrations with version > current inside a transaction
-        - Update `schema_version` after successful migration
-        - Log each migration applied at INFO level
-        - If migration fails, log error and exit with non-zero code
-    - Configuration module (`shared/config.zig`)
-      - Parse environment variables with type coercion (string, int, bool)
-        - Missing required variables cause a clear startup error with variable name
-        - Optional variables use provided defaults
-        - `LOG_LEVEL` is parsed and applied globally (default: INFO)
-    - Auth middleware (`shared/auth.zig`)
-      - Validate `X-API-Key` header against configured `API_KEY`
-        - Requests without header or with wrong key return 401 `{"detail": "Invalid API key"}`
-        - Requests with correct key pass through
-        - Configurable path exclusions (e.g., `/health`)
-    - Rate limiting middleware (`shared/rate_limit.zig`)
-      - Implement in-memory sliding window counter per API key
-        - Configurable max requests per minute
-        - Returns 429 `{"detail": "Rate limit exceeded", "retry_after": N}` when limit exceeded
-        - Counters reset on service restart
-    - Request body size enforcement
-      - Reject request bodies exceeding configured max size before reading into memory
-        - Returns 413 `{"detail": "Request body exceeds maximum size"}`
-        - Configurable per-service (256KB for Error Tracker, 512KB for Metrics Collector)
-    - Graceful shutdown handler (`shared/shutdown.zig`)
-      - Register SIGTERM and SIGINT signal handlers
-        - On signal: set shutdown flag, stop accepting new connections
-        - Wait for in-flight requests (max 5 second timeout)
-        - Call registered cleanup callbacks (stop background threads, flush writes, close SQLite)
-        - Exit with code 0
-    - Structured logging module (`shared/log.zig`)
-      - Output JSON-formatted log lines to stdout
-        - Format: `{"ts": "...", "level": "...", "service": "...", "msg": "..."}`
-        - Support log levels: ERROR, WARN, INFO, DEBUG
-        - Respect `LOG_LEVEL` configuration (suppress messages below threshold)
-        - Service name is set once at startup
-  - Tailwind CSS embedding
-    - Set up Tailwind CSS build pipeline
-      - Create `shared/styles/` directory with `tailwind.config.js`, `input.css`, and `package.json`
-      - Configure `tailwind.config.js` to scan Zig template strings (HTML embedded in `.zig` files and `@embedFile` template files) for class usage
-      - Add `npm run build:css` script that produces `dist/tailwind.min.css`
-      - CSS output is under 50KB (minified + purged)
-    - Integrate CSS into Zig build
-      - Each service's `build.zig` references the built CSS file via `@embedFile`
-      - CSS is served from each service at `/static/tailwind.css`
-      - No external network requests needed for styling
-    - Add CSS build step to Dockerfiles (run `npm run build:css` before `zig build`)
-      - Dockerfile installs Node.js in the builder stage for Tailwind compilation
-  - JavaScript charting library embedding (Metrics Collector only)
-    - Select and vendor a lightweight charting library: **uPlot** (~35KB min+gz, no dependencies, fast canvas-based rendering)
-      - Download uPlot release files (`uPlot.min.js`, `uPlot.min.css`) into `metrics-collector/static/`
-      - Embed via `@embedFile` and serve at `/static/uplot.js` and `/static/uplot.css`
-      - Charts render without external CDN dependencies
-      - Total embedded JS+CSS under 50KB
+- ~~Shared infrastructure (built before individual services)~~
+  - ~~Shared Zig modules (`shared/`)~~
+    - ~~Decide on shared vs. independent approach for common code~~
+      - ~~Create a `shared/` directory with reusable Zig modules referenced by each service's `build.zig`~~
+      - ~~Modules are importable via `build.zig` dependency path~~
+    - ~~HTTP server and router module (`shared/http.zig`)~~
+      - ~~Implement a thin router on top of `std.http.Server` that supports:~~
+        - ~~Path registration with method dispatch (GET, POST)~~
+        - ~~Path parameter extraction (e.g., `/api/errors/{id}` → extracts `id`)~~
+        - ~~Middleware chain (auth, rate limiting, body size enforcement)~~
+        - ~~Static file serving (for embedded CSS/JS assets)~~
+      - ~~Router matches registered routes and dispatches to handler functions~~
+      - ~~Unmatched routes return 404 with `{"detail": "Not found"}`~~
+      - ~~Method not allowed returns 405~~
+    - ~~JSON module (`shared/json.zig`)~~
+      - ~~Implement JSON parsing and serialization helpers on top of `std.json`~~
+        - ~~Parse JSON request bodies into Zig structs with optional field support~~
+        - ~~Serialize Zig structs/values to JSON response bodies~~
+        - ~~Handle malformed JSON gracefully (return 400, don't crash)~~
+        - ~~Support nested objects, arrays, nullable fields~~
+      - ~~Provide helper for JSON error responses: `json_error(status, detail)`~~
+    - ~~HTML templating module (`shared/html.zig`)~~
+      - ~~Implement a simple runtime HTML template engine (comptime generation is impractical for dynamic content)~~
+        - ~~Templates are HTML strings with `{{variable}}` placeholders~~
+        - ~~Template strings are embedded in the binary via `@embedFile`~~
+        - ~~Support iteration (`{{#each items}}...{{/each}}`) and conditionals (`{{#if condition}}...{{/if}}`)~~
+        - ~~HTML-escape all variable output by default to prevent XSS~~
+      - ~~Template rendering produces a complete HTML string for the HTTP response~~
+    - ~~SQLite module (`shared/sqlite.zig`)~~
+      - ~~Implement SQLite connection wrapper via `@cImport` of sqlite3.h~~
+        - ~~Open database at configurable path~~
+        - ~~Execute `PRAGMA journal_mode=WAL;`, `PRAGMA busy_timeout=5000;`, `PRAGMA synchronous=NORMAL;`, `PRAGMA foreign_keys=ON;` on connection open~~
+        - ~~Provide prepared statement helpers with parameter binding (prevents SQL injection)~~
+        - ~~Provide query helpers that return rows as iterators~~
+        - ~~Handle SQLite errors with descriptive error messages (log and/or return to caller)~~
+      - ~~Implement schema migration runner~~
+        - ~~Create `_meta` table on first run: `CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT);`~~
+        - ~~Read `schema_version` from `_meta` (default "0")~~
+        - ~~Accept an ordered list of migration SQL strings~~
+        - ~~Execute migrations with version > current inside a transaction~~
+        - ~~Update `schema_version` after successful migration~~
+        - ~~Log each migration applied at INFO level~~
+        - ~~If migration fails, log error and exit with non-zero code~~
+    - ~~Configuration module (`shared/config.zig`)~~
+      - ~~Parse environment variables with type coercion (string, int, bool)~~
+        - ~~Missing required variables cause a clear startup error with variable name~~
+        - ~~Optional variables use provided defaults~~
+        - ~~`LOG_LEVEL` is parsed and applied globally (default: INFO)~~
+    - ~~Auth middleware (`shared/auth.zig`)~~
+      - ~~Validate `X-API-Key` header against configured `API_KEY`~~
+        - ~~Requests without header or with wrong key return 401 `{"detail": "Invalid API key"}`~~
+        - ~~Requests with correct key pass through~~
+        - ~~Configurable path exclusions (e.g., `/health`)~~
+    - ~~Rate limiting middleware (`shared/rate_limit.zig`)~~
+      - ~~Implement in-memory sliding window counter per API key~~
+        - ~~Configurable max requests per minute~~
+        - ~~Returns 429 `{"detail": "Rate limit exceeded", "retry_after": N}` when limit exceeded~~
+        - ~~Counters reset on service restart~~
+    - ~~Request body size enforcement~~
+      - ~~Reject request bodies exceeding configured max size before reading into memory~~
+        - ~~Returns 413 `{"detail": "Request body exceeds maximum size"}`~~
+        - ~~Configurable per-service (256KB for Error Tracker, 512KB for Metrics Collector)~~
+    - ~~Graceful shutdown handler (`shared/shutdown.zig`)~~
+      - ~~Register SIGTERM and SIGINT signal handlers~~
+        - ~~On signal: set shutdown flag, stop accepting new connections~~
+        - ~~Wait for in-flight requests (max 5 second timeout)~~
+        - ~~Call registered cleanup callbacks (stop background threads, flush writes, close SQLite)~~
+        - ~~Exit with code 0~~
+    - ~~Structured logging module (`shared/log.zig`)~~
+      - ~~Output JSON-formatted log lines to stdout~~
+        - ~~Format: `{"ts": "...", "level": "...", "service": "...", "msg": "..."}`~~
+        - ~~Support log levels: ERROR, WARN, INFO, DEBUG~~
+        - ~~Respect `LOG_LEVEL` configuration (suppress messages below threshold)~~
+        - ~~Service name is set once at startup~~
+  - ~~Tailwind CSS embedding~~
+    - ~~Set up Tailwind CSS build pipeline~~
+      - ~~Create `shared/styles/` directory with `tailwind.config.js`, `input.css`, and `package.json`~~
+      - ~~Configure `tailwind.config.js` to scan Zig template strings (HTML embedded in `.zig` files and `@embedFile` template files) for class usage~~
+      - ~~Add `npm run build:css` script that produces `dist/tailwind.min.css`~~
+      - ~~CSS output is under 50KB (minified + purged)~~
+    - ~~Integrate CSS into Zig build~~
+      - ~~Each service's `build.zig` references the built CSS file via `@embedFile`~~
+      - ~~CSS is served from each service at `/static/tailwind.css`~~
+      - ~~No external network requests needed for styling~~
+    - ~~Add CSS build step to Dockerfiles (run `npm run build:css` before `zig build`)~~
+      - ~~Dockerfile installs Node.js in the builder stage for Tailwind compilation~~
+  - ~~JavaScript charting library embedding (Metrics Collector only)~~
+    - ~~Select and vendor a lightweight charting library: **uPlot** (~35KB min+gz, no dependencies, fast canvas-based rendering)~~
+      - ~~Download uPlot release files (`uPlot.min.js`, `uPlot.min.css`) into `metrics-collector/static/`~~
+      - ~~Embed via `@embedFile` and serve at `/static/uplot.js` and `/static/uplot.css`~~
+      - ~~Charts render without external CDN dependencies~~
+      - ~~Total embedded JS+CSS under 50KB~~
 
 - Python client package (`clients/python/`)
-  - Package scaffolding
-    - Create `pyproject.toml` with package metadata, dependencies (httpx for async HTTP), and entry points
-      - Package is installable with `pip install -e .`
-    - Create package directory structure: `monlightstack/error_client.py`, `monlightstack/metrics_client.py`, `monlightstack/integrations/fastapi.py`, `monlightstack/__init__.py`
-      - Package imports work: `from monlightstack import ErrorClient, MetricsClient`
-      - FastAPI integration imports work: `from monlightstack.integrations.fastapi import MonlightMiddleware, MonlightExceptionHandler`
+  - ~~Package scaffolding~~
+    - ~~Create `pyproject.toml` with package metadata, dependencies (httpx for async HTTP), and entry points~~
+      - ~~Package is installable with `pip install -e .`~~
+    - ~~Create package directory structure: `monlightstack/error_client.py`, `monlightstack/metrics_client.py`, `monlightstack/integrations/fastapi.py`, `monlightstack/__init__.py`~~
+      - ~~Package imports work: `from monlightstack import ErrorClient, MetricsClient`~~
+      - ~~FastAPI integration imports work: `from monlightstack.integrations.fastapi import MonlightMiddleware, MonlightExceptionHandler`~~
   - Error client (`monlightstack/error_client.py`)
     - Implement `ErrorClient` class with `report_error(exception, request_context=None)` method
       - Sends POST to `{base_url}/api/errors` with correct JSON body and `X-API-Key` header

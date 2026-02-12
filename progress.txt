@@ -143,3 +143,30 @@
 - **Dashboard endpoint**: GET /api/dashboard returns summary stats (total_datapoints, distinct_metrics) and top 10 metrics by count. This is a simpler implementation than the plan specified (which called for error_rate, avg_latency_ms, etc.) — those specific fields assume particular metric naming conventions that may not exist yet.
 - **Test counts**: metrics-collector has 8 test targets (main, database, config, ingestion, aggregation, retention, metrics_query, web_ui). All pass except the known config test (`API_KEY is missing` fails because API_KEY is set in the test environment). This same issue exists in all three services.
 - **Total across all services**: error-tracker ~40 tests, log-viewer ~82 tests, metrics-collector ~60 tests. All passing with the single known config test exception per service.
+
+## Codebase Patterns
+- Python client package lives at `clients/python/` with `monlightstack/` as the importable package
+- Use `pip install -e ".[dev]"` in a venv to install with all dev dependencies (pytest, fastapi, etc.)
+- The Python client uses `httpx` for both async and sync HTTP calls
+- `pyproject.toml` uses `setuptools.build_meta` backend (not the newer `setuptools.backends._legacy`)
+- Tests live in `clients/python/tests/` and are configured via `[tool.pytest.ini_options]` in pyproject.toml
+- The `MonlightExceptionHandler` expects `ErrorClient` to be stored at `request.app.state.monlight_error_client` — use `setup_monlight()` to wire it up
+- Shared infrastructure (http.zig, json.zig, html.zig, shutdown.zig, log.zig) was implemented inline in each service's main.zig rather than as separate shared modules — the functionality exists but not as separate reusable files
+
+## Session 15: Python Client Package Scaffolding
+
+- Created `clients/python/pyproject.toml` with setuptools build backend, httpx dependency, and optional fastapi/dev dependency groups
+- Created package directory structure: `monlightstack/__init__.py`, `error_client.py`, `metrics_client.py`, `integrations/__init__.py`, `integrations/fastapi.py`
+- Implemented full `ErrorClient` class with async `report_error()` and sync `report_error_sync()` methods, PII header filtering, fire-and-forget behavior
+- Implemented full `MetricsClient` class with `counter()`, `histogram()`, `gauge()` methods, in-memory buffer, periodic flush via threading.Timer, and `shutdown()` method
+- Implemented `MonlightMiddleware` (ASGI middleware for request metrics), `MonlightExceptionHandler` (global exception handler), and `setup_monlight()` convenience function
+- Created `tests/test_scaffolding.py` with 7 tests verifying imports, constructor behavior, and URL normalization
+- Files changed: `clients/python/pyproject.toml`, `clients/python/monlightstack/__init__.py`, `clients/python/monlightstack/error_client.py`, `clients/python/monlightstack/metrics_client.py`, `clients/python/monlightstack/integrations/__init__.py`, `clients/python/monlightstack/integrations/fastapi.py`, `clients/python/tests/test_scaffolding.py`
+- Also struck through all shared infrastructure tasks in plan.md (implemented inline in services)
+- **Learnings for future iterations:**
+  - `setuptools.backends._legacy:_Backend` requires very recent setuptools (>= 72); use `setuptools.build_meta` for compatibility
+  - The system pip has `PIP_REQUIRE_VIRTUALENV=1` set; always create a venv first with `python3 -m venv .venv`
+  - Python 3.11 is available at system level via pyenv
+  - The `.venv/` directory is already in `.gitignore`
+  - `pytest-asyncio` with `asyncio_mode = "auto"` in pyproject.toml avoids needing `@pytest.mark.asyncio` on every async test
+---
