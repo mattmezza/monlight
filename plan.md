@@ -8,24 +8,24 @@
       - ~~`docker build` produces a working image under 20MB~~
     - ~~Create `src/main.zig` with HTTP server skeleton listening on port 8000~~
       - ~~Server starts and responds to requests~~
-  - SQLite database layer
-    - Implement SQLite initialization using shared SQLite module
-      - Database file is created at configurable `DATABASE_PATH`
-      - WAL mode, busy timeout, and pragmas applied automatically by shared module
-    - Create schema migrations:
-      - Migration 1: `dsn_keys` table (id, public_key, project, created_at, active)
-        - Table is created on first startup
-        - `public_key` column is unique and indexed
-      - Migration 2: `source_maps` table (id, project, release, file_url, map_content, uploaded_at)
-        - Table is created on first startup
-        - Composite unique index on (project, release, file_url)
-      - Migration 3: Indexes: `idx_dsn_public_key`, `idx_source_map_lookup` on (project, release, file_url)
-        - Indexes exist and are used by query planner
-  - Configuration module
-    - Parse environment variables: `DATABASE_PATH`, `ADMIN_API_KEY`, `ERROR_TRACKER_URL`, `ERROR_TRACKER_API_KEY`, `METRICS_COLLECTOR_URL`, `METRICS_COLLECTOR_API_KEY`, `CORS_ORIGINS`, `MAX_BODY_SIZE`, `RATE_LIMIT`, `LOG_LEVEL`
-      - All variables are read from env
-      - Missing required variables (`ADMIN_API_KEY`, `ERROR_TRACKER_URL`, `ERROR_TRACKER_API_KEY`, `METRICS_COLLECTOR_URL`, `METRICS_COLLECTOR_API_KEY`) cause a clear startup error
-      - Defaults are applied for optional variables
+  - ~~SQLite database layer~~
+    - ~~Implement SQLite initialization using shared SQLite module~~
+      - ~~Database file is created at configurable `DATABASE_PATH`~~
+      - ~~WAL mode, busy timeout, and pragmas applied automatically by shared module~~
+    - ~~Create schema migrations:~~
+      - ~~Migration 1: `dsn_keys` table (id, public_key, project, created_at, active)~~
+        - ~~Table is created on first startup~~
+        - ~~`public_key` column is unique and indexed~~
+      - ~~Migration 2: `source_maps` table (id, project, release, file_url, map_content, uploaded_at)~~
+        - ~~Table is created on first startup~~
+        - ~~Composite unique index on (project, release, file_url)~~
+      - ~~Migration 3: Indexes: `idx_dsn_public_key`, `idx_source_map_lookup` on (project, release, file_url)~~
+        - ~~Indexes exist and are used by query planner~~
+  - ~~Configuration module~~
+    - ~~Parse environment variables: `DATABASE_PATH`, `ADMIN_API_KEY`, `ERROR_TRACKER_URL`, `ERROR_TRACKER_API_KEY`, `METRICS_COLLECTOR_URL`, `METRICS_COLLECTOR_API_KEY`, `CORS_ORIGINS`, `MAX_BODY_SIZE`, `RATE_LIMIT`, `LOG_LEVEL`~~
+      - ~~All variables are read from env~~
+      - ~~Missing required variables (`ADMIN_API_KEY`, `ERROR_TRACKER_URL`, `ERROR_TRACKER_API_KEY`, `METRICS_COLLECTOR_URL`, `METRICS_COLLECTOR_API_KEY`) cause a clear startup error~~
+      - ~~Defaults are applied for optional variables~~
   - DSN / public key authentication
     - Implement public key validation for browser ingestion endpoints
       - Requests must include `X-Monlight-Key` header with a valid public key from `dsn_keys` table

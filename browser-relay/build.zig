@@ -67,6 +67,30 @@ pub fn build(b: *std.Build) void {
 
     const run_main_tests = b.addRunArtifact(main_tests);
 
+    // Test step — tests for config.zig
+    const config_tests = b.addTest(.{
+        .root_source_file = b.path("src/config.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    config_tests.root_module.addImport("config", config_mod);
+
+    const run_config_tests = b.addRunArtifact(config_tests);
+
+    // Test step — tests for database.zig
+    const db_tests = b.addTest(.{
+        .root_source_file = b.path("src/database.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    db_tests.root_module.addImport("sqlite", sqlite_mod);
+    db_tests.linkSystemLibrary("sqlite3");
+    db_tests.linkLibC();
+
+    const run_db_tests = b.addRunArtifact(db_tests);
+
     const test_step = b.step("test", "Run all unit tests");
     test_step.dependOn(&run_main_tests.step);
+    test_step.dependOn(&run_config_tests.step);
+    test_step.dependOn(&run_db_tests.step);
 }

@@ -345,3 +345,14 @@
   - The `max_body_size` for browser-relay is 64KB (vs 256KB for error-tracker) — browser payloads are smaller
   - The HTTP server skeleton is intentionally minimal: no config, database, auth, or rate limiting yet — those will be added incrementally by subsequent plan tasks
 ---
+
+## Session 27c: Browser Relay Config, Database & Integration
+
+- What was implemented: Created `config.zig` (loads 10 env vars including 5 required: `ADMIN_API_KEY`, `ERROR_TRACKER_URL`, `ERROR_TRACKER_API_KEY`, `METRICS_COLLECTOR_URL`, `METRICS_COLLECTOR_API_KEY`), `database.zig` (3 migrations: `dsn_keys` table, `source_maps` table, indexes), and integrated both into `main.zig` with auth middleware, rate limiting, and body size enforcement.
+- Files changed: `browser-relay/src/config.zig` (new), `browser-relay/src/database.zig` (new), `browser-relay/src/main.zig` (expanded with config/db/auth/rate-limit integration), `browser-relay/build.zig` (added config and database test targets), `plan.md` (struck through SQLite database layer and Configuration module tasks)
+- **Learnings for future iterations:**
+  - The shared sqlite module's `exec()` calls `log.err()` on failure, and Zig's test runner treats `log.err` calls as test failures ("logged errors"). To test unique constraint violations without triggering test failures, use `INSERT OR IGNORE` + `SELECT COUNT(*)` instead of `expectError(error.ExecFailed, ...)`.
+  - SQLite's UNIQUE constraint on a column automatically creates an implicit unique index (`sqlite_autoindex_*`). The query planner may prefer this over an explicit index on the same column. Tests should check for `USING INDEX` generically rather than a specific index name.
+  - Browser relay uses `ADMIN_API_KEY` (not `API_KEY`) for management endpoints — distinct from the service API key pattern used by the other three services. DSN public keys are a separate auth mechanism for browser-side ingestion.
+  - The `@intCast` is needed when converting the `i64` return from `config_mod.getInt()` to `usize` for `max_body_size` and `rate_limit`.
+---

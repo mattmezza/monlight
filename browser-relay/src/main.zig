@@ -1,12 +1,19 @@
 const std = @import("std");
 const net = std.net;
 const log = std.log;
+const database = @import("database.zig");
+const sqlite = @import("sqlite");
+const app_config = @import("config.zig");
+const auth = @import("auth");
+const rate_limit = @import("rate_limit");
 
 const server_port: u16 = 8000;
 const max_header_size = 8192;
 
-/// Maximum request body size in bytes (64KB for browser payloads).
-pub const max_body_size: usize = 64 * 1024;
+/// Maximum requests per minute per public key (rate limit for Browser Relay).
+const rate_limit_max_requests: usize = 300;
+/// Rate limit window in milliseconds (1 minute).
+const rate_limit_window_ms: i64 = 60_000;
 
 pub fn main() !void {
     // Check for --healthcheck CLI flag
@@ -18,6 +25,21 @@ pub fn main() !void {
         }
     }
 
+    // Load configuration from environment variables
+    const cfg = app_config.load() catch {
+        // load() already prints descriptive error messages
+        std.process.exit(1);
+    };
+
+    log.info("configuration loaded (database: {s})", .{cfg.database_path});
+
+    // Initialize database (opens connection + runs migrations)
+    var db = database.init(cfg.db_path_z) catch |err| {
+        log.err("Failed to initialize database: {}", .{err});
+        std.process.exit(1);
+    };
+    defer db.close();
+
     log.info("Starting browser-relay on port {d}...", .{server_port});
 
     const address = net.Address.initIp4(.{ 0, 0, 0, 0 }, server_port);
@@ -28,20 +50,31 @@ pub fn main() !void {
 
     log.info("Browser relay listening on 0.0.0.0:{d}", .{server_port});
 
+    // Initialize rate limiter
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    var limiter = rate_limit.RateLimiter.init(gpa.allocator(), rate_limit_max_requests, rate_limit_window_ms) catch |err| {
+        log.err("Failed to initialize rate limiter: {}", .{err});
+        std.process.exit(1);
+    };
+    defer limiter.deinit();
+
     // Accept loop
     while (true) {
         const conn = server.accept() catch |err| {
             log.err("Failed to accept connection: {}", .{err});
             continue;
         };
-        handleConnection(conn) catch |err| {
+        handleConnection(conn, cfg.admin_api_key, &limiter, &db, &cfg) catch |err| {
             log.err("Failed to handle connection: {}", .{err});
         };
     }
 }
 
-pub fn handleConnection(conn: net.Server.Connection) !void {
+pub fn handleConnection(conn: net.Server.Connection, api_key: []const u8, limiter: *rate_limit.RateLimiter, db: *sqlite.Database, cfg: *const app_config.Config) !void {
     defer conn.stream.close();
+    _ = db;
+    _ = cfg;
 
     var buf: [max_header_size]u8 = undefined;
     var http_server = std.http.Server.init(conn, &buf);
@@ -50,6 +83,22 @@ pub fn handleConnection(conn: net.Server.Connection) !void {
         log.err("Failed to receive request head: {}", .{err});
         return;
     };
+
+    // Authenticate the request (skips excluded paths like /health)
+    const excluded_paths = [_][]const u8{"/health"};
+    if (auth.authenticate(&request, api_key, &excluded_paths) == .rejected) {
+        return; // 401 response already sent by auth module
+    }
+
+    // Rate limiting
+    if (rate_limit.checkRateLimit(&request, limiter, &excluded_paths) == .limited) {
+        return; // 429 response already sent by rate_limit module
+    }
+
+    // Body size enforcement
+    if (rate_limit.checkBodySize(&request, @as(usize, 64 * 1024)) == .too_large) {
+        return; // 413 response already sent by rate_limit module
+    }
 
     // Route the request
     const target = request.head.target;
