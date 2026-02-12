@@ -516,8 +516,8 @@
       - ~~Labels: method, endpoint (normalized path template from FastAPI route), status code~~
       - ~~Endpoint normalization: uses `request.scope["route"].path` if available (e.g., `/bookings/{id}` not `/bookings/123`)~~
       - ~~Installable via `app.add_middleware(MonlightMiddleware, metrics_client=client)`~~
-    - Provide setup helper: `setup_monlight(app, error_tracker_url, metrics_collector_url, api_key)` that wires up both
-      - Single function call in FlowRent's `main.py` to enable all monitoring
+    - ~~Provide setup helper: `setup_monlight(app, error_tracker_url, metrics_collector_url, api_key)` that wires up both~~
+      - ~~Single function call in FlowRent's `main.py` to enable all monitoring~~
   - Tests
     - Write unit tests for error client (payload formatting, PII filtering, timeout handling)
       - Tests pass with `pytest`

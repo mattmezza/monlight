@@ -145,6 +145,8 @@
 - **Total across all services**: error-tracker ~40 tests, log-viewer ~82 tests, metrics-collector ~60 tests. All passing with the single known config test exception per service.
 
 ## Codebase Patterns
+- `setup_monlight()` is the recommended single-call entry point for wiring up both error tracking and metrics in FastAPI apps
+- When testing with `httpx_mock` and `MetricsClient` shutdown flush, add `@pytest.mark.httpx_mock(can_send_already_matched_responses=True)` and mock the metrics endpoint too
 - Python client package lives at `clients/python/` with `monlightstack/` as the importable package
 - Use `pip install -e ".[dev]"` in a venv to install with all dev dependencies (pytest, fastapi, etc.)
 - The Python client uses `httpx` for both async and sync HTTP calls
@@ -216,4 +218,15 @@
   - The middleware calls `self.metrics_client.counter("http_requests_total", labels={...})` and `self.metrics_client.histogram("http_request_duration_seconds", value=duration, labels={...})` — labels are always passed as kwargs
   - Endpoint normalization relies on `request.scope.get("route")` which is populated by FastAPI's router — for unknown paths (404s), this is None and the raw URL path is used instead
   - Status code is always stored as a string (e.g., `"200"` not `200`) in the labels dict
+---
+
+## Session 20: setup_monlight() Verification & Tests
+
+- What was implemented: Verified existing `setup_monlight()` function (implemented in session 15) meets acceptance criteria and wrote 16 comprehensive tests covering full setup (both URLs), error tracking only, metrics only, no-op (no URLs), default parameter values, client configuration verification, and end-to-end behavior.
+- Files changed: `clients/python/tests/test_setup_monlight.py` (new), `plan.md` (struck through setup_monlight task)
+- **Learnings for future iterations:**
+  - `setup_monlight()` was already fully implemented in session 15 as part of scaffolding — only needed test verification and strikethrough
+  - When testing with `httpx_mock` and MetricsClient that flushes on shutdown, you need to mock the metrics POST endpoint too (otherwise teardown fails with "unexpected request")
+  - Use `@pytest.mark.httpx_mock(can_send_already_matched_responses=True)` when a test may trigger the same mock multiple times (e.g., error report + metrics flush both need HTTP mocks)
+  - `patch.object(MetricsClient, "start")` effectively prevents the timer from running in tests while still verifying `start()` was called
 ---
