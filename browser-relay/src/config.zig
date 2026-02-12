@@ -34,11 +34,15 @@ pub const Config = struct {
     /// Number of days to retain source maps before deletion.
     retention_days: i64,
 
-    /// Null-terminated copy of database_path for SQLite C API.
-    db_path_z: [*:0]const u8,
-
-    // Internal storage for the null-terminated path
+    // Internal storage for the null-terminated database path
     _db_path_buf: [512]u8,
+
+    /// Returns a null-terminated pointer to the database path.
+    /// Must be called on a stable (non-temporary) Config instance,
+    /// since the returned pointer borrows from `_db_path_buf`.
+    pub fn dbPathZ(self: *const Config) [*:0]const u8 {
+        return self._db_path_buf[0..self.database_path.len :0];
+    }
 };
 
 /// Load browser relay configuration from environment variables.
@@ -81,7 +85,6 @@ pub fn load() config_mod.ConfigError!Config {
         .max_body_size = max_body_size,
         .rate_limit = rate_limit_val,
         .retention_days = retention_days,
-        .db_path_z = db_path_buf[0..database_path.len :0],
         ._db_path_buf = db_path_buf,
     };
 }

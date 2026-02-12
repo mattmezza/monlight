@@ -5,13 +5,24 @@ const rate_limit = @import("rate_limit");
 const sqlite = @import("sqlite");
 const database = @import("database.zig");
 const app_config = @import("config.zig");
+const cors = main.cors;
 
 const test_admin_api_key = "test-admin-secret-key-1234567890";
 
 const HttpResponse = struct {
     status_code: u16,
-    body: []const u8,
-    raw: []const u8,
+    total_read: usize,
+    body_offset: usize,
+    // Owns the response data so slices remain valid.
+    _buf: [4096]u8,
+
+    fn raw(self: *const HttpResponse) []const u8 {
+        return self._buf[0..self.total_read];
+    }
+
+    fn body(self: *const HttpResponse) []const u8 {
+        return self._buf[self.body_offset..self.total_read];
+    }
 };
 
 const TestServer = struct {
@@ -19,6 +30,7 @@ const TestServer = struct {
     thread: ?std.Thread = null,
     db: sqlite.Database,
     cfg: app_config.Config,
+    cors_config: cors.CorsConfig,
 
     fn init() !TestServer {
         const address = net.Address.initIp4(.{ 127, 0, 0, 1 }, 0);
@@ -29,6 +41,7 @@ const TestServer = struct {
             .server = server,
             .db = db,
             .cfg = makeTestConfig(),
+            .cors_config = cors.parseCorsOrigins(null),
         };
     }
 
@@ -47,7 +60,7 @@ const TestServer = struct {
         var handled: usize = 0;
         while (handled < count) {
             const conn = self.server.accept() catch continue;
-            main.handleConnection(conn, test_admin_api_key, &limiter, &self.db, &self.cfg) catch {};
+            main.handleConnection(conn, test_admin_api_key, &limiter, &self.db, &self.cfg, &self.cors_config) catch {};
             handled += 1;
         }
     }
@@ -85,38 +98,35 @@ fn sendRequest(srv_port: u16, method: []const u8, path: []const u8, headers: []c
 
     try stream.writeAll(request_str);
 
-    var response_buf: [4096]u8 = undefined;
-    var total_read: usize = 0;
-    while (total_read < response_buf.len) {
-        const n = stream.read(response_buf[total_read..]) catch break;
+    var result = HttpResponse{
+        .status_code = 0,
+        .total_read = 0,
+        .body_offset = 0,
+        ._buf = undefined,
+    };
+    while (result.total_read < result._buf.len) {
+        const n = stream.read(result._buf[result.total_read..]) catch break;
         if (n == 0) break;
-        total_read += n;
+        result.total_read += n;
     }
 
-    if (total_read == 0) return error.EmptyResponse;
+    if (result.total_read == 0) return error.EmptyResponse;
 
-    const response = response_buf[0..total_read];
+    const response = result._buf[0..result.total_read];
 
-    // Parse status code (e.g., "HTTP/1.1 200 OK")
-    var status_code: u16 = 0;
     if (std.mem.indexOf(u8, response, "HTTP/1.1 ")) |start| {
         const code_start = start + 9;
         if (code_start + 3 <= response.len) {
-            status_code = std.fmt.parseInt(u16, response[code_start .. code_start + 3], 10) catch 0;
+            result.status_code = std.fmt.parseInt(u16, response[code_start .. code_start + 3], 10) catch 0;
         }
     }
 
-    // Find body (after \r\n\r\n)
-    const body = if (std.mem.indexOf(u8, response, "\r\n\r\n")) |sep|
-        response[sep + 4 ..]
+    result.body_offset = if (std.mem.indexOf(u8, response, "\r\n\r\n")) |sep|
+        sep + 4
     else
-        response[0..0];
+        result.total_read;
 
-    return HttpResponse{
-        .status_code = status_code,
-        .body = body,
-        .raw = response,
-    };
+    return result;
 }
 
 fn makeTestConfig() app_config.Config {
@@ -134,7 +144,6 @@ fn makeTestConfig() app_config.Config {
     const path = ":memory:";
     @memcpy(cfg._db_path_buf[0..path.len], path);
     cfg._db_path_buf[path.len] = 0;
-    cfg.db_path_z = cfg._db_path_buf[0..path.len :0];
     return cfg;
 }
 
@@ -149,7 +158,7 @@ test "health endpoint is accessible without any auth" {
 
     const resp = try sendRequest(srv.port(), "GET", "/health", "");
     try std.testing.expectEqual(@as(u16, 200), resp.status_code);
-    try std.testing.expect(std.mem.indexOf(u8, resp.body, "\"ok\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, resp.body(), "\"ok\"") != null);
 }
 
 // ============================================================
@@ -163,7 +172,7 @@ test "browser endpoint without X-Monlight-Key returns 401" {
 
     const resp = try sendRequest(srv.port(), "POST", "/api/browser/errors", "");
     try std.testing.expectEqual(@as(u16, 401), resp.status_code);
-    try std.testing.expect(std.mem.indexOf(u8, resp.body, "Invalid DSN key") != null);
+    try std.testing.expect(std.mem.indexOf(u8, resp.body(), "Invalid DSN key") != null);
 }
 
 test "browser endpoint with invalid X-Monlight-Key returns 401" {
@@ -173,7 +182,7 @@ test "browser endpoint with invalid X-Monlight-Key returns 401" {
 
     const resp = try sendRequest(srv.port(), "POST", "/api/browser/errors", "X-Monlight-Key: invalid_key_12345\r\n");
     try std.testing.expectEqual(@as(u16, 401), resp.status_code);
-    try std.testing.expect(std.mem.indexOf(u8, resp.body, "Invalid DSN key") != null);
+    try std.testing.expect(std.mem.indexOf(u8, resp.body(), "Invalid DSN key") != null);
 }
 
 test "browser endpoint with deactivated DSN key returns 401" {
@@ -184,7 +193,7 @@ test "browser endpoint with deactivated DSN key returns 401" {
 
     const resp = try sendRequest(srv.port(), "POST", "/api/browser/errors", "X-Monlight-Key: deactivated_key_abcdef\r\n");
     try std.testing.expectEqual(@as(u16, 401), resp.status_code);
-    try std.testing.expect(std.mem.indexOf(u8, resp.body, "Invalid DSN key") != null);
+    try std.testing.expect(std.mem.indexOf(u8, resp.body(), "Invalid DSN key") != null);
 }
 
 test "browser endpoint with valid DSN key passes auth" {
@@ -220,7 +229,7 @@ test "admin endpoint without X-API-Key returns 401" {
 
     const resp = try sendRequest(srv.port(), "GET", "/api/dsn-keys", "");
     try std.testing.expectEqual(@as(u16, 401), resp.status_code);
-    try std.testing.expect(std.mem.indexOf(u8, resp.body, "Invalid API key") != null);
+    try std.testing.expect(std.mem.indexOf(u8, resp.body(), "Invalid API key") != null);
 }
 
 test "admin endpoint with wrong X-API-Key returns 401" {
@@ -230,7 +239,7 @@ test "admin endpoint with wrong X-API-Key returns 401" {
 
     const resp = try sendRequest(srv.port(), "GET", "/api/dsn-keys", "X-API-Key: wrong_key_xyz\r\n");
     try std.testing.expectEqual(@as(u16, 401), resp.status_code);
-    try std.testing.expect(std.mem.indexOf(u8, resp.body, "Invalid API key") != null);
+    try std.testing.expect(std.mem.indexOf(u8, resp.body(), "Invalid API key") != null);
 }
 
 test "admin endpoint with correct X-API-Key passes auth" {
@@ -277,7 +286,7 @@ test "browser endpoint rejects admin API key (wrong auth mechanism)" {
     const header = std.fmt.comptimePrint("X-API-Key: {s}\r\n", .{test_admin_api_key});
     const resp = try sendRequest(srv.port(), "POST", "/api/browser/errors", header);
     try std.testing.expectEqual(@as(u16, 401), resp.status_code);
-    try std.testing.expect(std.mem.indexOf(u8, resp.body, "Invalid DSN key") != null);
+    try std.testing.expect(std.mem.indexOf(u8, resp.body(), "Invalid DSN key") != null);
 }
 
 test "admin endpoint rejects DSN key (wrong auth mechanism)" {
@@ -290,7 +299,7 @@ test "admin endpoint rejects DSN key (wrong auth mechanism)" {
     // because admin endpoints expect X-API-Key
     const resp = try sendRequest(srv.port(), "GET", "/api/dsn-keys", "X-Monlight-Key: dsn_key_for_admin_test\r\n");
     try std.testing.expectEqual(@as(u16, 401), resp.status_code);
-    try std.testing.expect(std.mem.indexOf(u8, resp.body, "Invalid API key") != null);
+    try std.testing.expect(std.mem.indexOf(u8, resp.body(), "Invalid API key") != null);
 }
 
 test "DSN auth 401 response has JSON content-type" {
@@ -300,7 +309,7 @@ test "DSN auth 401 response has JSON content-type" {
 
     const resp = try sendRequest(srv.port(), "POST", "/api/browser/errors", "");
     try std.testing.expectEqual(@as(u16, 401), resp.status_code);
-    try std.testing.expect(std.mem.indexOf(u8, resp.raw, "application/json") != null);
+    try std.testing.expect(std.mem.indexOf(u8, resp.raw(), "application/json") != null);
 }
 
 test "unknown path returns 404" {

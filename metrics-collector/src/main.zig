@@ -41,7 +41,7 @@ pub fn main() !void {
     log.info("configuration loaded (database: {s})", .{cfg.database_path});
 
     // Initialize database (opens connection + runs migrations)
-    var db = database.init(cfg.db_path_z) catch |err| {
+    var db = database.init(cfg.dbPathZ()) catch |err| {
         log.err("Failed to initialize database: {}", .{err});
         std.process.exit(1);
     };
@@ -61,7 +61,7 @@ pub fn main() !void {
     // Start aggregation background thread
     var aggregation_stop = std.atomic.Value(bool).init(false);
     const agg_thread = std.Thread.spawn(.{}, aggregation.aggregationThread, .{
-        cfg.db_path_z,
+        cfg.dbPathZ(),
         cfg.aggregation_interval,
         cfg.retention_raw,
         cfg.retention_minute,

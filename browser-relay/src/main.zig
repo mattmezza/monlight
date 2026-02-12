@@ -7,6 +7,7 @@ const app_config = @import("config.zig");
 const auth = @import("auth");
 const rate_limit = @import("rate_limit");
 const dsn_auth = @import("dsn_auth.zig");
+pub const cors = @import("cors.zig");
 
 const server_port: u16 = 8000;
 const max_header_size = 8192;
@@ -35,7 +36,7 @@ pub fn main() !void {
     log.info("configuration loaded (database: {s})", .{cfg.database_path});
 
     // Initialize database (opens connection + runs migrations)
-    var db = database.init(cfg.db_path_z) catch |err| {
+    var db = database.init(cfg.dbPathZ()) catch |err| {
         log.err("Failed to initialize database: {}", .{err});
         std.process.exit(1);
     };
@@ -50,6 +51,10 @@ pub fn main() !void {
     defer server.deinit();
 
     log.info("Browser relay listening on 0.0.0.0:{d}", .{server_port});
+
+    // Parse CORS origins from config
+    const cors_config = cors.parseCorsOrigins(cfg.cors_origins);
+    log.info("CORS: {d} allowed origins configured", .{cors_config.count});
 
     // Initialize rate limiter
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -66,13 +71,13 @@ pub fn main() !void {
             log.err("Failed to accept connection: {}", .{err});
             continue;
         };
-        handleConnection(conn, cfg.admin_api_key, &limiter, &db, &cfg) catch |err| {
+        handleConnection(conn, cfg.admin_api_key, &limiter, &db, &cfg, &cors_config) catch |err| {
             log.err("Failed to handle connection: {}", .{err});
         };
     }
 }
 
-pub fn handleConnection(conn: net.Server.Connection, admin_api_key: []const u8, limiter: *rate_limit.RateLimiter, db: *sqlite.Database, cfg: *const app_config.Config) !void {
+pub fn handleConnection(conn: net.Server.Connection, admin_api_key: []const u8, limiter: *rate_limit.RateLimiter, db: *sqlite.Database, cfg: *const app_config.Config, cors_config: *const cors.CorsConfig) !void {
     defer conn.stream.close();
     _ = cfg;
 
@@ -110,6 +115,13 @@ pub fn handleConnection(conn: net.Server.Connection, admin_api_key: []const u8, 
         target;
 
     if (isBrowserIngestionPath(path)) {
+        // CORS handling for browser ingestion endpoints
+        const cors_action = cors.handleCors(&request, cors_config);
+        switch (cors_action) {
+            .preflight_handled => return, // 204 already sent
+            .allowed, .no_cors => {}, // continue processing
+        }
+
         // Browser ingestion endpoints use DSN public key auth (X-Monlight-Key header)
         const dsn_result = dsn_auth.authenticateDsn(&request, db);
         if (!dsn_result.authenticated) {
@@ -118,7 +130,14 @@ pub fn handleConnection(conn: net.Server.Connection, admin_api_key: []const u8, 
         // Route to browser ingestion handlers
         // (handlers to be implemented in future tasks)
         _ = dsn_result.project();
-        try handleNotFound(&request);
+
+        // Get CORS headers to include in response
+        const cors_hdrs = cors.getCorsHeaders(&request, cors_config);
+        if (cors_hdrs) |hdrs| {
+            try sendJsonResponseWithCors(&request, .not_found, "{\"detail\": \"Not found\"}", hdrs.origin);
+        } else {
+            try handleNotFound(&request);
+        }
     } else if (isAdminPath(path)) {
         // Admin/management endpoints use admin API key auth (X-API-Key header)
         const no_exclusions = [_][]const u8{};
@@ -170,6 +189,25 @@ fn sendJsonResponse(
         .status = status,
         .extra_headers = &.{
             .{ .name = "content-type", .value = "application/json" },
+        },
+    }) catch |err| {
+        log.err("Failed to send response: {}", .{err});
+        return err;
+    };
+}
+
+/// Send a JSON response with CORS Access-Control-Allow-Origin header.
+pub fn sendJsonResponseWithCors(
+    request: *std.http.Server.Request,
+    status: std.http.Status,
+    body: []const u8,
+    origin: []const u8,
+) !void {
+    request.respond(body, .{
+        .status = status,
+        .extra_headers = &.{
+            .{ .name = "content-type", .value = "application/json" },
+            .{ .name = "access-control-allow-origin", .value = origin },
         },
     }) catch |err| {
         log.err("Failed to send response: {}", .{err});

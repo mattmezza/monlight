@@ -319,7 +319,7 @@ pytest
 
 ```bash
 # Build a single service
-docker build -t monlight/error-tracker error-tracker/
+docker build -t monlight/error-tracker -f error-tracker/Dockerfile .
 
 # Build all via compose
 docker compose -f deploy/docker-compose.monitoring.yml build
