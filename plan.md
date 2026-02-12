@@ -505,11 +505,11 @@
     - ~~Handle connection failures gracefully (log warning, drop metrics)~~
       - ~~Network errors do not crash the application~~
   - FastAPI integration helpers (`monlightstack/integrations/fastapi.py`)
-    - Implement `MonlightExceptionHandler` — a global exception handler for FastAPI
-      - Catches all unhandled exceptions (excluding HTTPException and RequestValidationError)
-      - Calls `ErrorClient.report_error()` with the request and exception
-      - Logs the error locally and returns a 500 JSON response
-      - Installable via `app.add_exception_handler(Exception, handler)`
+    - ~~Implement `MonlightExceptionHandler` — a global exception handler for FastAPI~~
+      - ~~Catches all unhandled exceptions (excluding HTTPException and RequestValidationError)~~
+      - ~~Calls `ErrorClient.report_error()` with the request and exception~~
+      - ~~Logs the error locally and returns a 500 JSON response~~
+      - ~~Installable via `app.add_exception_handler(Exception, handler)`~~
     - Implement `MonlightMiddleware` — an ASGI middleware for request metrics
       - Records request start time, processes request, records end time
       - Emits `http_requests_total` (counter) and `http_request_duration_seconds` (histogram)

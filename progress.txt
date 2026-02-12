@@ -194,3 +194,14 @@
   - `client.start()` must always be paired with `client.shutdown()` in tests (use try/finally) to avoid dangling timer threads
   - The MetricsClient `_buffer` list and `_lock` are easily inspectable in tests since they're instance attributes, making buffer state assertions straightforward
 ---
+
+## Session 18: FastAPI MonlightExceptionHandler Verification
+
+- What was implemented: Verified that the existing `MonlightExceptionHandler` (implemented in session 15) meets all 4 acceptance criteria: (1) catches unhandled exceptions excluding HTTPException/RequestValidationError (via FastAPI's handler hierarchy), (2) calls `ErrorClient.report_error()` with request and exception via fire-and-forget `asyncio.create_task`, (3) logs error locally via `logger.exception()` and returns 500 JSON response, (4) installable via `app.add_exception_handler(Exception, handler)`.
+- Files changed: `plan.md` (struck through MonlightExceptionHandler task)
+- **Learnings for future iterations:**
+  - The FastAPI integration code was fully implemented in session 15 as part of scaffolding — the remaining plan tasks just need verification and strikethrough
+  - `MonlightExceptionHandler` is an async function (not a class) — it's registered directly as `app.add_exception_handler(Exception, MonlightExceptionHandler)`
+  - HTTPException and RequestValidationError exclusion works automatically because FastAPI registers its own handlers for those types, which take precedence over the generic `Exception` handler
+  - The error client is stored at `request.app.state.monlight_error_client` — this is the convention used by `setup_monlight()` to wire things up
+---
