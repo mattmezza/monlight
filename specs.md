@@ -334,25 +334,41 @@ Capture unhandled exceptions from FlowRent with full context (stack trace, reque
 | project | VARCHAR(100) | Project identifier, e.g., "flowrent" (indexed) |
 | environment | VARCHAR(20) | Environment: "prod", "dev", "staging" (indexed) |
 | exception_type | VARCHAR(200) | Exception class name, e.g., "ValueError" |
-| message | TEXT | Exception message |
-| traceback | TEXT | Full stack trace |
-| request_url | VARCHAR(500) | HTTP request URL (nullable) |
-| request_method | VARCHAR(10) | HTTP method: GET, POST, etc. (nullable) |
-| request_headers | TEXT | JSON blob of relevant headers (nullable) |
-| user_id | VARCHAR(100) | User identifier if available (nullable) |
-| extra | TEXT | JSON blob for additional context (nullable) |
+| message | TEXT | Exception message (from first occurrence) |
+| traceback | TEXT | Full stack trace (from first occurrence) |
 | count | INTEGER | Occurrence count, default 1 |
 | first_seen | DATETIME | First occurrence timestamp (indexed) |
 | last_seen | DATETIME | Most recent occurrence timestamp (indexed) |
 | resolved | BOOLEAN | Resolution status, default false (indexed) |
 | resolved_at | DATETIME | When marked resolved (nullable) |
 
-#### 4.3.2 Indexes
+**Note:** Per-occurrence context (request_url, request_method, request_headers, user_id, extra) is stored in the `error_occurrences` table. The `errors` table holds the group-level summary. The `traceback` and `message` on the `errors` table are from the first occurrence and used for display/fingerprinting.
+
+#### 4.3.2 Error Occurrence Entity
+
+Stores the most recent individual occurrences of each error group, preserving request context from recurring errors.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| id | INTEGER | Primary key, auto-increment |
+| error_id | INTEGER | Foreign key to errors.id (indexed) |
+| timestamp | DATETIME | When this occurrence happened |
+| request_url | VARCHAR(500) | HTTP request URL (nullable) |
+| request_method | VARCHAR(10) | HTTP method (nullable) |
+| request_headers | TEXT | JSON blob of relevant headers (nullable) |
+| user_id | VARCHAR(100) | User identifier (nullable) |
+| extra | TEXT | JSON blob for additional context (nullable) |
+| traceback | TEXT | Full stack trace for this occurrence |
+
+**Retention:** Keep the last 5 occurrences per error group. When a 6th occurrence arrives, delete the oldest occurrence for that error_id.
+
+#### 4.3.3 Indexes
 
 - `idx_fingerprint_resolved` on (fingerprint, resolved) - for deduplication lookup
 - `idx_project_env` on (project, environment) - for filtering
 - `idx_last_seen` on (last_seen) - for sorting
 - `idx_resolved` on (resolved) - for filtering
+- `idx_occurrence_error_id` on error_occurrences(error_id) - for occurrence lookup
 
 ### 4.4 API Specification
 
@@ -457,16 +473,33 @@ Get single error with full details.
   "exception_type": "ValueError",
   "message": "invalid input",
   "traceback": "Traceback (most recent call last):\n...",
-  "request_url": "/api/bookings",
-  "request_method": "POST",
-  "request_headers": {"User-Agent": "..."},
-  "user_id": "123",
-  "extra": {"booking_id": 456},
   "count": 5,
   "first_seen": "2025-01-20T10:00:00Z",
   "last_seen": "2025-01-23T15:30:00Z",
   "resolved": false,
-  "resolved_at": null
+  "resolved_at": null,
+  "occurrences": [
+    {
+      "id": 101,
+      "timestamp": "2025-01-23T15:30:00Z",
+      "request_url": "/api/bookings",
+      "request_method": "POST",
+      "request_headers": {"User-Agent": "..."},
+      "user_id": "123",
+      "extra": {"booking_id": 456},
+      "traceback": "Traceback (most recent call last):\n..."
+    },
+    {
+      "id": 100,
+      "timestamp": "2025-01-22T10:00:00Z",
+      "request_url": "/api/bookings",
+      "request_method": "POST",
+      "request_headers": {"User-Agent": "..."},
+      "user_id": "789",
+      "extra": {"booking_id": 321},
+      "traceback": "Traceback (most recent call last):\n..."
+    }
+  ]
 }
 ```
 
@@ -587,6 +620,7 @@ Read Docker container logs, index them in SQLite for searchability, and provide 
 | LV-005 | Support multiple containers |
 | LV-006 | Handle log rotation gracefully |
 | LV-007 | Track read position to avoid reprocessing |
+| LV-008 | Reassemble multiline log entries (e.g., Python tracebacks) |
 
 #### 5.2.2 Log Storage
 
@@ -678,6 +712,9 @@ Parse log message to extract level. FlowRent logs may use various formats:
 
 Query logs with filtering.
 
+**Headers:**
+- `X-API-Key: <api_key>` (required)
+
 **Query Parameters:**
 - `container` (optional): Filter by container name
 - `level` (optional): Filter by level (DEBUG, INFO, WARNING, ERROR)
@@ -710,6 +747,9 @@ Query logs with filtering.
 
 Server-Sent Events stream for live tail.
 
+**Headers:**
+- `X-API-Key: <api_key>` (required)
+
 **Query Parameters:**
 - `container` (optional): Filter by container
 - `level` (optional): Filter by level
@@ -722,6 +762,13 @@ data: {"id": 12346, "timestamp": "...", "level": "INFO", "message": "..."}
 event: log
 data: {"id": 12347, "timestamp": "...", "level": "ERROR", "message": "..."}
 ```
+
+**SSE connection lifecycle:**
+- Maximum connection duration: 30 minutes (client should reconnect automatically)
+- Heartbeat: Send `event: heartbeat\ndata: {}\n\n` every 15 seconds to detect dead connections
+- Maximum concurrent SSE connections: 5 (return `503 Service Unavailable` when exceeded)
+- On client disconnect: Clean up connection resources immediately
+- Backpressure: If a client cannot keep up, drop log events for that client (don't buffer unboundedly)
 
 #### 5.5.3 GET /api/containers
 
@@ -789,13 +836,33 @@ Health check endpoint.
    b. If rotated, start from beginning
    c. Seek to last position
    d. Read new lines
-   e. For each line:
+   e. Reassemble multiline entries (see below)
+   f. For each complete entry:
       - Parse JSON
       - Extract timestamp, stream, message
       - Extract log level from message
       - Insert into database
-   f. Update cursor position
+   g. Update cursor position
 2. Run cleanup if total logs > MAX_ENTRIES
+
+**Multiline log reassembly:**
+
+Docker splits each `\n`-terminated line into a separate JSON log entry. A single logical log message (e.g., a Python traceback) may span many Docker JSON lines. The Log Viewer reassembles these:
+
+1. Buffer incoming lines per container
+2. A line starts a **new** log entry if it matches any log level pattern (see 5.4) or begins with a timestamp pattern (ISO8601 or common log formats)
+3. A line that does **not** match any start pattern is appended to the current buffered entry (it is a continuation line, e.g., a traceback frame or multiline message)
+4. When a new start pattern is detected, the previously buffered entry is flushed (inserted into the database) and a new buffer starts
+5. On poll cycle end, any buffered entry older than 2 seconds is flushed (to avoid holding partial entries indefinitely)
+
+**Example:** Python traceback arriving as separate Docker JSON lines:
+```
+{"log": "ERROR:  Traceback (most recent call last):\n", ...}  → starts new entry
+{"log": "  File \"/app/routes/bookings.py\", line 42\n", ...} → continuation
+{"log": "    result = process(data)\n", ...}                  → continuation
+{"log": "ValueError: invalid input\n", ...}                   → continuation
+```
+These four Docker lines become a single log entry in the database.
 
 **Cleanup:**
 1. Count total log entries
@@ -809,6 +876,7 @@ Health check endpoint.
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
 | DATABASE_PATH | string | ./data/logs.db | SQLite database file path |
+| API_KEY | string | (required) | Shared secret for authentication |
 | LOG_SOURCES | string | /var/lib/docker/containers | Docker containers directory |
 | CONTAINERS | string | (required) | Comma-separated container names to watch |
 | MAX_ENTRIES | int | 100000 | Maximum log entries to retain |
@@ -913,8 +981,21 @@ Longer retention, pre-computed aggregates.
 
 - `idx_raw_timestamp` on metrics_raw(timestamp)
 - `idx_raw_name` on metrics_raw(name)
+- `idx_raw_name_timestamp` on metrics_raw(name, timestamp) - for aggregation queries
 - `idx_agg_bucket` on metrics_aggregated(bucket)
 - `idx_agg_name_resolution` on metrics_aggregated(name, resolution)
+- `idx_agg_name_resolution_bucket` on metrics_aggregated(name, resolution, bucket) - for time-range queries
+
+#### 6.3.4 Label Filtering Strategy
+
+Labels are stored as JSON text (e.g., `{"method": "GET", "endpoint": "/bookings", "status": "200"}`). SQLite's `json_extract()` function is used for label filtering at query time.
+
+**Performance trade-off:** JSON-based label filtering requires a full scan of rows matching the name/time criteria. This is acceptable because:
+1. Label filtering always happens after name + time range filtering, which uses indexes to narrow the candidate set
+2. The expected cardinality is low (hundreds to low thousands of aggregated rows per query)
+3. Adding a normalized labels table would increase storage and write complexity for minimal query benefit at this scale
+
+**If label filtering becomes a bottleneck:** Consider adding a `label_hash` column (hash of sorted label key-value pairs) with an index, allowing exact-match label filtering via index lookup. This is a future optimization, not needed for initial implementation.
 
 ### 6.4 Pre-defined Metrics
 
@@ -1328,6 +1409,8 @@ services:
     volumes:
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - ./data/logs:/app/data
+    env_file:
+      - secrets.env
     environment:
       - DATABASE_PATH=/app/data/logs.db
       - CONTAINERS=rentl_prod,rentl_dev
@@ -1376,6 +1459,9 @@ networks:
 ```
 # Error Tracker
 ERROR_TRACKER_API_KEY=<generate-random-32-char-string>
+
+# Log Viewer
+LOG_VIEWER_API_KEY=<generate-random-32-char-string>
 
 # Metrics Collector
 METRICS_COLLECTOR_API_KEY=<generate-random-32-char-string>
@@ -1555,6 +1641,163 @@ Each service exposes `/health` endpoint:
 - Returns service-specific health metrics
 - Used by Docker health checks for auto-restart
 
+### 9.8 Request Limits
+
+| Service | Max Request Body | Rate Limit |
+|---------|-----------------|------------|
+| Error Tracker | 256KB per POST | 100 requests/minute per API key |
+| Metrics Collector | 512KB per POST | 200 requests/minute per API key |
+| Log Viewer | N/A (read-only) | 60 requests/minute per API key |
+
+**Behavior on limit exceeded:**
+- Body too large: Return `413 Payload Too Large` with `{"detail": "Request body exceeds maximum size"}`
+- Rate limit exceeded: Return `429 Too Many Requests` with `{"detail": "Rate limit exceeded", "retry_after": N}`
+
+**Rate limiting implementation:**
+- Simple in-memory sliding window counter per API key
+- No external dependencies (no Redis)
+- Reset on service restart (acceptable for this use case)
+- Rate limits are generous enough to never trigger under normal FlowRent load
+
+### 9.9 Timestamps and Timezones
+
+All timestamps throughout the monitoring stack use **UTC** exclusively:
+- Stored in SQLite as ISO8601 strings with `Z` suffix (e.g., `2025-01-23T15:30:00Z`)
+- API responses always use UTC ISO8601 format
+- API request parameters (`since`, `until`, `timestamp`) are parsed as UTC; timezone offsets are accepted and converted to UTC on ingestion
+- Web UI displays timestamps in UTC with a "(UTC)" label
+- FlowRent clients must send timestamps in UTC (or omit to use server time)
+
+### 9.10 Concurrency Model
+
+**Zig service architecture:**
+- Single-threaded event loop using Zig's `std.http.Server`
+- One HTTP connection handled at a time (sufficient for low-traffic monitoring services)
+- Background tasks (log polling, metric aggregation, retention cleanup) run on separate threads
+- If concurrency becomes a bottleneck, migrate to a thread-pool model with N worker threads (future enhancement)
+
+**SQLite configuration:**
+- WAL (Write-Ahead Logging) mode enabled on startup for concurrent read/write support
+- Busy timeout set to 5000ms to handle contention between HTTP thread and background threads
+- Single database connection per thread (no connection pooling needed)
+- `PRAGMA journal_mode=WAL;` and `PRAGMA busy_timeout=5000;` executed on connection open
+- `PRAGMA synchronous=NORMAL;` for balanced durability/performance (monitoring data is not critical)
+- `PRAGMA foreign_keys=ON;` for referential integrity
+
+### 9.11 Graceful Shutdown
+
+Each service must handle `SIGTERM` and `SIGINT` signals:
+1. Stop accepting new HTTP connections
+2. Wait for in-flight HTTP requests to complete (max 5 second timeout)
+3. Stop background tasks (polling, aggregation)
+4. Flush any pending writes to SQLite
+5. Close SQLite connections cleanly (ensures WAL checkpoint)
+6. Exit with code 0
+
+**Docker integration:** Docker sends `SIGTERM` on `docker stop`, waits 10 seconds (default), then sends `SIGKILL`. The 5-second drain timeout ensures clean shutdown within this window.
+
+### 9.12 Service Logging
+
+The monitoring services themselves log to stdout in a structured JSON format:
+
+```
+{"ts": "2025-01-23T15:30:00Z", "level": "INFO", "service": "error-tracker", "msg": "Server started on port 8000"}
+```
+
+**Log levels:**
+- `ERROR`: Service-level failures (SQLite errors, Postmark API failures)
+- `WARN`: Degraded conditions (rate limit hit, oversized request rejected, connection timeouts)
+- `INFO`: Operational events (startup, shutdown, ingestion stats, aggregation runs)
+- `DEBUG`: Detailed request/response logging (disabled in production)
+
+**Configuration:** `LOG_LEVEL` environment variable (default: `INFO`)
+
+Logs are captured by Docker's json-file log driver and can be viewed via `docker logs` or ingested by the Log Viewer itself.
+
+### 9.13 Database Migration Strategy
+
+**Philosophy:** Keep schema changes simple and additive; avoid complex migration frameworks.
+
+**Implementation:**
+1. Each service stores a `schema_version` in a `_meta` table: `CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT);`
+2. On startup, the service reads the current `schema_version` (default: "0" if table doesn't exist)
+3. Migrations are defined as an ordered array of SQL statements in the Zig source code, each associated with a version number
+4. The service executes all migrations with version > current, inside a transaction
+5. After all migrations succeed, `schema_version` is updated to the latest version
+
+**Example migration sequence:**
+```
+Version 1: CREATE TABLE errors (...)
+Version 2: ALTER TABLE errors ADD COLUMN severity VARCHAR(20) DEFAULT 'error';
+Version 3: CREATE INDEX idx_severity ON errors(severity);
+```
+
+**Rules:**
+- Migrations are append-only; never modify or delete an existing migration
+- Each migration must be idempotent where possible (use `IF NOT EXISTS`)
+- Breaking changes (column removal, type changes) require a new table + data copy approach
+- Rollbacks are not supported; fix forward only
+
+### 9.14 CORS Policy
+
+**Default:** No CORS headers are sent. Services are designed for same-origin access only (served from the same host via nginx).
+
+**If cross-origin access is needed** (e.g., monitoring UI on a different subdomain):
+- Add `CORS_ORIGINS` environment variable (comma-separated allowed origins)
+- When set, respond with `Access-Control-Allow-Origin`, `Access-Control-Allow-Headers` (X-API-Key, Content-Type), and `Access-Control-Allow-Methods`
+- Preflight `OPTIONS` requests return 204 with CORS headers
+
+### 9.15 Upgrade and Deployment Procedure
+
+**Standard upgrade (zero-downtime for FlowRent):**
+
+```bash
+# 1. Pull latest code
+git pull origin main
+
+# 2. Build new images
+docker compose -f docker-compose.monitoring.yml build
+
+# 3. Rolling restart (one service at a time)
+docker compose -f docker-compose.monitoring.yml up -d --no-deps error-tracker
+docker compose -f docker-compose.monitoring.yml up -d --no-deps log-viewer
+docker compose -f docker-compose.monitoring.yml up -d --no-deps metrics-collector
+
+# 4. Verify health
+curl http://localhost:5010/health
+curl http://localhost:5011/health
+curl http://localhost:5012/health
+```
+
+**Notes:**
+- FlowRent is unaffected during monitoring stack restarts (graceful degradation applies)
+- SQLite databases persist across restarts via volume mounts
+- Schema migrations run automatically on startup (see 9.13)
+- If a migration fails, the service logs the error and exits; the previous container version continues running until the issue is resolved
+
+### 9.16 Backup
+
+**Error Tracker database:**
+- Optional daily backup script copies `errors.db` to S3 using the SQLite `.backup` API (or `sqlite3 errors.db ".backup /tmp/errors-backup.db"`)
+- Cron job or Docker-based scheduled task
+- Retain last 7 daily backups
+
+**Log Viewer and Metrics Collector databases:**
+- No backup needed (logs reconstructible from Docker, metrics are ephemeral by design)
+
+**Backup script (`deploy/backup.sh`):**
+```bash
+#!/bin/bash
+BACKUP_DIR="/tmp/monlight-backups"
+DATE=$(date +%Y%m%d)
+mkdir -p "$BACKUP_DIR"
+sqlite3 /path/to/data/errors/errors.db ".backup $BACKUP_DIR/errors-$DATE.db"
+# Upload to S3 (optional)
+# aws s3 cp "$BACKUP_DIR/errors-$DATE.db" s3://bucket/backups/
+# Cleanup old backups
+find "$BACKUP_DIR" -name "errors-*.db" -mtime +7 -delete
+```
+
 ---
 
 ## 10. Security Considerations
@@ -1563,11 +1806,11 @@ Each service exposes `/health` endpoint:
 
 | Service | Method | Scope |
 |---------|--------|-------|
-| Error Tracker API | API Key (X-API-Key header) | All POST endpoints |
+| Error Tracker API | API Key (X-API-Key header) | All POST and GET endpoints |
 | Error Tracker UI | None (internal network only) | Or nginx basic auth |
-| Log Viewer API | None | Read-only, internal network |
+| Log Viewer API | API Key (X-API-Key header) | All GET endpoints (except /health) |
 | Log Viewer UI | None (internal network only) | Or nginx basic auth |
-| Metrics Collector API | API Key (X-API-Key header) | All POST endpoints |
+| Metrics Collector API | API Key (X-API-Key header) | All POST and GET endpoints |
 | Metrics Collector UI | None (internal network only) | Or nginx basic auth |
 
 ### 10.2 Network Security

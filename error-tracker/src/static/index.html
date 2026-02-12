@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Error Tracker</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace; }
+  </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+  <div class="max-w-7xl mx-auto px-4 py-6">
+    <header class="mb-6">
+      <h1 class="text-2xl font-bold text-white">Error Tracker</h1>
+      <p class="text-gray-400 text-sm mt-1">Monitor and manage application errors</p>
+    </header>
+
+    <!-- Filters -->
+    <div class="flex flex-wrap gap-4 mb-6 items-end">
+      <div>
+        <label class="block text-xs text-gray-400 mb-1">Project</label>
+        <select id="filter-project" class="bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded px-3 py-1.5 focus:outline-none focus:border-blue-500">
+          <option value="">All projects</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs text-gray-400 mb-1">Environment</label>
+        <select id="filter-environment" class="bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded px-3 py-1.5 focus:outline-none focus:border-blue-500">
+          <option value="">All environments</option>
+          <option value="production">production</option>
+          <option value="staging">staging</option>
+          <option value="development">development</option>
+        </select>
+      </div>
+      <div class="flex items-center gap-2">
+        <label class="block text-xs text-gray-400">Show resolved</label>
+        <input type="checkbox" id="filter-resolved" class="rounded bg-gray-800 border-gray-700 text-blue-500 focus:ring-blue-500 focus:ring-offset-gray-900">
+      </div>
+    </div>
+
+    <!-- Error Table -->
+    <div class="overflow-x-auto rounded-lg border border-gray-700">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-800 text-gray-400 text-xs uppercase tracking-wider">
+          <tr>
+            <th class="px-4 py-3 text-left">Exception</th>
+            <th class="px-4 py-3 text-left">Message</th>
+            <th class="px-4 py-3 text-left">Project</th>
+            <th class="px-4 py-3 text-left">Environment</th>
+            <th class="px-4 py-3 text-right">Count</th>
+            <th class="px-4 py-3 text-left">First Seen</th>
+            <th class="px-4 py-3 text-left">Last Seen</th>
+          </tr>
+        </thead>
+        <tbody id="error-table-body" class="divide-y divide-gray-800">
+          <tr><td colspan="7" class="px-4 py-8 text-center text-gray-500">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Pagination -->
+    <div id="pagination" class="flex items-center justify-between mt-4 text-sm text-gray-400">
+      <span id="pagination-info"></span>
+      <div class="flex gap-2">
+        <button id="btn-prev" class="px-3 py-1 rounded bg-gray-800 border border-gray-700 hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed" disabled>Prev</button>
+        <button id="btn-next" class="px-3 py-1 rounded bg-gray-800 border border-gray-700 hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed" disabled>Next</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_KEY = localStorage.getItem('api_key') || '';
+    let currentOffset = 0;
+    const LIMIT = 50;
+
+    function headers() {
+      const h = { 'Content-Type': 'application/json' };
+      if (API_KEY) h['X-API-Key'] = API_KEY;
+      return h;
+    }
+
+    function truncate(s, n) {
+      if (!s) return '';
+      return s.length > n ? s.substring(0, n) + '...' : s;
+    }
+
+    function formatDate(iso) {
+      if (!iso) return '';
+      const d = new Date(iso + 'Z');
+      return d.toLocaleString();
+    }
+
+    function timeAgo(iso) {
+      if (!iso) return '';
+      const now = Date.now();
+      const then = new Date(iso + 'Z').getTime();
+      const diff = Math.floor((now - then) / 1000);
+      if (diff < 60) return diff + 's ago';
+      if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+      if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+      return Math.floor(diff / 86400) + 'd ago';
+    }
+
+    async function loadProjects() {
+      try {
+        const res = await fetch('/api/projects', { headers: headers() });
+        const data = await res.json();
+        const sel = document.getElementById('filter-project');
+        (data.projects || []).forEach(p => {
+          const opt = document.createElement('option');
+          opt.value = p;
+          opt.textContent = p;
+          sel.appendChild(opt);
+        });
+      } catch (e) {
+        console.error('Failed to load projects:', e);
+      }
+    }
+
+    async function loadErrors() {
+      const project = document.getElementById('filter-project').value;
+      const environment = document.getElementById('filter-environment').value;
+      const resolved = document.getElementById('filter-resolved').checked;
+
+      const params = new URLSearchParams();
+      if (project) params.set('project', project);
+      if (environment) params.set('environment', environment);
+      if (resolved) params.set('resolved', 'true');
+      params.set('limit', LIMIT);
+      params.set('offset', currentOffset);
+
+      const tbody = document.getElementById('error-table-body');
+
+      try {
+        const res = await fetch('/api/errors?' + params.toString(), { headers: headers() });
+        const data = await res.json();
+
+        if (!data.errors || data.errors.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-500">No errors found</td></tr>';
+          updatePagination(0, 0);
+          return;
+        }
+
+        tbody.innerHTML = data.errors.map(err => `
+          <tr class="hover:bg-gray-800/50 cursor-pointer transition-colors" onclick="window.location='/errors/${err.id}'">
+            <td class="px-4 py-3">
+              <span class="text-red-400 font-medium">${esc(err.exception_type)}</span>
+            </td>
+            <td class="px-4 py-3 text-gray-300 max-w-xs truncate">${esc(truncate(err.message, 80))}</td>
+            <td class="px-4 py-3">
+              <span class="inline-block bg-blue-900/40 text-blue-300 text-xs px-2 py-0.5 rounded">${esc(err.project)}</span>
+            </td>
+            <td class="px-4 py-3">
+              <span class="inline-block ${envColor(err.environment)} text-xs px-2 py-0.5 rounded">${esc(err.environment)}</span>
+            </td>
+            <td class="px-4 py-3 text-right font-medium ${err.count > 100 ? 'text-red-400' : err.count > 10 ? 'text-yellow-400' : 'text-gray-300'}">${err.count}</td>
+            <td class="px-4 py-3 text-gray-400 whitespace-nowrap" title="${esc(formatDate(err.first_seen))}">${timeAgo(err.first_seen)}</td>
+            <td class="px-4 py-3 text-gray-400 whitespace-nowrap" title="${esc(formatDate(err.last_seen))}">${timeAgo(err.last_seen)}</td>
+          </tr>
+        `).join('');
+
+        updatePagination(data.total, data.offset);
+      } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-red-400">Failed to load errors</td></tr>';
+        console.error('Failed to load errors:', e);
+      }
+    }
+
+    function envColor(env) {
+      switch (env) {
+        case 'production': return 'bg-red-900/40 text-red-300';
+        case 'staging': return 'bg-yellow-900/40 text-yellow-300';
+        case 'development': return 'bg-green-900/40 text-green-300';
+        default: return 'bg-gray-700 text-gray-300';
+      }
+    }
+
+    function esc(s) {
+      if (!s) return '';
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    function updatePagination(total, offset) {
+      const info = document.getElementById('pagination-info');
+      const btnPrev = document.getElementById('btn-prev');
+      const btnNext = document.getElementById('btn-next');
+
+      if (total === 0) {
+        info.textContent = 'No errors';
+        btnPrev.disabled = true;
+        btnNext.disabled = true;
+        return;
+      }
+
+      const start = offset + 1;
+      const end = Math.min(offset + LIMIT, total);
+      info.textContent = `Showing ${start}-${end} of ${total}`;
+
+      btnPrev.disabled = offset === 0;
+      btnNext.disabled = offset + LIMIT >= total;
+    }
+
+    document.getElementById('btn-prev').addEventListener('click', () => {
+      currentOffset = Math.max(0, currentOffset - LIMIT);
+      loadErrors();
+    });
+
+    document.getElementById('btn-next').addEventListener('click', () => {
+      currentOffset += LIMIT;
+      loadErrors();
+    });
+
+    document.getElementById('filter-project').addEventListener('change', () => { currentOffset = 0; loadErrors(); });
+    document.getElementById('filter-environment').addEventListener('change', () => { currentOffset = 0; loadErrors(); });
+    document.getElementById('filter-resolved').addEventListener('change', () => { currentOffset = 0; loadErrors(); });
+
+    // Initial load
+    loadProjects();
+    loadErrors();
+  </script>
+</body>
+</html>

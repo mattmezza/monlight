@@ -1,0 +1,325 @@
+# Progress & Learnings
+
+## Session 1: Repository Setup
+
+- The monorepo has 5 top-level service directories: `error-tracker/`, `log-viewer/`, `metrics-collector/`, `clients/python/`, `shared/`
+- Deployment config lives in `deploy/` with `docker-compose.monitoring.yml` and `secrets.env.example`
+- `deploy/data/{errors,logs,metrics}/` directories hold SQLite persistence volumes
+- The docker-compose file uses relative build paths (`../error-tracker`, etc.) since it lives in `deploy/`
+- The `.gitignore` must cover: Zig (`zig-out/`, `zig-cache/`, `.zig-cache/`), SQLite (`*.db`, `*.db-wal`, `*.db-shm`), Python (`__pycache__/`, `*.egg-info/`, etc.), env files (`secrets.env`, `.env`), and Node (`node_modules/`)
+- All three services map internal port 8000 to external ports 5010, 5011, 5012 respectively
+- Services connect via the `flowrent_network` external Docker network
+- Each service binary supports a `--healthcheck` CLI flag for Docker health checks
+- The `env_file` directive in docker-compose points to `secrets.env` (not committed; `secrets.env.example` serves as template)
+- Environment variable naming convention: service-specific keys use service name prefix (e.g., `ERROR_TRACKER_API_KEY`), but each service reads it as just `API_KEY` from its own config module
+
+## Session 2: Error Tracker Bootstrap & SQLite Layer
+
+- Zig 0.13 is installed at `/tmp/zig-linux-x86_64-0.13.0/zig` (not in PATH by default)
+- In Zig 0.13, `std.Build.Module` does NOT have a `link_library` field. C library linking must be done on the artifact (executable/test) only via `linkSystemLibrary` and `linkLibC`.
+- In Zig 0.13, `std.http.Server.Request.respond()` signature is `respond(content, options)` — content ([]const u8) comes FIRST, options struct second. This differs from some later versions.
+- The `@cImport` of `sqlite3.h` works with system-installed `sqlite-dev` package on Alpine and `libsqlite3-dev` on Debian/Ubuntu.
+- Shared modules (e.g., `shared/sqlite.zig`) are imported into services via `b.addModule("sqlite", .{ .root_source_file = b.path("../shared/sqlite.zig") })` in `build.zig`, then `exe.root_module.addImport("sqlite", sqlite_mod)`.
+- Since `build.zig` references `../shared/`, the Dockerfile must use the repo root as Docker build context, not the service directory. Updated docker-compose to use `context: ..` with `dockerfile: error-tracker/Dockerfile`.
+- SQLite `execMulti` uses an internal 8KB buffer for null-terminating SQL strings. Migration SQL must fit within this limit.
+- In-memory SQLite databases (`:memory:`) use `memory` journal mode, not WAL. Tests that check WAL pragma should account for this.
+- SQLite `EXPLAIN QUERY PLAN` returns the detail string in column index 3 — useful for verifying index usage in tests.
+- The `_meta` table pattern for schema versioning: `(key TEXT PRIMARY KEY, value TEXT)` with `schema_version` key stores the version as a text string. Migration runner compares version as `usize` integer.
+
+## Session 3: Error Tracker Configuration Module
+
+- Shared config module (`shared/config.zig`) provides generic env var parsing helpers: `getRequired`, `getString`, `getInt`, `getBool`, `getOptional`, `initLogLevel`. Each service's config module uses these to define its own specific config struct.
+- Adding a new shared module requires updates in `build.zig`: (1) `b.addModule(...)` to create the module, (2) `exe.root_module.addImport(...)` on the executable, and (3) the same addImport on EVERY test artifact that transitively imports it.
+- The shared config module does NOT need `linkSystemLibrary("sqlite3")` or `linkLibC()` since it has no C dependencies — only test artifacts with C deps need those.
+- Environment variables in Zig tests cannot be easily set/unset, so config tests rely on verifying behavior with env vars known to NOT exist (e.g., `MONLIGHT_TEST_NONEXISTENT_VAR_12345`) rather than setting them.
+- `std.debug.print` is used for fatal startup messages (instead of `std.log`) because log level filtering might suppress the message. Fatal config errors must always be visible.
+- Config struct stores a `db_path_z: [*:0]const u8` (null-terminated) alongside the regular `database_path: []const u8` slice, because SQLite's C API requires null-terminated strings. The null-terminated version is backed by a `_db_path_buf: [512]u8` field within the struct.
+- IMPORTANT: Previous feature branches are not auto-merged into main. When branching for a new task, branch off the PREVIOUS feature branch (not main) if that branch contains required code (e.g., `shared/sqlite.zig`).
+- `std.posix.getenv()` returns `?[]const u8` — an optional slice. It returns null when the env var is not set.
+
+## Session 4: Error Tracker Auth Integration Tests
+
+- Integration tests for HTTP behavior (auth, routing) require spinning up a real TCP server because `std.http.Server.Request` cannot be mocked — it requires a real connection.
+- Pattern for HTTP integration tests: create a `TestServer` struct that owns the `net.Server`, start it with a thread that accepts N connections, send raw HTTP requests, parse raw responses. Use port 0 to let the OS assign a free port (avoids conflicts in parallel test runs).
+- `handleConnection` must be `pub` in main.zig so that test files (`auth_test.zig`) can import and call it.
+- Test files that import `main.zig` (via `@import("main.zig")`) need all the same shared module imports and C library linking as `main.zig` itself in `build.zig`.
+- Zig compiler rejects `_ = self;` if `self` was already used earlier in the function — the discard is "pointless" and causes a compile error.
+- Deleting `.zig-cache/o/` partially can corrupt the build cache. If the build produces `FileNotFound`, delete the entire `.zig-cache/` directory and rebuild.
+
+## Session 5: Error Tracker Request Limits (Rate Limiting + Body Size)
+
+- In Zig 0.13, the HTTP 413 status code enum is `.payload_too_large`, NOT `.request_entity_too_large`. Always check `/tmp/zig-linux-x86_64-0.13.0/lib/std/http.zig` for the correct enum names.
+- The middleware pattern used across the codebase is "call-and-check": each middleware function takes `*std.http.Server.Request` plus its config, sends the error response itself if rejected, and returns an enum the caller checks. This avoids function chaining complexity.
+- When adding a new shared module (e.g., `rate_limit`), you must add `addImport` to: (1) the main executable, (2) ALL test artifacts that transitively import it (including test files that `@import("main.zig")` since main.zig now imports the new module).
+- Rate limiter uses a ring buffer of timestamps for sliding window tracking. The `max_requests` parameter doubles as the ring buffer size, keeping memory usage proportional to the limit.
+- `handleConnection` signature changes (adding parameters) require updating ALL test files that call it. Currently `auth_test.zig` and `rate_limit_test.zig` both call `main.handleConnection(...)`.
+- For integration tests of rate limiting, use a `TestServer` that owns the `RateLimiter` with a small limit (e.g., 2-3 requests) to make tests fast and deterministic. Auth tests should use a generous limit (e.g., 1000) so rate limiting doesn't interfere.
+- Body size enforcement checks the `Content-Length` header before reading the body, avoiding memory allocation for oversized requests. Requests without `Content-Length` are allowed through (they may have no body or use chunked encoding).
+
+## Session 6: Error Tracker Fingerprinting Algorithm
+
+- The fingerprint module (`fingerprint.zig`) is pure Zig — no C deps (uses `std.crypto.hash.Md5`), no shared module deps. Test artifacts for it don't need `linkSystemLibrary` or `linkLibC`.
+- Zig 0.13's `std.crypto.hash.Md5` API: `Md5.init(.{})` → `.update(data)` → `.final(&digest)`. Digest is `[16]u8`. Also has a one-shot `Md5.hash(input, &out, .{})`.
+- Python traceback parsing: the `File "...", line N` format always has `", line "` (with the comma+space) immediately after the closing quote of the file path. The optional `, in function_name` part comes after the line number.
+- The fingerprint key format is `{project}:{exception_type}:{file}:{line}` — the MD5 hasher can be fed these parts incrementally with `.update()` calls (including the `:` separators) rather than needing to allocate a concatenated string.
+- When no traceback location can be parsed (non-Python tracebacks or plain text), the fallback uses the entire traceback string as the location component, still producing a deterministic 32-char hex fingerprint.
+
+## Session 7: Error Tracker Error Ingestion Endpoint
+
+- The `error_ingestion.zig` module handles: JSON parsing/validation, fingerprint-based deduplication (create/increment/reopen), occurrence record creation, and occurrence trimming (max 5 per error).
+- `std.json.parseFromSliceLeaky` is preferred over `parseFromSlice` when using an arena allocator — it skips tracking individual allocations since the arena will free them all at once.
+- The ingestion flow: parse JSON → validate required fields + length limits → compute fingerprint → find existing error by fingerprint → create/increment/reopen → create occurrence → trim occurrences. All DB operations are sequential (no transactions needed for single-row operations).
+- `handleConnection` signature grew to include `db: *sqlite.Database` and `cfg: *const app_config.Config` so the error ingestion handler can access the database and config (e.g., Postmark settings for email alerts).
+- When `handleConnection` signature changes, ALL test files that call it must be updated. Test files need `makeTestConfig()` helper functions that create dummy Config structs with valid field values.
+- The `Config` struct has a `_db_path_buf: [512]u8` field that backs the null-terminated `db_path_z` pointer. When creating test configs, this buffer must be properly initialized with `@memcpy` and null terminator.
+- Body size enforcement tests that previously used `POST /api/errors` had to be changed to `POST /api/test` (which returns 404) because the error ingestion handler now tries to read the request body. If `Content-Length` claims N bytes but none are sent, the server hangs waiting for data.
+- The Postmark email integration builds JSON payloads manually using `std.ArrayList(u8)` writer with a `writeJsonEscaped` helper that escapes `"`, `\\`, `\n`, `\r`, `\t`, and control chars below 0x20.
+- `std.http.Client` in Zig 0.13: create with `{ .allocator = allocator }`, `open(.POST, uri, .{ .server_header_buffer, .extra_headers })`, set `.transfer_encoding = .{ .content_length = len }`, then `send()` → `writeAll(payload)` → `finish()` → `wait()`.
+- Email alerting is fire-and-forget: failures are logged with `log.warn` but never propagate errors back to the HTTP response. If Postmark credentials are not configured (`null`), the alert is skipped silently with an early return.
+
+## Session 8: Error Listing Endpoint
+
+- The `error_listing.zig` module handles GET /api/errors with query parameter parsing, dynamic SQL construction, and JSON response formatting.
+- Since Zig doesn't support runtime string concatenation for SQL queries easily, the approach uses 4 separate prepared statement variants (no filters, project only, environment only, both) rather than dynamically building a single SQL string. This is verbose but safe and avoids SQL injection.
+- Query parameter parsing uses `std.mem.splitScalar` to split on `&`, then `std.mem.indexOf` to find `=` separators. No URL decoding is implemented yet (not needed for the current use case).
+- `std.fmt.parseInt(u32, value, 10)` is used for parsing numeric query params like `limit` and `offset`, with `catch continue` to skip invalid values gracefully.
+- The listing endpoint returns a two-query pattern: first a `SELECT COUNT(*)` for the total, then a `SELECT ... LIMIT ? OFFSET ?` for the paginated data. Both queries use the same filter conditions.
+- Routing in `main.zig` distinguishes GET vs POST on `/api/errors` by checking the HTTP method after matching the path prefix. The `isApiErrorsPath()` helper matches both `/api/errors` (exact) and `/api/errors?...` (with query string).
+- JSON response is built manually with `std.ArrayList(u8)` writer rather than using `std.json` serialization, to have full control over the output format and avoid needing to define Zig structs that match the exact JSON shape.
+
+## Session 9: Error Detail Endpoint
+
+- The `error_detail.zig` module handles GET /api/errors/{id} — returns full error group data plus the last 5 occurrences with request context.
+- Routing in `main.zig`: within the GET `/api/errors` branch, `error_detail.extractId(target)` is checked first. If it returns an ID, the request is routed to `handleErrorDetail`; otherwise it falls through to `handleErrorListing`.
+- `isApiErrorsPath()` was updated to also match `/api/errors/` sub-paths by adding a `rest[0] == '/'` check.
+- Zig 0.13 type coercion quirk: `ArrayList(u8).toOwnedSlice()` returns `![]u8`, which does NOT implicitly coerce to `!?[]const u8` (optional + const). You must assign to an intermediate `const result: []const u8 = try buf.toOwnedSlice();` and then `return result;` — the `[]const u8` → `?[]const u8` coercion works, but `[]u8` → `?[]const u8` does not coerce through error union payloads directly.
+
+## Session 10: Error Tracker Resolve Endpoint
+
+- The `error_resolve.zig` module handles POST /api/errors/{id}/resolve — marks an error as resolved with `resolved=1` and `resolved_at` timestamp.
+- Routing for POST resolve must be checked BEFORE the GET `/api/errors/{id}` branch in `main.zig`, since `isApiErrorsPath()` would also match `/api/errors/42/resolve`. The resolve check uses `error_resolve.extractResolveId()` which specifically matches the `/api/errors/{id}/resolve` pattern.
+- The `extractResolveId` function is separate from `extractId` in `error_detail.zig` — it specifically looks for the `/resolve` suffix after the ID segment. This is cleaner than trying to make `extractId` handle both cases.
+- Idempotent resolve: if the error is already resolved, the endpoint returns 200 without modifying `resolved_at`. This avoids updating the timestamp on every call and preserves the original resolution time.
+- The resolve endpoint uses a tagged union `ResolveResult` (`.resolved` or `.not_found`) rather than an optional, making the handler code in `main.zig` clearer about which HTTP status code to return.
+- Tests for `API_KEY`-dependent modules (main.zig, auth_test.zig, rate_limit_test.zig) require setting `API_KEY=test_key_123` in the environment when running `zig build test`.
+
+## Session 11: Projects Listing Endpoint
+
+- The `projects_listing.zig` module handles GET /api/projects — returns distinct project names from the errors table as `{"projects": ["flowrent", ...]}`.
+- `Statement.deinit()` and `RowIterator.deinit()` both call `sqlite3_finalize` on the same underlying statement pointer. Calling both causes a double-free segfault. Pattern: only call `stmt.deinit()`, never `iter.deinit()` when you own the statement. This is the correct ownership pattern throughout the codebase.
+- Routing for `/api/projects` must be placed BEFORE the `/api/errors` catch-all in `main.zig`, since `isApiErrorsPath()` would not match it, but ordering still matters for clarity and to avoid future conflicts with broader path matchers.
+- The `isApiProjectsPath()` helper follows the same pattern as `isApiErrorsPath()`: matches `/api/projects` exactly or `/api/projects?...` with query string.
+- The JSON response is built manually with `ArrayList(u8)` writer, consistent with the pattern established in `error_listing.zig` and `error_detail.zig`.
+
+## Session 12: Data Retention Cleanup
+
+- Retention cleanup uses a separate SQLite connection on a background thread. WAL mode supports concurrent read/write access from multiple connections, so this is safe alongside the main HTTP server thread.
+- `std.atomic.Value(bool)` is used for thread stop signaling with `.load(.acquire)` / `.store(true, .release)` ordering. This ensures the background thread sees the stop signal promptly.
+- SQLite's `strftime` with string concatenation `'-' || ? || ' days'` allows parameterized date arithmetic in DELETE queries (e.g., `datetime('now', '-' || ? || ' days')`).
+- The `std.Thread.spawn` API in Zig 0.13 takes `.{}` (spawn config options), a function pointer, and an args tuple. The function pointer must match the args tuple types exactly.
+- The retention thread sleeps in 1-second chunks rather than one long sleep, so it can check the stop flag frequently and shut down promptly.
+- Associated `error_occurrences` are cascade-deleted via the existing `FOREIGN KEY (error_id) REFERENCES errors(id) ON DELETE CASCADE` constraint — no need to manually delete them.
+- The retention module is tested with an in-memory SQLite database (`:memory:`), using the same schema setup pattern as other test modules. Tests insert errors with manually set timestamps to simulate aging.
+
+## Session 13: Web UI for Error Tracker
+
+- The Web UI is implemented as two HTML pages (`index.html` for listing, `error_detail.html` for detail view) embedded into the binary at compile time via `@embedFile("static/index.html")`.
+- HTML files live in `error-tracker/src/static/` — Zig's `@embedFile` resolves paths relative to the source file that contains it, so `web_ui.zig` uses `@embedFile("static/index.html")`.
+- Web UI routes (`GET /` and `GET /errors/{id}`) are handled **before** the auth middleware in `handleConnection`, so the HTML pages are served without requiring an API key. The JavaScript in the pages reads the API key from `localStorage` and passes it as `X-API-Key` header on fetch calls to the API endpoints.
+- The `web_ui.zig` module contains `isErrorDetailPath()` which matches `/errors/{numeric_id}` — distinct from `/api/errors/{id}` which returns JSON.
+- Tailwind CSS is loaded via CDN (`<script src="https://cdn.tailwindcss.com">`). The HTML is embedded in the binary but CSS is fetched at runtime. This avoids needing a Tailwind build pipeline in the Zig build system.
+- The pages use a dark theme (gray-900 background) with color-coded elements: red for errors/production, yellow for staging/warning counts, green for resolved/development, blue for project badges, purple for user IDs.
+- The listing page supports filtering by project (dropdown populated from `/api/projects`), environment, and resolved status. Pagination with prev/next buttons and offset tracking.
+- The detail page shows traceback in a monospace `<pre>` block, occurrences in expandable `<details>` sections for headers and extra context, and a "Mark as Resolved" button that calls `POST /api/errors/{id}/resolve`.
+- No additional build.zig changes are needed for `@embedFile` — Zig handles it automatically. The only build.zig change was adding the `web_ui_tests` target (no dependencies needed since web_ui.zig only uses std).
+
+## Session 14: Metrics Collector (Full Implementation)
+
+- **SQLite `datetime()` vs `strftime()` format mismatch**: SQLite's `datetime()` function outputs space-separated format (`2025-01-20 10:01:00`) while our timestamps use ISO 8601 with `T` separator (`2025-01-20T10:01:00Z`). This causes lexicographic comparison failures in `WHERE timestamp >= datetime(?, '+1 minute')`. Fix: always use `strftime('%Y-%m-%dT%H:%M:%SZ', ?, '+1 minute')` which outputs `T`-separated format matching our data.
+- **Aggregation thread design**: The background aggregation thread combines three responsibilities: (1) minute-level aggregation every `aggregation_interval` seconds, (2) hour-level aggregation every 60 intervals (~hourly), and (3) retention cleanup also every 60 intervals. Each runs sequentially in the same thread with its own SQLite connection.
+- **Percentile calculation**: Uses nearest-rank method — sort all values, compute index as `ceil(percentile/100 * count) - 1`, clamp to valid range. For hour-level aggregation, percentiles are approximated by averaging minute-level percentiles (exact would require storing all raw values).
+- **metrics_query SQL building**: Dynamic SQL uses embedded offset strings from a fixed set of constants (`1 hour`, `24 hours`, `7 days`, `30 days`) — these come from our own `periodToOffset()` function, not from user input, so they're safe against injection without parameterization.
+- **Web UI with uPlot charts**: The metrics dashboard uses uPlot (loaded via CDN) for two interactive charts: (1) Metric Explorer showing avg value + count over time for a selected metric, (2) Latency Percentiles showing p50/p95/p99 lines for histogram-type metrics. uPlot was chosen for its small size and fast canvas rendering.
+- **Dashboard endpoint**: GET /api/dashboard returns summary stats (total_datapoints, distinct_metrics) and top 10 metrics by count. This is a simpler implementation than the plan specified (which called for error_rate, avg_latency_ms, etc.) — those specific fields assume particular metric naming conventions that may not exist yet.
+- **Test counts**: metrics-collector has 8 test targets (main, database, config, ingestion, aggregation, retention, metrics_query, web_ui). All pass except the known config test (`API_KEY is missing` fails because API_KEY is set in the test environment). This same issue exists in all three services.
+- **Total across all services**: error-tracker ~40 tests, log-viewer ~82 tests, metrics-collector ~60 tests. All passing with the single known config test exception per service.
+
+## Codebase Patterns
+- All three Zig services read `API_KEY` (not prefixed). In docker-compose, map from `secrets.env` prefixed vars: `API_KEY=${ERROR_TRACKER_API_KEY}`
+- `setup_monlight()` is the recommended single-call entry point for wiring up both error tracking and metrics in FastAPI apps
+- When testing with `httpx_mock` and `MetricsClient` shutdown flush, add `@pytest.mark.httpx_mock(can_send_already_matched_responses=True)` and mock the metrics endpoint too
+- Python client package lives at `clients/python/` with `monlight/` as the importable package
+- Use `pip install -e ".[dev]"` in a venv to install with all dev dependencies (pytest, fastapi, etc.)
+- The Python client uses `httpx` for both async and sync HTTP calls
+- `pyproject.toml` uses `setuptools.build_meta` backend (not the newer `setuptools.backends._legacy`)
+- Use `pytest-httpx` for mocking HTTP calls: `httpx_mock.add_response()` / `httpx_mock.add_exception()` / `httpx_mock.get_requests()`
+- Tests live in `clients/python/tests/` and are configured via `[tool.pytest.ini_options]` in pyproject.toml
+- The `MonlightExceptionHandler` expects `ErrorClient` to be stored at `request.app.state.monlight_error_client` — use `setup_monlight()` to wire it up
+- Shared infrastructure (http.zig, json.zig, html.zig, shutdown.zig, log.zig) was implemented inline in each service's main.zig rather than as separate shared modules — the functionality exists but not as separate reusable files
+- Config tests for "API_KEY is missing" are environment-aware: they check if API_KEY is set, and verify the appropriate behavior (success or error). In CI, set `API_KEY=test_key_ci_12345` and `CONTAINERS=test_container` for all Zig tests.
+- Docker builds for all services require repo root as build context (not the service directory) because Dockerfiles copy from `shared/`. Use `context: ..` + `dockerfile: <service>/Dockerfile` in docker-compose.
+- Use `pip install -e ".[dev]"` in a venv to install with all dev dependencies (pytest, fastapi, etc.)
+- The Python client uses `httpx` for both async and sync HTTP calls
+- `pyproject.toml` uses `setuptools.build_meta` backend (not the newer `setuptools.backends._legacy`)
+- Use `pytest-httpx` for mocking HTTP calls: `httpx_mock.add_response()` / `httpx_mock.add_exception()` / `httpx_mock.get_requests()`
+- Tests live in `clients/python/tests/` and are configured via `[tool.pytest.ini_options]` in pyproject.toml
+- The `MonlightExceptionHandler` expects `ErrorClient` to be stored at `request.app.state.monlight_error_client` — use `setup_monlight()` to wire it up
+- Shared infrastructure (http.zig, json.zig, html.zig, shutdown.zig, log.zig) was implemented inline in each service's main.zig rather than as separate shared modules — the functionality exists but not as separate reusable files
+- E2e smoke tests live in `deploy/`: run `docker compose -f docker-compose.test.yml up --build -d` then `./smoke-test.sh`. Uses ports 15010-15012 to avoid production conflicts.
+
+- Created `clients/python/pyproject.toml` with setuptools build backend, httpx dependency, and optional fastapi/dev dependency groups
+- Created package directory structure: `monlight/__init__.py`, `error_client.py`, `metrics_client.py`, `integrations/__init__.py`, `integrations/fastapi.py`
+- Implemented full `ErrorClient` class with async `report_error()` and sync `report_error_sync()` methods, PII header filtering, fire-and-forget behavior
+- Implemented full `MetricsClient` class with `counter()`, `histogram()`, `gauge()` methods, in-memory buffer, periodic flush via threading.Timer, and `shutdown()` method
+- Implemented `MonlightMiddleware` (ASGI middleware for request metrics), `MonlightExceptionHandler` (global exception handler), and `setup_monlight()` convenience function
+- Created `tests/test_scaffolding.py` with 7 tests verifying imports, constructor behavior, and URL normalization
+- Files changed: `clients/python/pyproject.toml`, `clients/python/monlight/__init__.py`, `clients/python/monlight/error_client.py`, `clients/python/monlight/metrics_client.py`, `clients/python/monlight/integrations/__init__.py`, `clients/python/monlight/integrations/fastapi.py`, `clients/python/tests/test_scaffolding.py`
+- Also struck through all shared infrastructure tasks in plan.md (implemented inline in services)
+- **Learnings for future iterations:**
+  - `setuptools.backends._legacy:_Backend` requires very recent setuptools (>= 72); use `setuptools.build_meta` for compatibility
+  - The system pip has `PIP_REQUIRE_VIRTUALENV=1` set; always create a venv first with `python3 -m venv .venv`
+  - Python 3.11 is available at system level via pyenv
+  - The `.venv/` directory is already in `.gitignore`
+  - `pytest-asyncio` with `asyncio_mode = "auto"` in pyproject.toml avoids needing `@pytest.mark.asyncio` on every async test
+---
+
+## Session 16: Python Error Client Tests & Verification
+
+- What was implemented: Verified existing ErrorClient implementation and wrote 31 comprehensive unit tests covering payload formatting, PII filtering, HTTP behavior, fire-and-forget error handling, and sync variant
+- Files changed: `clients/python/tests/test_error_client.py` (new), `plan.md` (struck through error client tasks)
+- **Learnings for future iterations:**
+  - `pytest-httpx` provides `httpx_mock` fixture that intercepts both async and sync httpx calls — use `httpx_mock.add_response()` for success cases, `httpx_mock.add_exception()` for failure simulation
+  - `httpx_mock.get_requests()` returns list of captured requests; headers are lowercased in the request object (e.g., `requests[0].headers["x-api-key"]`)
+  - `caplog` fixture with `caplog.at_level(logging.WARNING, logger="monlight.error_client")` captures log records for assertion
+  - The ErrorClient was already fully implemented in session 15 as part of scaffolding — the plan tasks just needed test verification and strikethrough
+---
+
+## Session 17: Python MetricsClient Tests & Verification
+
+- What was implemented: Verified existing MetricsClient implementation meets all acceptance criteria and wrote 42 comprehensive unit tests covering buffering (counter/histogram/gauge), flush behavior, connection failure handling, periodic timer, shutdown, configuration, and thread safety
+- Files changed: `clients/python/tests/test_metrics_client.py` (new), `plan.md` (struck through metrics client tasks)
+- **Learnings for future iterations:**
+  - MetricsClient was already fully implemented in session 15 as part of scaffolding — only needed test verification and strikethrough
+  - `MetricsClient.flush()` clears the buffer before sending (copy + clear under lock), so metrics are dropped on failure — this is intentional (no retry semantics)
+  - For testing the periodic timer, use a very short `flush_interval` (0.1s) and `time.sleep(0.5)` to verify it fires — keeps tests fast
+  - `client.start()` must always be paired with `client.shutdown()` in tests (use try/finally) to avoid dangling timer threads
+  - The MetricsClient `_buffer` list and `_lock` are easily inspectable in tests since they're instance attributes, making buffer state assertions straightforward
+---
+
+## Session 18: FastAPI MonlightExceptionHandler Verification
+
+- What was implemented: Verified that the existing `MonlightExceptionHandler` (implemented in session 15) meets all 4 acceptance criteria: (1) catches unhandled exceptions excluding HTTPException/RequestValidationError (via FastAPI's handler hierarchy), (2) calls `ErrorClient.report_error()` with request and exception via fire-and-forget `asyncio.create_task`, (3) logs error locally via `logger.exception()` and returns 500 JSON response, (4) installable via `app.add_exception_handler(Exception, handler)`.
+- Files changed: `plan.md` (struck through MonlightExceptionHandler task)
+- **Learnings for future iterations:**
+  - The FastAPI integration code was fully implemented in session 15 as part of scaffolding — the remaining plan tasks just need verification and strikethrough
+  - `MonlightExceptionHandler` is an async function (not a class) — it's registered directly as `app.add_exception_handler(Exception, MonlightExceptionHandler)`
+  - HTTPException and RequestValidationError exclusion works automatically because FastAPI registers its own handlers for those types, which take precedence over the generic `Exception` handler
+  - The error client is stored at `request.app.state.monlight_error_client` — this is the convention used by `setup_monlight()` to wire things up
+---
+
+## Session 19: MonlightMiddleware Verification & Tests
+
+- What was implemented: Verified existing `MonlightMiddleware` (ASGI middleware for request metrics) meets all 6 acceptance criteria and wrote 25 comprehensive tests covering metric emission (counter + histogram), label correctness (method, endpoint, status), endpoint normalization with parameterized FastAPI routes, timing accuracy, installation via `add_middleware`, and edge cases (HTTP errors, unknown paths).
+- Files changed: `clients/python/tests/test_middleware.py` (new), `plan.md` (struck through MonlightMiddleware task)
+- **Learnings for future iterations:**
+  - MonlightMiddleware was fully implemented in session 15 as part of scaffolding — only needed test verification and strikethrough
+  - `MonlightMiddleware` extends `BaseHTTPMiddleware` from Starlette — test it with `fastapi.testclient.TestClient` and a mock `MetricsClient` (using `MagicMock(spec=MetricsClient)`)
+  - The middleware calls `self.metrics_client.counter("http_requests_total", labels={...})` and `self.metrics_client.histogram("http_request_duration_seconds", value=duration, labels={...})` — labels are always passed as kwargs
+  - Endpoint normalization relies on `request.scope.get("route")` which is populated by FastAPI's router — for unknown paths (404s), this is None and the raw URL path is used instead
+  - Status code is always stored as a string (e.g., `"200"` not `200`) in the labels dict
+---
+
+## Session 20: setup_monlight() Verification & Tests
+
+- What was implemented: Verified existing `setup_monlight()` function (implemented in session 15) meets acceptance criteria and wrote 16 comprehensive tests covering full setup (both URLs), error tracking only, metrics only, no-op (no URLs), default parameter values, client configuration verification, and end-to-end behavior.
+- Files changed: `clients/python/tests/test_setup_monlight.py` (new), `plan.md` (struck through setup_monlight task)
+- **Learnings for future iterations:**
+  - `setup_monlight()` was already fully implemented in session 15 as part of scaffolding — only needed test verification and strikethrough
+  - When testing with `httpx_mock` and MetricsClient that flushes on shutdown, you need to mock the metrics POST endpoint too (otherwise teardown fails with "unexpected request")
+  - Use `@pytest.mark.httpx_mock(can_send_already_matched_responses=True)` when a test may trigger the same mock multiple times (e.g., error report + metrics flush both need HTTP mocks)
+  - `patch.object(MetricsClient, "start")` effectively prevents the timer from running in tests while still verifying `start()` was called
+---
+
+## Session 21: CI/CD Workflow for Zig Services
+
+- What was implemented: Created GitHub Actions workflow (`.github/workflows/zig-services.yml`) for all three Zig services with test, Docker build, image size verification, and GHCR push stages. Also fixed a known test issue across all three services where the `config.test.load fails when API_KEY is missing` test was not environment-aware.
+- Files changed:
+  - `.github/workflows/zig-services.yml` (new) — CI/CD workflow with matrix strategy for 3 services
+  - `error-tracker/src/config.zig` — Made config test environment-aware
+  - `log-viewer/src/config.zig` — Made config test environment-aware
+  - `metrics-collector/src/config.zig` — Made config test environment-aware
+  - `deploy/docker-compose.monitoring.yml` — Fixed build context for log-viewer and metrics-collector (was `build: ../log-viewer`, now uses `context: ..` + `dockerfile:` to ensure `shared/` directory is accessible)
+  - `plan.md` — Struck through CI/CD Zig workflow task and Python client test tasks
+- **Learnings for future iterations:**
+  - The config tests that check "API_KEY is missing" must be environment-aware since CI sets `API_KEY` for other tests. Solution: check `std.posix.getenv("API_KEY")` and verify the appropriate behavior (success vs error).
+  - `goto-bus-stop/setup-zig@v2` is the recommended GitHub Action for installing Zig in CI workflows.
+  - Docker builds for all three services require `context: .` (repo root) because they `COPY shared/` — using shorthand `build: ../service` only sets context to the service directory and won't find `shared/`.
+  - The workflow uses `docker/build-push-action@v5` with GHA cache (`cache-from: type=gha`, `cache-to: type=gha,mode=max`) for efficient Docker layer caching.
+  - Image size check builds the image locally with `docker build -t size-check` since the build-push action may not leave images locally on PRs.
+  - The `hashFiles` function in GitHub Actions cache keys supports glob patterns for cache invalidation on source changes.
+---
+
+## Session 22: CI/CD Workflow for Python Client
+
+- What was implemented: Created GitHub Actions workflow (`.github/workflows/python-client.yml`) for the Python client package with test matrix (Python 3.10, 3.11, 3.12), path-filtered triggers, and optional PyPI publishing on tagged releases.
+- Files changed:
+  - `.github/workflows/python-client.yml` (new) — CI/CD workflow with Python version matrix and PyPI publish job
+  - `plan.md` — Struck through Python client CI/CD task
+- **Learnings for future iterations:**
+  - Path filtering in GitHub Actions (`paths: ['clients/python/**']`) ensures the workflow only runs when Python client files change, saving CI resources.
+  - `pypa/gh-action-pypi-publish@release/v1` with `id-token: write` permission uses trusted publishing (OIDC) — no PyPI API token secret needed if the PyPI project is configured for GitHub Actions trusted publishing.
+  - Tag convention `python-v*` (e.g., `python-v0.1.0`) distinguishes Python client releases from potential Zig service releases, allowing independent versioning.
+  - Testing across Python 3.10/3.11/3.12 ensures compatibility with the `requires-python = ">=3.10"` constraint in pyproject.toml.
+  - All 121 Python client tests pass locally — the test job in CI should produce the same results.
+---
+
+## Session 23: End-to-End Validation
+
+- What was implemented: Created `deploy/docker-compose.test.yml` and `deploy/smoke-test.sh` for end-to-end smoke testing of all three Monlight services. The compose file uses isolated ports (15010-15012) and a dedicated `monlight_e2e_test` network (not the production `flowrent_network`). The smoke test script covers all 6 acceptance criteria: health checks, error ingestion (create + duplicate), log viewer with empty log directory, metrics ingestion, web UI accessibility, and graceful shutdown via SIGTERM.
+- Files changed:
+  - `deploy/docker-compose.test.yml` (new) — test compose configuration with isolated ports, volumes, and network
+  - `deploy/smoke-test.sh` (new) — comprehensive smoke test script with pass/fail tracking
+  - `plan.md` — struck through end-to-end validation task
+- **Learnings for future iterations:**
+  - Docker daemon is not available in this development environment — e2e tests must be run manually on a machine with Docker
+  - The `version` field in docker-compose files is obsolete and produces warnings; omit it for cleaner output
+  - For e2e tests, use high port numbers (15xxx) to avoid conflicts with production services (5xxx)
+  - Log Viewer gracefully handles empty/missing LOG_SOURCES — it retries every poll interval without crashing
+  - The `docker compose config --quiet` command validates compose file syntax without requiring a running daemon
+  - Use `docker kill --signal=SIGTERM` (not `docker stop`) to test graceful shutdown behavior, since `docker stop` sends SIGTERM then waits before SIGKILL
+  - All three services implement `--healthcheck` CLI flag that connects to localhost:8000 and checks for 200 response
+---
+
+## Session 24: Backup Script (deploy/backup.sh)
+
+- What was implemented: Verified and committed the existing `deploy/backup.sh` script which backs up all three SQLite databases (errors.db, logs.db, metrics.db) using SQLite's `.backup` command. The script supports selective backup (by name), retains the last 7 daily backups with automatic pruning, verifies backup integrity via `PRAGMA integrity_check`, and includes a commented-out S3 upload section with detailed setup instructions.
+- Files changed: `deploy/backup.sh` (committed as new file), `plan.md` (struck through backup script task)
+- **Learnings for future iterations:**
+  - The backup script was already created in a previous session but not committed — always check `git status` for uncommitted files before implementing
+  - SQLite `.backup` command is the correct way to back up WAL-mode databases — it creates a consistent snapshot even while the database is in use
+  - The `*.db` pattern in `.gitignore` already covers backup .db files, so the `deploy/backups/` directory contents are automatically ignored
+   - `bash -n script.sh` validates bash syntax without executing the script — useful as a quick quality check for shell scripts
+---
+
+## Session 25: Upgrade Script (deploy/upgrade.sh)
+
+- What was implemented: Created `deploy/upgrade.sh` — an upgrade script that pulls latest code, rebuilds Docker images, and restarts Monlight services one at a time with health verification after each restart. Includes pre-upgrade backup, rollback image tagging, and detailed rollback instructions on failure.
+- Files changed: `deploy/upgrade.sh` (new), `plan.md` (struck through upgrade script task)
+- **Learnings for future iterations:**
+  - The upgrade script follows the same style/conventions as `backup.sh`: `set -euo pipefail`, `log()/warn()/die()` helpers, `SCRIPT_DIR` pattern, associative arrays for service config
+  - `docker compose up -d --no-deps <service>` recreates only the specified service without restarting its dependencies
+  - `git pull --ff-only` is safer than `git pull` for automated scripts — it fails on merge conflicts rather than opening an editor
+  - Pre-upgrade image tagging (`docker tag <image>:latest <image>:rollback`) provides a fast rollback path without needing to rebuild
+  - Health checks poll `/health` on each service's external port (5010, 5011, 5012) — these endpoints require no API key
+---
+
+## Session 26: Verify Deployment Config Completeness
+
+- What was implemented: Updated `deploy/docker-compose.monitoring.yml` to fix three deployment config gaps: (1) mapped service-specific API keys from `secrets.env` (e.g., `LOG_VIEWER_API_KEY`) to the `API_KEY` env var each service reads, (2) added `LOG_LEVEL` env var with `${LOG_LEVEL:-info}` default to all three services, (3) added `deploy.resources.limits.memory: 30M` to all three services. Also removed obsolete `version: "3.8"` field and documented `LOG_LEVEL` in `secrets.env.example`.
+- Files changed: `deploy/docker-compose.monitoring.yml`, `deploy/secrets.env.example`, `plan.md`
+- **Learnings for future iterations:**
+  - All three Zig services read `API_KEY` (not prefixed names) from their environment, but `secrets.env` uses prefixed names (`ERROR_TRACKER_API_KEY`, `LOG_VIEWER_API_KEY`, `METRICS_COLLECTOR_API_KEY`). The docker-compose `environment` section maps them: `API_KEY=${LOG_VIEWER_API_KEY}`
+  - For Docker Compose v2 (non-Swarm), use `deploy.resources.limits.memory` for memory limits — this works with `docker compose` CLI even without Swarm mode
+  - The `${VAR:-default}` syntax in docker-compose environment values allows providing defaults while still supporting override from secrets.env or host environment
+  - The obsolete `version: "3.8"` field produces warnings in modern Docker Compose — omit it
+---

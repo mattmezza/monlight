@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Metrics Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/uplot@1.6.30/dist/uPlot.iife.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.30/dist/uPlot.min.css">
+    <style>
+        body { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace; background: #0f172a; color: #e2e8f0; }
+        .card { background: #1e293b; border: 1px solid #334155; border-radius: 8px; }
+        .stat-value { font-size: 2rem; font-weight: 700; color: #38bdf8; }
+        .stat-label { font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; }
+        select, button { background: #334155; color: #e2e8f0; border: 1px solid #475569; border-radius: 4px; padding: 6px 12px; font-family: inherit; cursor: pointer; }
+        select:hover, button:hover { background: #475569; }
+        .metric-row { border-bottom: 1px solid #334155; }
+        .metric-row:last-child { border-bottom: none; }
+        .metric-row:hover { background: #334155; }
+        .chart-container { min-height: 250px; }
+        .type-badge { font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; }
+        .type-counter { background: #1e3a5f; color: #38bdf8; }
+        .type-histogram { background: #3b1f4f; color: #c084fc; }
+        .type-gauge { background: #1a3a2a; color: #4ade80; }
+        .loading { color: #64748b; font-style: italic; }
+    </style>
+</head>
+<body class="min-h-screen p-6">
+    <div class="max-w-7xl mx-auto">
+        <!-- Header -->
+        <div class="flex items-center justify-between mb-6">
+            <div>
+                <h1 class="text-2xl font-bold text-white">Metrics Dashboard</h1>
+                <p class="text-sm text-gray-400 mt-1">Monlight Metrics Collector</p>
+            </div>
+            <div class="flex items-center gap-3">
+                <select id="periodSelect" onchange="loadDashboard()">
+                    <option value="1h">Last 1 hour</option>
+                    <option value="24h" selected>Last 24 hours</option>
+                    <option value="7d">Last 7 days</option>
+                    <option value="30d">Last 30 days</option>
+                </select>
+                <button onclick="loadDashboard()" title="Refresh">Refresh</button>
+            </div>
+        </div>
+
+        <!-- Summary Stats -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div class="card p-4">
+                <div class="stat-label">Total Datapoints</div>
+                <div class="stat-value" id="totalDatapoints">--</div>
+            </div>
+            <div class="card p-4">
+                <div class="stat-label">Distinct Metrics</div>
+                <div class="stat-value" id="distinctMetrics">--</div>
+            </div>
+            <div class="card p-4">
+                <div class="stat-label">Status</div>
+                <div class="stat-value" id="healthStatus">--</div>
+            </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+            <div class="card p-4">
+                <h3 class="text-sm font-semibold text-gray-300 mb-3">Metric Explorer</h3>
+                <div class="flex gap-2 mb-3">
+                    <select id="metricSelect" onchange="loadMetricChart()" class="flex-1">
+                        <option value="">Select a metric...</option>
+                    </select>
+                </div>
+                <div class="chart-container" id="metricChart">
+                    <p class="loading p-4">Select a metric to view chart</p>
+                </div>
+            </div>
+            <div class="card p-4">
+                <h3 class="text-sm font-semibold text-gray-300 mb-3">Latency Percentiles</h3>
+                <div class="flex gap-2 mb-3">
+                    <select id="latencyMetricSelect" onchange="loadLatencyChart()" class="flex-1">
+                        <option value="">Select a histogram metric...</option>
+                    </select>
+                </div>
+                <div class="chart-container" id="latencyChart">
+                    <p class="loading p-4">Select a histogram metric to view percentiles</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Top Metrics Table -->
+        <div class="card p-4">
+            <h3 class="text-sm font-semibold text-gray-300 mb-3">Top Metrics</h3>
+            <div id="topMetrics">
+                <p class="loading p-4">Loading...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_KEY = localStorage.getItem('api_key') || prompt('Enter API key:');
+        if (API_KEY) localStorage.setItem('api_key', API_KEY);
+
+        const headers = { 'X-API-Key': API_KEY };
+
+        async function loadDashboard() {
+            const period = document.getElementById('periodSelect').value;
+
+            // Load dashboard data
+            try {
+                const resp = await fetch(`/api/dashboard?period=${period}`, { headers });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    document.getElementById('totalDatapoints').textContent = data.summary?.total_datapoints?.toLocaleString() || '0';
+                    document.getElementById('distinctMetrics').textContent = data.summary?.distinct_metrics?.toLocaleString() || '0';
+                    renderTopMetrics(data.top_metrics || []);
+                }
+            } catch (e) {
+                console.error('Dashboard load failed:', e);
+            }
+
+            // Load health
+            try {
+                const resp = await fetch('/health');
+                if (resp.ok) {
+                    const data = await resp.json();
+                    document.getElementById('healthStatus').textContent = data.status === 'ok' ? 'OK' : 'Error';
+                    document.getElementById('healthStatus').style.color = data.status === 'ok' ? '#4ade80' : '#f87171';
+                }
+            } catch (e) {
+                document.getElementById('healthStatus').textContent = 'Error';
+                document.getElementById('healthStatus').style.color = '#f87171';
+            }
+
+            // Load metric names for dropdowns
+            try {
+                const resp = await fetch('/api/metrics/names', { headers });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    populateMetricDropdowns(data.metrics || []);
+                }
+            } catch (e) {
+                console.error('Metric names load failed:', e);
+            }
+        }
+
+        function populateMetricDropdowns(metrics) {
+            const metricSelect = document.getElementById('metricSelect');
+            const latencySelect = document.getElementById('latencyMetricSelect');
+
+            // Save current selections
+            const currentMetric = metricSelect.value;
+            const currentLatency = latencySelect.value;
+
+            metricSelect.innerHTML = '<option value="">Select a metric...</option>';
+            latencySelect.innerHTML = '<option value="">Select a histogram metric...</option>';
+
+            metrics.forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m.name;
+                opt.textContent = `${m.name} (${m.type})`;
+                metricSelect.appendChild(opt);
+
+                if (m.type === 'histogram') {
+                    const opt2 = document.createElement('option');
+                    opt2.value = m.name;
+                    opt2.textContent = m.name;
+                    latencySelect.appendChild(opt2);
+                }
+            });
+
+            // Restore selections
+            if (currentMetric) metricSelect.value = currentMetric;
+            if (currentLatency) latencySelect.value = currentLatency;
+        }
+
+        function renderTopMetrics(metrics) {
+            const container = document.getElementById('topMetrics');
+            if (metrics.length === 0) {
+                container.innerHTML = '<p class="text-gray-500 p-4">No metrics collected yet</p>';
+                return;
+            }
+
+            let html = '<div class="overflow-x-auto"><table class="w-full text-sm">';
+            html += '<thead><tr class="text-gray-400 text-left border-b border-gray-700">';
+            html += '<th class="pb-2 pr-4">Name</th><th class="pb-2 pr-4">Type</th><th class="pb-2 pr-4 text-right">Count</th><th class="pb-2 text-right">Total</th>';
+            html += '</tr></thead><tbody>';
+
+            metrics.forEach(m => {
+                const typeClass = `type-${m.type}`;
+                html += `<tr class="metric-row">`;
+                html += `<td class="py-2 pr-4 font-medium">${escapeHtml(m.name)}</td>`;
+                html += `<td class="py-2 pr-4"><span class="type-badge ${typeClass}">${escapeHtml(m.type)}</span></td>`;
+                html += `<td class="py-2 pr-4 text-right text-gray-300">${m.count.toLocaleString()}</td>`;
+                html += `<td class="py-2 text-right text-gray-300">${m.total.toFixed(2)}</td>`;
+                html += `</tr>`;
+            });
+
+            html += '</tbody></table></div>';
+            container.innerHTML = html;
+        }
+
+        let metricChartInstance = null;
+        async function loadMetricChart() {
+            const name = document.getElementById('metricSelect').value;
+            const container = document.getElementById('metricChart');
+            if (!name) {
+                container.innerHTML = '<p class="loading p-4">Select a metric to view chart</p>';
+                if (metricChartInstance) { metricChartInstance.destroy(); metricChartInstance = null; }
+                return;
+            }
+
+            const period = document.getElementById('periodSelect').value;
+            try {
+                const resp = await fetch(`/api/metrics?name=${encodeURIComponent(name)}&period=${period}`, { headers });
+                if (!resp.ok) return;
+                const data = await resp.json();
+
+                if (data.data.length === 0) {
+                    container.innerHTML = '<p class="loading p-4">No data for selected period</p>';
+                    return;
+                }
+
+                container.innerHTML = '';
+                if (metricChartInstance) metricChartInstance.destroy();
+
+                const timestamps = data.data.map(d => new Date(d.bucket).getTime() / 1000);
+                const values = data.data.map(d => d.avg);
+                const counts = data.data.map(d => d.count);
+
+                const opts = {
+                    width: container.clientWidth,
+                    height: 220,
+                    series: [
+                        {},
+                        { label: 'Avg Value', stroke: '#38bdf8', width: 2, fill: 'rgba(56,189,248,0.1)' },
+                        { label: 'Count', stroke: '#4ade80', width: 1, dash: [4, 4] },
+                    ],
+                    axes: [
+                        { stroke: '#64748b', grid: { stroke: '#1e293b' } },
+                        { stroke: '#64748b', grid: { stroke: '#1e293b' } },
+                    ],
+                    scales: { x: { time: true } },
+                };
+
+                metricChartInstance = new uPlot(opts, [timestamps, values, counts], container);
+            } catch (e) {
+                console.error('Chart load failed:', e);
+                container.innerHTML = '<p class="loading p-4">Failed to load chart</p>';
+            }
+        }
+
+        let latencyChartInstance = null;
+        async function loadLatencyChart() {
+            const name = document.getElementById('latencyMetricSelect').value;
+            const container = document.getElementById('latencyChart');
+            if (!name) {
+                container.innerHTML = '<p class="loading p-4">Select a histogram metric to view percentiles</p>';
+                if (latencyChartInstance) { latencyChartInstance.destroy(); latencyChartInstance = null; }
+                return;
+            }
+
+            const period = document.getElementById('periodSelect').value;
+            try {
+                const resp = await fetch(`/api/metrics?name=${encodeURIComponent(name)}&period=${period}`, { headers });
+                if (!resp.ok) return;
+                const data = await resp.json();
+
+                if (data.data.length === 0) {
+                    container.innerHTML = '<p class="loading p-4">No data for selected period</p>';
+                    return;
+                }
+
+                container.innerHTML = '';
+                if (latencyChartInstance) latencyChartInstance.destroy();
+
+                const timestamps = data.data.map(d => new Date(d.bucket).getTime() / 1000);
+                const p50 = data.data.map(d => d.p50);
+                const p95 = data.data.map(d => d.p95);
+                const p99 = data.data.map(d => d.p99);
+
+                const opts = {
+                    width: container.clientWidth,
+                    height: 220,
+                    series: [
+                        {},
+                        { label: 'p50', stroke: '#4ade80', width: 2 },
+                        { label: 'p95', stroke: '#facc15', width: 2 },
+                        { label: 'p99', stroke: '#f87171', width: 2 },
+                    ],
+                    axes: [
+                        { stroke: '#64748b', grid: { stroke: '#1e293b' } },
+                        { stroke: '#64748b', grid: { stroke: '#1e293b' } },
+                    ],
+                    scales: { x: { time: true } },
+                };
+
+                latencyChartInstance = new uPlot(opts, [timestamps, p50, p95, p99], container);
+            } catch (e) {
+                console.error('Latency chart load failed:', e);
+                container.innerHTML = '<p class="loading p-4">Failed to load chart</p>';
+            }
+        }
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        // Initial load
+        loadDashboard();
+    </script>
+</body>
+</html>

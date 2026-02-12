@@ -1,0 +1,93 @@
+services:
+  error-tracker:
+    build:
+      context: ..
+      dockerfile: error-tracker/Dockerfile
+    container_name: error_tracker
+    ports:
+      - "5010:8000"
+    volumes:
+      - ./data/errors:/app/data
+    env_file:
+      - secrets.env
+    environment:
+      - DATABASE_PATH=/app/data/errors.db
+      - API_KEY=${ERROR_TRACKER_API_KEY}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    deploy:
+      resources:
+        limits:
+          memory: 30M
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/app/error-tracker", "--healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - monitoring
+
+  log-viewer:
+    build:
+      context: ..
+      dockerfile: log-viewer/Dockerfile
+    container_name: log_viewer
+    ports:
+      - "5011:8000"
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - ./data/logs:/app/data
+    env_file:
+      - secrets.env
+    environment:
+      - DATABASE_PATH=/app/data/logs.db
+      - API_KEY=${LOG_VIEWER_API_KEY}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - CONTAINERS=rentl_prod,rentl_dev
+      - MAX_ENTRIES=100000
+      - POLL_INTERVAL=5
+    deploy:
+      resources:
+        limits:
+          memory: 30M
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/app/log-viewer", "--healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - monitoring
+
+  metrics-collector:
+    build:
+      context: ..
+      dockerfile: metrics-collector/Dockerfile
+    container_name: metrics_collector
+    ports:
+      - "5012:8000"
+    volumes:
+      - ./data/metrics:/app/data
+    env_file:
+      - secrets.env
+    environment:
+      - DATABASE_PATH=/app/data/metrics.db
+      - API_KEY=${METRICS_COLLECTOR_API_KEY}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    deploy:
+      resources:
+        limits:
+          memory: 30M
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/app/metrics-collector", "--healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - monitoring
+
+networks:
+  monitoring:
+    name: flowrent_network
+    external: true
