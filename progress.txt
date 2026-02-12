@@ -288,3 +288,14 @@
   - Use `docker kill --signal=SIGTERM` (not `docker stop`) to test graceful shutdown behavior, since `docker stop` sends SIGTERM then waits before SIGKILL
   - All three services implement `--healthcheck` CLI flag that connects to localhost:8000 and checks for 200 response
 ---
+
+## Session 24: Backup Script (deploy/backup.sh)
+
+- What was implemented: Verified and committed the existing `deploy/backup.sh` script which backs up all three SQLite databases (errors.db, logs.db, metrics.db) using SQLite's `.backup` command. The script supports selective backup (by name), retains the last 7 daily backups with automatic pruning, verifies backup integrity via `PRAGMA integrity_check`, and includes a commented-out S3 upload section with detailed setup instructions.
+- Files changed: `deploy/backup.sh` (committed as new file), `plan.md` (struck through backup script task)
+- **Learnings for future iterations:**
+  - The backup script was already created in a previous session but not committed — always check `git status` for uncommitted files before implementing
+  - SQLite `.backup` command is the correct way to back up WAL-mode databases — it creates a consistent snapshot even while the database is in use
+  - The `*.db` pattern in `.gitignore` already covers backup .db files, so the `deploy/backups/` directory contents are automatically ignored
+  - `bash -n script.sh` validates bash syntax without executing the script — useful as a quick quality check for shell scripts
+---

@@ -563,11 +563,11 @@
     - ~~Graceful shutdown works (send SIGTERM, verify clean exit within 10 seconds)~~
 
 - Deployment and operations (`deploy/`)
-  - Create backup script (`deploy/backup.sh`)
-    - Script uses SQLite `.backup` command to safely copy `errors.db`
-    - Retains last 7 daily backups (deletes older ones)
-    - Optionally uploads to S3 (commented out by default, with instructions)
-    - Script is executable and documented
+  - ~~Create backup script (`deploy/backup.sh`)~~
+    - ~~Script uses SQLite `.backup` command to safely copy `errors.db`~~
+    - ~~Retains last 7 daily backups (deletes older ones)~~
+    - ~~Optionally uploads to S3 (commented out by default, with instructions)~~
+    - ~~Script is executable and documented~~
   - Create upgrade script or document (`deploy/upgrade.sh`)
     - Pulls latest code, builds images, restarts services one at a time
     - Verifies health after each service restart
