@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# End-to-end smoke test for MonlightStack services.
+# End-to-end smoke test for Monlight services.
 #
 # Prerequisites:
 #   docker compose -f docker-compose.test.yml up --build -d

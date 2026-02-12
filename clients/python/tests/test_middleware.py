@@ -14,8 +14,8 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from monlightstack.integrations.fastapi import MonlightMiddleware
-from monlightstack.metrics_client import MetricsClient
+from monlight.integrations.fastapi import MonlightMiddleware
+from monlight.metrics_client import MetricsClient
 
 
 @pytest.fixture

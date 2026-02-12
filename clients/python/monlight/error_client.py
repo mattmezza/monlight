@@ -1,4 +1,4 @@
-"""Error tracking client for MonlightStack Error Tracker service."""
+"""Error tracking client for Monlight Error Tracker service."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ _SENSITIVE_HEADERS = frozenset({"authorization", "cookie", "set-cookie", "x-api-
 
 
 class ErrorClient:
-    """Client for reporting errors to MonlightStack Error Tracker.
+    """Client for reporting errors to Monlight Error Tracker.
 
     Sends error reports via HTTP POST to the Error Tracker service.
     Designed for fire-and-forget usage: connection failures are logged

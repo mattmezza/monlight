@@ -19,7 +19,7 @@ from unittest.mock import patch
 import httpx
 import pytest
 
-from monlightstack.metrics_client import MetricsClient
+from monlight.metrics_client import MetricsClient
 
 
 # ---------------------------------------------------------------------------
@@ -281,7 +281,7 @@ class TestConnectionFailures:
         httpx_mock.add_exception(httpx.ConnectError("Connection refused"))
 
         client.counter("test")
-        with caplog.at_level(logging.WARNING, logger="monlightstack.metrics_client"):
+        with caplog.at_level(logging.WARNING, logger="monlight.metrics_client"):
             client.flush()
 
         assert any("Failed to flush" in record.message for record in caplog.records)
@@ -298,7 +298,7 @@ class TestConnectionFailures:
         httpx_mock.add_response(status_code=500, text="Internal Server Error")
 
         client.counter("test")
-        with caplog.at_level(logging.WARNING, logger="monlightstack.metrics_client"):
+        with caplog.at_level(logging.WARNING, logger="monlight.metrics_client"):
             client.flush()
 
         assert any("returned status 500" in record.message for record in caplog.records)
@@ -308,7 +308,7 @@ class TestConnectionFailures:
         httpx_mock.add_response(status_code=401, json={"detail": "Invalid API key"})
 
         client.counter("test")
-        with caplog.at_level(logging.WARNING, logger="monlightstack.metrics_client"):
+        with caplog.at_level(logging.WARNING, logger="monlight.metrics_client"):
             client.flush()
 
         assert any("returned status 401" in record.message for record in caplog.records)

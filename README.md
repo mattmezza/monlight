@@ -1,4 +1,4 @@
-# MonlightStack
+# Monlight
 
 A self-hosted, lightweight monitoring stack built with Zig and SQLite. Three independent microservices -- error tracking, log viewing, and metrics collection -- each under 20MB, running on less than 50MB of RAM combined.
 
@@ -10,7 +10,7 @@ A self-hosted, lightweight monitoring stack built with Zig and SQLite. Three ind
                         |  (Python/other) |
                         +--------+--------+
                                  |
-                    monlightstack client
+                    monlight client
                                  |
               +------------------+------------------+
               |                  |                  |
@@ -69,8 +69,8 @@ Each service is a single static binary with an embedded web UI. No external data
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/mattmezza/monlightstack.git
-cd monlightstack
+git clone https://github.com/mattmezza/monlight.git
+cd monlight
 ```
 
 ### 2. Configure secrets
@@ -121,14 +121,14 @@ curl http://localhost:5012/health
 Install the Python client:
 
 ```bash
-pip install monlightstack[fastapi]
+pip install monlight[fastapi]
 ```
 
 Add monitoring to a FastAPI app:
 
 ```python
 from fastapi import FastAPI
-from monlightstack.integrations.fastapi import setup_monlight
+from monlight.integrations.fastapi import setup_monlight
 
 app = FastAPI()
 
@@ -151,7 +151,7 @@ This automatically captures unhandled exceptions and emits `http_requests_total`
 ### 5. Use the clients directly (optional)
 
 ```python
-from monlightstack import ErrorClient, MetricsClient
+from monlight import ErrorClient, MetricsClient
 
 # Error reporting
 error_client = ErrorClient(
@@ -319,7 +319,7 @@ pytest
 
 ```bash
 # Build a single service
-docker build -t monlightstack/error-tracker error-tracker/
+docker build -t monlight/error-tracker error-tracker/
 
 # Build all via compose
 docker compose -f deploy/docker-compose.monitoring.yml build
@@ -335,7 +335,7 @@ Images are multi-stage Alpine builds, each under 20MB.
 ## Project Structure
 
 ```
-monlightstack/
+monlight/
 ├── error-tracker/       # Error tracking service (Zig)
 ├── log-viewer/          # Log aggregation service (Zig)
 ├── metrics-collector/   # Metrics collection service (Zig)

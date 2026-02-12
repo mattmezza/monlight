@@ -14,10 +14,10 @@ pytest tests/ -v
 ```
 
 ## Package Structure
-- `monlightstack/__init__.py` - Top-level exports: `ErrorClient`, `MetricsClient`
-- `monlightstack/error_client.py` - Error tracking client (async + sync)
-- `monlightstack/metrics_client.py` - Metrics collection client with buffering
-- `monlightstack/integrations/fastapi.py` - FastAPI middleware + exception handler
+- `monlight/__init__.py` - Top-level exports: `ErrorClient`, `MetricsClient`
+- `monlight/error_client.py` - Error tracking client (async + sync)
+- `monlight/metrics_client.py` - Metrics collection client with buffering
+- `monlight/integrations/fastapi.py` - FastAPI middleware + exception handler
 
 ## Key Patterns
 - `ErrorClient.report_error()` is async; use `report_error_sync()` for synchronous contexts
@@ -38,7 +38,7 @@ pytest tests/ -v
 - `httpx_mock.add_response(status_code=..., json=...)` for success cases
 - `httpx_mock.add_exception(httpx.ConnectError(...))` for failure simulation
 - `httpx_mock.get_requests()` to inspect sent requests (headers are lowercased)
-- `caplog` fixture with `caplog.at_level(logging.WARNING, logger="monlightstack.error_client")` to verify warning logs
+- `caplog` fixture with `caplog.at_level(logging.WARNING, logger="monlight.error_client")` to verify warning logs
 - `asyncio_mode = "auto"` in pyproject.toml means async test functions are auto-detected (no `@pytest.mark.asyncio` needed)
 - When testing `MetricsClient` periodic timer, always pair `client.start()` with `client.shutdown()` in try/finally to avoid dangling timer threads
 - For testing `MonlightMiddleware`, use `MagicMock(spec=MetricsClient)` — the middleware calls `.counter()` and `.histogram()` with labels as a kwarg, so use `mock.counter.call_args.kwargs["labels"]` to inspect them

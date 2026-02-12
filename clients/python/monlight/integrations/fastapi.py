@@ -1,4 +1,4 @@
-"""FastAPI integration for MonlightStack monitoring.
+"""FastAPI integration for Monlight monitoring.
 
 Provides middleware for automatic request metrics and an exception handler
 for error tracking.
@@ -16,8 +16,8 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp
 
-from monlightstack.error_client import ErrorClient
-from monlightstack.metrics_client import MetricsClient
+from monlight.error_client import ErrorClient
+from monlight.metrics_client import MetricsClient
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ class MonlightMiddleware(BaseHTTPMiddleware):
 
 
 async def MonlightExceptionHandler(request: Request, exc: Exception) -> JSONResponse:
-    """Global exception handler that reports errors to MonlightStack.
+    """Global exception handler that reports errors to Monlight.
 
     Catches all unhandled exceptions (excluding ``HTTPException`` and
     ``RequestValidationError``), reports them to the Error Tracker, and
@@ -134,7 +134,7 @@ def setup_monlight(
     environment: str = "prod",
     flush_interval: float = 10.0,
 ) -> dict[str, Any]:
-    """Wire up MonlightStack monitoring on a FastAPI/Starlette application.
+    """Wire up Monlight monitoring on a FastAPI/Starlette application.
 
     This is a convenience function that sets up both the exception handler
     and the metrics middleware in a single call.
@@ -166,7 +166,7 @@ def setup_monlight(
         app.state.monlight_error_client = error_client
         app.add_exception_handler(Exception, MonlightExceptionHandler)
         result["error_client"] = error_client
-        logger.info("MonlightStack error tracking enabled: %s", error_tracker_url)
+        logger.info("Monlight error tracking enabled: %s", error_tracker_url)
 
     if metrics_collector_url:
         metrics_client = MetricsClient(
@@ -177,8 +177,6 @@ def setup_monlight(
         app.add_middleware(MonlightMiddleware, metrics_client=metrics_client)
         metrics_client.start()
         result["metrics_client"] = metrics_client
-        logger.info(
-            "MonlightStack metrics collection enabled: %s", metrics_collector_url
-        )
+        logger.info("Monlight metrics collection enabled: %s", metrics_collector_url)
 
     return result

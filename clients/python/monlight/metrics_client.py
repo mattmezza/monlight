@@ -1,4 +1,4 @@
-"""Metrics collection client for MonlightStack Metrics Collector service."""
+"""Metrics collection client for Monlight Metrics Collector service."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class MetricsClient:
-    """Client for sending metrics to MonlightStack Metrics Collector.
+    """Client for sending metrics to Monlight Metrics Collector.
 
     Buffers metrics in memory and periodically flushes them as a batch
     POST to the Metrics Collector service.

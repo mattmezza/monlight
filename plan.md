@@ -1,4 +1,4 @@
-# MonlightStack — Implementation Plan
+# Monlight — Implementation Plan
 
 - ~~Repository setup~~
   - ~~Initialize monorepo structure~~
@@ -479,10 +479,10 @@
   - ~~Package scaffolding~~
     - ~~Create `pyproject.toml` with package metadata, dependencies (httpx for async HTTP), and entry points~~
       - ~~Package is installable with `pip install -e .`~~
-    - ~~Create package directory structure: `monlightstack/error_client.py`, `monlightstack/metrics_client.py`, `monlightstack/integrations/fastapi.py`, `monlightstack/__init__.py`~~
-      - ~~Package imports work: `from monlightstack import ErrorClient, MetricsClient`~~
-      - ~~FastAPI integration imports work: `from monlightstack.integrations.fastapi import MonlightMiddleware, MonlightExceptionHandler`~~
-  - ~~Error client (`monlightstack/error_client.py`)~~
+    - ~~Create package directory structure: `monlight/error_client.py`, `monlight/metrics_client.py`, `monlight/integrations/fastapi.py`, `monlight/__init__.py`~~
+      - ~~Package imports work: `from monlight import ErrorClient, MetricsClient`~~
+      - ~~FastAPI integration imports work: `from monlight.integrations.fastapi import MonlightMiddleware, MonlightExceptionHandler`~~
+  - ~~Error client (`monlight/error_client.py`)~~
     - ~~Implement `ErrorClient` class with `report_error(exception, request_context=None)` method~~
       - ~~Sends POST to `{base_url}/api/errors` with correct JSON body and `X-API-Key` header~~
       - ~~Extracts exception_type, message, traceback from Python exception object~~
@@ -492,7 +492,7 @@
       - ~~Caller is not blocked waiting for error reporting~~
     - ~~Implement PII filtering: strip sensitive headers (Authorization, Cookie), allow configurable field exclusions~~
       - ~~Authorization and Cookie headers are never sent~~
-  - ~~Metrics client (`monlightstack/metrics_client.py`)~~
+  - ~~Metrics client (`monlight/metrics_client.py`)~~
     - ~~Implement `MetricsClient` class with `counter(name, labels=None, value=1)`, `histogram(name, labels=None, value)`, `gauge(name, labels=None, value)` methods~~
       - ~~Each method buffers a metric in memory~~
     - ~~Implement in-memory buffer with periodic flush: `flush()` sends buffered metrics as batch POST to `{base_url}/api/metrics`~~
@@ -504,7 +504,7 @@
       - ~~On shutdown, all buffered metrics are sent before process exits~~
     - ~~Handle connection failures gracefully (log warning, drop metrics)~~
       - ~~Network errors do not crash the application~~
-  - ~~FastAPI integration helpers (`monlightstack/integrations/fastapi.py`)~~
+  - ~~FastAPI integration helpers (`monlight/integrations/fastapi.py`)~~
     - ~~Implement `MonlightExceptionHandler` — a global exception handler for FastAPI~~
       - ~~Catches all unhandled exceptions (excluding HTTPException and RequestValidationError)~~
       - ~~Calls `ErrorClient.report_error()` with the request and exception~~

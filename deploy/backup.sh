@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# MonlightStack Database Backup Script
+# Monlight Database Backup Script
 #
 # Safely backs up all SQLite databases (errors.db, logs.db, metrics.db)
 # using SQLite's .backup command, which creates a consistent snapshot

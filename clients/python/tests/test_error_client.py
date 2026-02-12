@@ -16,7 +16,7 @@ from unittest.mock import patch
 import httpx
 import pytest
 
-from monlightstack.error_client import ErrorClient
+from monlight.error_client import ErrorClient
 
 
 # ---------------------------------------------------------------------------
@@ -393,7 +393,7 @@ class TestFireAndForget:
         httpx_mock.add_exception(httpx.ConnectError("Connection refused"))
 
         exc = _make_exception()
-        with caplog.at_level(logging.WARNING, logger="monlightstack.error_client"):
+        with caplog.at_level(logging.WARNING, logger="monlight.error_client"):
             await client.report_error(exc)
 
         assert any(
@@ -414,7 +414,7 @@ class TestFireAndForget:
         httpx_mock.add_response(status_code=500, text="Internal Server Error")
 
         exc = _make_exception()
-        with caplog.at_level(logging.WARNING, logger="monlightstack.error_client"):
+        with caplog.at_level(logging.WARNING, logger="monlight.error_client"):
             await client.report_error(exc)
 
         assert any(
@@ -429,7 +429,7 @@ class TestFireAndForget:
         httpx_mock.add_response(status_code=401, json={"detail": "Invalid API key"})
 
         exc = _make_exception()
-        with caplog.at_level(logging.WARNING, logger="monlightstack.error_client"):
+        with caplog.at_level(logging.WARNING, logger="monlight.error_client"):
             await client.report_error(exc)
 
         assert any(

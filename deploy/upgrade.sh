@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# MonlightStack Upgrade Script
+# Monlight Upgrade Script
 #
 # Pulls latest code, rebuilds Docker images, and restarts services
 # one at a time with health verification after each restart.
