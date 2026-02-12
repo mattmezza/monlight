@@ -323,3 +323,14 @@
   - The `${VAR:-default}` syntax in docker-compose environment values allows providing defaults while still supporting override from secrets.env or host environment
   - The obsolete `version: "3.8"` field produces warnings in modern Docker Compose — omit it
 ---
+
+## Session 27: Browser Relay Bootstrap (build.zig + build.zig.zon)
+
+- What was implemented: Created the `browser-relay/` directory with `build.zig`, `build.zig.zon`, and a minimal `src/main.zig` stub. The build system imports all four shared modules (sqlite, config, auth, rate_limit), links SQLite C library, and produces a working `browser-relay` binary. The main.zig includes a `--healthcheck` CLI flag (raw TCP, same pattern as other services) and a placeholder test.
+- Files changed: `browser-relay/build.zig` (new), `browser-relay/build.zig.zon` (new), `browser-relay/src/main.zig` (new), `plan.md` (struck through build.zig task)
+- **Learnings for future iterations:**
+  - The browser-relay build.zig follows the exact same pattern as error-tracker: shared modules via `b.addModule` + `addImport`, `linkSystemLibrary("sqlite3")` + `linkLibC()` on both exe and test artifacts
+  - Healthcheck uses raw TCP (same as all other services) — Zig 0.13's `std.http.Client.Request` struct does NOT have a `.status` field accessible after `wait()`; the raw TCP approach is simpler and proven
+  - LSP diagnostics on `.zig.zon` files show "expected enum literal" errors — these are false positives from the language server, not actual build issues
+  - Binary size for the minimal stub is ~2.3MB (debug, not stripped) — similar to other services at this stage
+---
