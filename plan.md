@@ -465,21 +465,21 @@
     - ~~Verify rate limiting works (send 301+ requests, expect 429)~~
     - ~~Graceful shutdown works (send SIGTERM, verify clean exit within 10 seconds)~~
 
-- CI/CD updates (`.github/workflows/`)
-  - Extend Zig services workflow
-    - Add `browser-relay` to the build matrix
-      - Run `zig build test` for browser-relay
-      - Build Docker image for browser-relay
-      - Verify Docker image size is under 20MB
-      - Push image to GHCR on main branch
-  - Create workflow for JavaScript SDK
-    - Trigger on push to main and pull requests (when `clients/js/` changes)
-      - Workflow runs only when JS client files change
-    - Install Node.js dependencies
-    - Run TypeScript type checking (`tsc --noEmit`)
-    - Run tests (`npm test`)
-    - Run build (`npm run build`)
-    - Verify bundle size is under 5KB gzipped
-      - CI step runs `gzip -c dist/monlight.min.js | wc -c` and fails if size exceeds 5120 bytes
-    - Optionally publish to npm on tagged releases
-      - Package version matches git tag
+- ~~CI/CD updates (`.github/workflows/`)~~
+  - ~~Extend Zig services workflow~~
+    - ~~Add `browser-relay` to the build matrix~~
+      - ~~Run `zig build test` for browser-relay~~
+      - ~~Build Docker image for browser-relay~~
+      - ~~Verify Docker image size is under 20MB~~
+      - ~~Push image to GHCR on main branch~~
+  - ~~Create workflow for JavaScript SDK~~
+    - ~~Trigger on push to main and pull requests (when `clients/js/` changes)~~
+      - ~~Workflow runs only when JS client files change~~
+    - ~~Install Node.js dependencies~~
+    - ~~Run TypeScript type checking (`tsc --noEmit`)~~
+    - ~~Run tests (`npm test`)~~
+    - ~~Run build (`npm run build`)~~
+    - ~~Verify bundle size is under 5KB gzipped~~
+      - ~~CI step runs `gzip -c dist/monlight.min.js | wc -c` and fails if size exceeds 5120 bytes~~
+    - ~~Optionally publish to npm on tagged releases~~
+      - ~~Package version matches git tag~~

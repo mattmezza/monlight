@@ -574,3 +574,15 @@
   - The DSN key extraction from JSON uses grep/cut rather than jq to avoid adding jq as a dependency for smoke tests
   - Source map deobfuscation e2e test is included in the plan but would require a precise matching of file URLs between the source map and the error stack — the smoke test covers upload (201) as a proxy for the full pipeline, which is already covered by unit tests in browser-relay
 
+## Session 39c: CI/CD Updates
+
+- What was implemented: Extended CI/CD workflows to cover browser-relay and JS SDK:
+  1. **zig-services.yml**: Added `browser-relay` to both `test` and `build-docker` matrix lists. The browser-relay tests use hardcoded test configs (not env vars), so no additional CI env vars are needed.
+  2. **js-sdk.yml** (new): Created GitHub Actions workflow for the `@monlight/browser` JS SDK. Triggers on push/PR to main when `clients/js/**` changes. Steps: `npm ci`, `npm run typecheck`, `npm test`, `npm run build`, verify gzipped bundle < 5KB. Optional publish to npm on `js-v*` tags using `NPM_TOKEN` secret.
+- Files changed: `.github/workflows/zig-services.yml`, `.github/workflows/js-sdk.yml` (new), `plan.md` (struck through CI/CD tasks)
+- **Learnings for future iterations:**
+  - Browser-relay integration tests (dsn_auth_test, cors_test, forward_test) all use `makeTestConfig()` with hardcoded values and `:memory:` SQLite databases — no env vars or external services needed for CI
+  - The JS SDK workflow uses `npm ci` (not `npm install`) for reproducible CI builds from the lockfile
+  - Tag convention `js-v*` (e.g., `js-v0.1.0`) parallels the Python client's `python-v*` convention for independent package versioning
+  - The 5KB gzipped bundle limit (5120 bytes) is generous — current bundle is ~3.9KB gzipped, leaving room for features without hitting the limit
+
