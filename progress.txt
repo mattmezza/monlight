@@ -258,3 +258,17 @@
   - Image size check builds the image locally with `docker build -t size-check` since the build-push action may not leave images locally on PRs.
   - The `hashFiles` function in GitHub Actions cache keys supports glob patterns for cache invalidation on source changes.
 ---
+
+## Session 22: CI/CD Workflow for Python Client
+
+- What was implemented: Created GitHub Actions workflow (`.github/workflows/python-client.yml`) for the Python client package with test matrix (Python 3.10, 3.11, 3.12), path-filtered triggers, and optional PyPI publishing on tagged releases.
+- Files changed:
+  - `.github/workflows/python-client.yml` (new) — CI/CD workflow with Python version matrix and PyPI publish job
+  - `plan.md` — Struck through Python client CI/CD task
+- **Learnings for future iterations:**
+  - Path filtering in GitHub Actions (`paths: ['clients/python/**']`) ensures the workflow only runs when Python client files change, saving CI resources.
+  - `pypa/gh-action-pypi-publish@release/v1` with `id-token: write` permission uses trusted publishing (OIDC) — no PyPI API token secret needed if the PyPI project is configured for GitHub Actions trusted publishing.
+  - Tag convention `python-v*` (e.g., `python-v0.1.0`) distinguishes Python client releases from potential Zig service releases, allowing independent versioning.
+  - Testing across Python 3.10/3.11/3.12 ensures compatibility with the `requires-python = ">=3.10"` constraint in pyproject.toml.
+  - All 121 Python client tests pass locally — the test job in CI should produce the same results.
+---

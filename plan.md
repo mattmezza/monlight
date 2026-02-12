@@ -545,13 +545,13 @@
       - ~~Images are pushed only from main, not from PRs~~
     - ~~Cache Zig build artifacts to speed up CI~~
       - ~~Subsequent builds are faster due to caching~~
-  - Create workflow for Python client
-    - Trigger on push to main and pull requests (when `clients/python/` changes)
-      - Workflow runs only when Python client files change
-    - Run `pytest` for client tests
-      - All tests pass in CI
-    - Optionally publish to PyPI on tagged releases
-      - Package version matches git tag
+  - ~~Create workflow for Python client~~
+    - ~~Trigger on push to main and pull requests (when `clients/python/` changes)~~
+      - ~~Workflow runs only when Python client files change~~
+    - ~~Run `pytest` for client tests~~
+      - ~~All tests pass in CI~~
+    - ~~Optionally publish to PyPI on tagged releases~~
+      - ~~Package version matches git tag~~
 
 - End-to-end validation
   - Create a `docker-compose.test.yml` or script that starts all three services and runs smoke tests
