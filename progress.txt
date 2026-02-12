@@ -334,3 +334,14 @@
   - LSP diagnostics on `.zig.zon` files show "expected enum literal" errors — these are false positives from the language server, not actual build issues
   - Binary size for the minimal stub is ~2.3MB (debug, not stripped) — similar to other services at this stage
 ---
+
+## Session 27b: Browser Relay Dockerfile & HTTP Server Skeleton
+
+- What was implemented: Created the browser-relay Dockerfile (multi-stage Alpine build, same pattern as other services) and expanded `src/main.zig` to a full HTTP server skeleton: binds to 0.0.0.0:8000, accept loop with `handleConnection`, `/health` endpoint returning `{"status": "ok"}`, 404 handler, `sendJsonResponse` helper, and `--healthcheck` CLI flag. The `handleConnection` is `pub` so future test files can import it.
+- Files changed: `browser-relay/Dockerfile` (new), `browser-relay/src/main.zig` (expanded), `plan.md` (struck through Dockerfile and HTTP server skeleton tasks)
+- **Learnings for future iterations:**
+  - The browser-relay Dockerfile is identical to error-tracker's Dockerfile pattern: `alpine:3.21` builder with `zig sqlite-dev musl-dev`, copies service dir + shared/, builds with `-Doptimize=ReleaseSafe`, runtime stage with only `sqlite-libs`
+  - Port 8000 may already be in use in development — `AddressInUse` errors are expected when testing locally if another service is running
+  - The `max_body_size` for browser-relay is 64KB (vs 256KB for error-tracker) — browser payloads are smaller
+  - The HTTP server skeleton is intentionally minimal: no config, database, auth, or rate limiting yet — those will be added incrementally by subsequent plan tasks
+---

@@ -4,10 +4,10 @@
   - Bootstrap Zig project
     - ~~Create `build.zig` and `build.zig.zon` with SQLite C library dependency (for source map storage)~~
       - ~~`zig build` succeeds and produces a binary~~
-    - Create `Dockerfile` (multi-stage: Alpine + Zig build → Alpine runtime with sqlite-libs)
-      - `docker build` produces a working image under 20MB
-    - Create `src/main.zig` with HTTP server skeleton listening on port 8000
-      - Server starts and responds to requests
+    - ~~Create `Dockerfile` (multi-stage: Alpine + Zig build → Alpine runtime with sqlite-libs)~~
+      - ~~`docker build` produces a working image under 20MB~~
+    - ~~Create `src/main.zig` with HTTP server skeleton listening on port 8000~~
+      - ~~Server starts and responds to requests~~
   - SQLite database layer
     - Implement SQLite initialization using shared SQLite module
       - Database file is created at configurable `DATABASE_PATH`
