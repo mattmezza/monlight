@@ -6,6 +6,7 @@ const sqlite = @import("sqlite");
 const app_config = @import("config.zig");
 const auth = @import("auth");
 const rate_limit = @import("rate_limit");
+const dsn_auth = @import("dsn_auth.zig");
 
 const server_port: u16 = 8000;
 const max_header_size = 8192;
@@ -71,9 +72,8 @@ pub fn main() !void {
     }
 }
 
-pub fn handleConnection(conn: net.Server.Connection, api_key: []const u8, limiter: *rate_limit.RateLimiter, db: *sqlite.Database, cfg: *const app_config.Config) !void {
+pub fn handleConnection(conn: net.Server.Connection, admin_api_key: []const u8, limiter: *rate_limit.RateLimiter, db: *sqlite.Database, cfg: *const app_config.Config) !void {
     defer conn.stream.close();
-    _ = db;
     _ = cfg;
 
     var buf: [max_header_size]u8 = undefined;
@@ -84,29 +84,67 @@ pub fn handleConnection(conn: net.Server.Connection, api_key: []const u8, limite
         return;
     };
 
-    // Authenticate the request (skips excluded paths like /health)
-    const excluded_paths = [_][]const u8{"/health"};
-    if (auth.authenticate(&request, api_key, &excluded_paths) == .rejected) {
-        return; // 401 response already sent by auth module
-    }
-
-    // Rate limiting
-    if (rate_limit.checkRateLimit(&request, limiter, &excluded_paths) == .limited) {
-        return; // 429 response already sent by rate_limit module
-    }
-
-    // Body size enforcement
-    if (rate_limit.checkBodySize(&request, @as(usize, 64 * 1024)) == .too_large) {
-        return; // 413 response already sent by rate_limit module
-    }
-
-    // Route the request
     const target = request.head.target;
+
+    // Health endpoint: no auth required
     if (std.mem.eql(u8, target, "/health")) {
         try handleHealth(&request);
+        return;
+    }
+
+    // Rate limiting for all authenticated endpoints
+    const rate_excluded = [_][]const u8{"/health"};
+    if (rate_limit.checkRateLimit(&request, limiter, &rate_excluded) == .limited) {
+        return; // 429 response already sent
+    }
+
+    // Body size enforcement for all endpoints
+    if (rate_limit.checkBodySize(&request, @as(usize, 64 * 1024)) == .too_large) {
+        return; // 413 response already sent
+    }
+
+    // Determine which auth mechanism to use based on the path
+    const path = if (std.mem.indexOfScalar(u8, target, '?')) |qmark|
+        target[0..qmark]
+    else
+        target;
+
+    if (isBrowserIngestionPath(path)) {
+        // Browser ingestion endpoints use DSN public key auth (X-Monlight-Key header)
+        const dsn_result = dsn_auth.authenticateDsn(&request, db);
+        if (!dsn_result.authenticated) {
+            return; // 401 response already sent by dsn_auth
+        }
+        // Route to browser ingestion handlers
+        // (handlers to be implemented in future tasks)
+        _ = dsn_result.project();
+        try handleNotFound(&request);
+    } else if (isAdminPath(path)) {
+        // Admin/management endpoints use admin API key auth (X-API-Key header)
+        const no_exclusions = [_][]const u8{};
+        if (auth.authenticate(&request, admin_api_key, &no_exclusions) == .rejected) {
+            return; // 401 response already sent by auth module
+        }
+        // Route to admin handlers
+        // (handlers to be implemented in future tasks)
+        try handleNotFound(&request);
     } else {
+        // Unknown path
         try handleNotFound(&request);
     }
+}
+
+/// Check if the path is a browser ingestion endpoint.
+/// These use DSN public key authentication.
+fn isBrowserIngestionPath(path: []const u8) bool {
+    return std.mem.startsWith(u8, path, "/api/browser/");
+}
+
+/// Check if the path is an admin/management endpoint.
+/// These use admin API key authentication.
+fn isAdminPath(path: []const u8) bool {
+    return std.mem.startsWith(u8, path, "/api/source-maps") or
+        std.mem.startsWith(u8, path, "/api/dsn-keys");
 }
 
 fn handleHealth(request: *std.http.Server.Request) !void {
@@ -187,4 +225,24 @@ test "not found response" {
         \\{"detail": "Not found"}
     ;
     try std.testing.expectEqualStrings("{\"detail\": \"Not found\"}", body);
+}
+
+test "isBrowserIngestionPath matches browser paths" {
+    try std.testing.expect(isBrowserIngestionPath("/api/browser/errors"));
+    try std.testing.expect(isBrowserIngestionPath("/api/browser/metrics"));
+    try std.testing.expect(isBrowserIngestionPath("/api/browser/anything"));
+    try std.testing.expect(!isBrowserIngestionPath("/api/errors"));
+    try std.testing.expect(!isBrowserIngestionPath("/api/source-maps"));
+    try std.testing.expect(!isBrowserIngestionPath("/api/dsn-keys"));
+    try std.testing.expect(!isBrowserIngestionPath("/health"));
+}
+
+test "isAdminPath matches admin paths" {
+    try std.testing.expect(isAdminPath("/api/source-maps"));
+    try std.testing.expect(isAdminPath("/api/source-maps/1"));
+    try std.testing.expect(isAdminPath("/api/dsn-keys"));
+    try std.testing.expect(isAdminPath("/api/dsn-keys/1"));
+    try std.testing.expect(!isAdminPath("/api/browser/errors"));
+    try std.testing.expect(!isAdminPath("/api/errors"));
+    try std.testing.expect(!isAdminPath("/health"));
 }

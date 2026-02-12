@@ -89,8 +89,37 @@ pub fn build(b: *std.Build) void {
 
     const run_db_tests = b.addRunArtifact(db_tests);
 
+    // Test step — tests for dsn_auth.zig
+    const dsn_auth_tests = b.addTest(.{
+        .root_source_file = b.path("src/dsn_auth.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    dsn_auth_tests.root_module.addImport("sqlite", sqlite_mod);
+    dsn_auth_tests.linkSystemLibrary("sqlite3");
+    dsn_auth_tests.linkLibC();
+
+    const run_dsn_auth_tests = b.addRunArtifact(dsn_auth_tests);
+
+    // Test step — integration tests for DSN auth and admin auth (dsn_auth_test.zig)
+    const dsn_auth_integration_tests = b.addTest(.{
+        .root_source_file = b.path("src/dsn_auth_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    dsn_auth_integration_tests.root_module.addImport("sqlite", sqlite_mod);
+    dsn_auth_integration_tests.root_module.addImport("config", config_mod);
+    dsn_auth_integration_tests.root_module.addImport("auth", auth_mod);
+    dsn_auth_integration_tests.root_module.addImport("rate_limit", rate_limit_mod);
+    dsn_auth_integration_tests.linkSystemLibrary("sqlite3");
+    dsn_auth_integration_tests.linkLibC();
+
+    const run_dsn_auth_integration_tests = b.addRunArtifact(dsn_auth_integration_tests);
+
     const test_step = b.step("test", "Run all unit tests");
     test_step.dependOn(&run_main_tests.step);
     test_step.dependOn(&run_config_tests.step);
     test_step.dependOn(&run_db_tests.step);
+    test_step.dependOn(&run_dsn_auth_tests.step);
+    test_step.dependOn(&run_dsn_auth_integration_tests.step);
 }
