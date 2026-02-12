@@ -403,3 +403,13 @@
   - When previous sessions implement features but forget to strike through plan items, subsequent sessions should verify and clean up the plan rather than re-implementing
   - The browser-relay health check endpoint (`/health`) is handled before auth middleware in main.zig, so it works without any API key
 ---
+
+## Session 32: Browser Relay Data Retention Cleanup (Integration)
+
+- What was implemented: Completed integration of the `retention.zig` module (created in session 31) into the browser-relay service. Added the retention test target to `build.zig` (with sqlite module, linkSystemLibrary, linkLibC), integrated the retention background thread into `main.zig` following the exact pattern from error-tracker (std.atomic.Value(bool) stop flag, std.Thread.spawn, defer stop+join), and verified all 13 test suites (27/27 build steps) pass including the 6 retention unit tests.
+- Files changed: `browser-relay/build.zig` (added retention_tests target + dependOn), `browser-relay/src/main.zig` (added retention import, retention_cleanup_interval_ns constant, retention thread spawn/defer), `plan.md` (struck through data retention cleanup tasks)
+- **Learnings for future iterations:**
+  - The retention thread integration pattern is identical across services: import module, define interval constant, create atomic stop flag, spawn thread with (dbPathZ, retention_days, interval_ns, &stop), defer { stop.store(true, .release); thread.join(); }
+  - `retention.zig` imports `database.zig` for schema initialization in tests (`:memory:` databases need migration before inserting test data) — this is a file-level import, not a build.zig module import
+  - `zig build test --summary all` shows the count of test suites (13 for browser-relay) and whether they ran or were cached
+

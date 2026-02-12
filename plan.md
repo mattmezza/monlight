@@ -148,11 +148,11 @@
   - ~~Health check endpoint (`GET /health`)~~
     - ~~Return `{"status": "ok"}` with 200, no auth required~~
       - ~~Endpoint responds without any API key~~
-  - Data retention cleanup
-    - Implement background job that deletes source maps older than configurable retention period (default 90 days)
-      - Job runs periodically (e.g., daily)
-      - Only source maps beyond retention are deleted
-      - DSN keys are never auto-deleted
+  - ~~Data retention cleanup~~
+    - ~~Implement background job that deletes source maps older than configurable retention period (default 90 days)~~
+      - ~~Job runs periodically (e.g., daily)~~
+      - ~~Only source maps beyond retention are deleted~~
+      - ~~DSN keys are never auto-deleted~~
   - Tests
     - ~~Write tests for DSN key validation (valid key resolves to project, invalid key rejected, deactivated key rejected)~~
       - ~~Tests pass with `zig build test`~~
