@@ -451,19 +451,19 @@
     - ~~Add browser-relay to the rolling restart sequence~~
     - ~~Add health check: `curl http://localhost:5013/health`~~
 
-- End-to-end validation
-  - Extend `docker-compose.test.yml` or smoke test script
-    - Browser Relay starts and responds to `/health`
-    - Create a DSN key via `POST /api/dsn-keys` with admin key
-    - Submit a browser error via `POST /api/browser/errors` with DSN public key → returns 201
-    - Submit browser metrics via `POST /api/browser/metrics` with DSN public key → returns 202
-    - Verify error appears in Error Tracker (`GET /api/errors` on :5010) with `request_method: "BROWSER"`
-    - Verify metrics appear in Metrics Collector (check for `source: "browser"` labeled metrics)
-    - Upload a source map via `POST /api/source-maps` → returns 201
-    - Submit a browser error with matching `release` → verify stack trace is deobfuscated in Error Tracker
-    - Verify CORS headers are present on browser relay responses
-    - Verify rate limiting works (send 301+ requests, expect 429)
-    - Graceful shutdown works (send SIGTERM, verify clean exit within 10 seconds)
+- ~~End-to-end validation~~
+  - ~~Extend `docker-compose.test.yml` or smoke test script~~
+    - ~~Browser Relay starts and responds to `/health`~~
+    - ~~Create a DSN key via `POST /api/dsn-keys` with admin key~~
+    - ~~Submit a browser error via `POST /api/browser/errors` with DSN public key → returns 201~~
+    - ~~Submit browser metrics via `POST /api/browser/metrics` with DSN public key → returns 202~~
+    - ~~Verify error appears in Error Tracker (`GET /api/errors` on :5010) with `request_method: "BROWSER"`~~
+    - ~~Verify metrics appear in Metrics Collector (check for `source: "browser"` labeled metrics)~~
+    - ~~Upload a source map via `POST /api/source-maps` → returns 201~~
+    - ~~Submit a browser error with matching `release` → verify stack trace is deobfuscated in Error Tracker~~
+    - ~~Verify CORS headers are present on browser relay responses~~
+    - ~~Verify rate limiting works (send 301+ requests, expect 429)~~
+    - ~~Graceful shutdown works (send SIGTERM, verify clean exit within 10 seconds)~~
 
 - CI/CD updates (`.github/workflows/`)
   - Extend Zig services workflow

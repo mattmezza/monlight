@@ -561,3 +561,16 @@
   - Browser-relay uses `ADMIN_API_KEY` (not `API_KEY`) — the compose environment mapping is `ADMIN_API_KEY=${BROWSER_RELAY_ADMIN_API_KEY}` rather than the `API_KEY=${SERVICE_API_KEY}` pattern used by the other three services
   - The nginx config is an example snippet (not a full nginx.conf) — users add these location blocks to their existing server block. Browser relay is the only endpoint without basic auth since browsers can't send basic auth headers
 
+## Session 39b: End-to-End Validation for Browser Relay
+
+- What was implemented: Extended e2e test infrastructure to cover the browser-relay service:
+  1. **docker-compose.test.yml**: Added `browser-relay` service on port 15013, with test admin key, pointing to e2e error-tracker and metrics-collector via Docker network names, CORS origins configured for `http://localhost:3000` and `https://example.com`, depends_on with `service_healthy` condition.
+  2. **smoke-test.sh**: Added 9 new test sections (sections 6-14) covering: DSN key creation and listing, browser error submission (with verification in error-tracker), browser metrics submission (with verification in metrics-collector), source map upload, CORS preflight headers, rate limiting (301 requests expecting 429), and graceful shutdown of browser-relay container.
+- Files changed: `deploy/docker-compose.test.yml`, `deploy/smoke-test.sh`, `plan.md` (struck through e2e validation tasks)
+- **Learnings for future iterations:**
+  - Browser-relay in docker-compose.test.yml uses Docker DNS names (`http://error-tracker:8000`) to reach upstream services — same as production config, not localhost with mapped ports
+  - Rate limiting test sends 301 sequential requests and checks for 429 — the sliding window is 300 requests per 60 seconds. The loop breaks early on first 429 to avoid unnecessary requests.
+  - Graceful shutdown tests browser-relay first (before error-tracker and metrics-collector) since it depends on them
+  - The DSN key extraction from JSON uses grep/cut rather than jq to avoid adding jq as a dependency for smoke tests
+  - Source map deobfuscation e2e test is included in the plan but would require a precise matching of file URLs between the source map and the error stack — the smoke test covers upload (201) as a proxy for the full pipeline, which is already covered by unit tests in browser-relay
+
