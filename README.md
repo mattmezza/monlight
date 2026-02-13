@@ -1,34 +1,79 @@
 # Monlight
 
-A self-hosted, lightweight monitoring stack built with Zig and SQLite. Three independent microservices -- error tracking, log viewing, and metrics collection -- each under 20MB, running on less than 50MB of RAM combined.
+A self-hosted, lightweight monitoring stack built with Zig and SQLite. Four independent microservices -- error tracking, log viewing, metrics collection, and a browser relay -- each under 20MB, running on less than 50MB of RAM combined.
 
 ## Architecture
 
 ```
-                        +-----------------+
-                        |  Your App       |
-                        |  (Python/other) |
-                        +--------+--------+
-                                 |
-                    monlight client
-                                 |
-              +------------------+------------------+
-              |                  |                  |
-     +--------v-------+ +-------v--------+ +-------v--------+
-     | Error Tracker   | | Log Viewer     | | Metrics        |
-     | :5010           | | :5011          | | Collector :5012|
-     | POST /api/errors| | Docker log     | | POST /api/     |
-     | Web UI          | | ingestion      | |   metrics      |
-     | Email alerts    | | FTS5 search    | | Aggregation    |
-     +--------+--------+ | SSE live tail  | | Dashboard      |
-              |           | Web UI         | | Web UI         |
-              |           +-------+--------+ +-------+--------+
-              |                   |                  |
-        [errors.db]         [logs.db]          [metrics.db]
-              SQLite (WAL mode, zero config)
+                    Browser JS SDK                     Python Client
+                  (@monlight/browser)                    (monlight)
+                         |                                  |
+                         v                                  |
+               +---------+----------+          +------------+------------+
+               | Browser Relay      |          |            |            |
+               | :5013              |          |            |            |
+               | DSN auth, CORS     |          |            |            |
+               | Source map support  |          |            |            |
+               +---------+----------+          |            |            |
+                    |          |                |            |            |
+                    v          v                v            |            v
+           +-------+-------+  |  +-------+--------+  +-----+------+
+           | Error Tracker |  +->| Metrics        |  | Log Viewer |
+           | :5010         |     | Collector :5012|  | :5011      |
+           | POST /api/    |     | POST /api/     |  | Docker log |
+           |   errors      |     |   metrics      |  | ingestion  |
+           | Email alerts  |     | Aggregation    |  | FTS5 search|
+           | Web UI        |     | Dashboard      |  | SSE tail   |
+           +-------+-------+    | Web UI         |  | Web UI     |
+                   |             +-------+--------+  +-----+------+
+                   |                     |                  |
+             [errors.db]          [metrics.db]          [logs.db]
+                   SQLite (WAL mode, zero config)
 ```
 
 Each service is a single static binary with an embedded web UI. No external database, no message queue, no runtime dependencies beyond SQLite.
+
+## Quick Start
+
+### Using pre-built images (recommended)
+
+```bash
+# 1. Clone the repo (for compose file and config templates)
+git clone https://github.com/mattmezza/monlight.git
+cd monlight
+
+# 2. Configure secrets
+cp deploy/secrets.env.example deploy/secrets.env
+# Edit deploy/secrets.env and set your API keys
+
+# 3. Start the stack
+docker compose up -d
+```
+
+### Building from source
+
+```bash
+# Build and run all services from source
+docker compose -f deploy/docker-compose.monitoring.yml up -d --build
+```
+
+The services will be available at:
+
+| Service           | URL                     | Web UI                  |
+|-------------------|-------------------------|-------------------------|
+| Error Tracker     | http://localhost:5010    | http://localhost:5010/   |
+| Log Viewer        | http://localhost:5011    | http://localhost:5011/   |
+| Metrics Collector | http://localhost:5012    | http://localhost:5012/   |
+| Browser Relay     | http://localhost:5013    | --                      |
+
+Verify everything is running:
+
+```bash
+curl http://localhost:5010/health
+curl http://localhost:5011/health
+curl http://localhost:5012/health
+curl http://localhost:5013/health
+```
 
 ## Features
 
@@ -53,78 +98,31 @@ Each service is a single static binary with an embedded web UI. No external data
 - Dashboard endpoint with request rate, latency, and error rate timeseries
 - Web UI with uPlot charts
 
-**Python Client** -- Instrument your Python app with a single function call.
+**Browser Relay** -- Browser-facing ingestion proxy for the JS SDK.
+- DSN key authentication (no server API keys exposed to the browser)
+- CORS handling with per-project origin validation
+- Source map upload and stack trace deobfuscation
+- Forwards errors and metrics to the backend services
+
+**JavaScript SDK** (`@monlight/browser`) -- Lightweight browser monitoring.
+- Automatic error capture (unhandled errors + promise rejections)
+- Web Vitals collection (LCP, FID, CLS, INP, TTFB)
+- Network request monitoring (fetch/XHR timing and errors)
+- Under 5KB gzipped
+
+**Python Client** (`monlight`) -- Instrument your Python app with a single function call.
 - Async and sync error reporting with PII filtering
 - Buffered metrics with background flush
 - FastAPI middleware and exception handler
 - `setup_monlight()` one-liner for full integration
 
-## Getting Started
+## Client SDKs
 
-### Prerequisites
-
-- Docker and Docker Compose
-- (Optional) Python >= 3.10 for the client library
-
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/mattmezza/monlight.git
-cd monlight
-```
-
-### 2. Configure secrets
-
-```bash
-cp deploy/secrets.env.example deploy/secrets.env
-```
-
-Edit `deploy/secrets.env` and set your API keys:
-
-```env
-ERROR_TRACKER_API_KEY=your-error-tracker-key
-LOG_VIEWER_API_KEY=your-log-viewer-key
-METRICS_COLLECTOR_API_KEY=your-metrics-key
-
-# Optional: email alerting via Postmark
-POSTMARK_API_TOKEN=
-POSTMARK_FROM_EMAIL=
-ALERT_EMAILS=
-
-LOG_LEVEL=INFO
-```
-
-### 3. Start the stack
-
-```bash
-docker compose -f deploy/docker-compose.monitoring.yml up -d
-```
-
-The services will be available at:
-
-| Service           | URL                     | Web UI                  |
-|-------------------|-------------------------|-------------------------|
-| Error Tracker     | http://localhost:5010    | http://localhost:5010/   |
-| Log Viewer        | http://localhost:5011    | http://localhost:5011/   |
-| Metrics Collector | http://localhost:5012    | http://localhost:5012/   |
-
-Verify everything is running:
-
-```bash
-curl http://localhost:5010/health
-curl http://localhost:5011/health
-curl http://localhost:5012/health
-```
-
-### 4. Instrument your application
-
-Install the Python client:
+### Python
 
 ```bash
 pip install monlight[fastapi]
 ```
-
-Add monitoring to a FastAPI app:
 
 ```python
 from fastapi import FastAPI
@@ -140,15 +138,9 @@ setup_monlight(
     project="my-app",
     environment="production",
 )
-
-@app.get("/")
-def index():
-    return {"status": "ok"}
 ```
 
-This automatically captures unhandled exceptions and emits `http_requests_total` and `http_request_duration_seconds` metrics for every request.
-
-### 5. Use the clients directly (optional)
+Or use the clients directly:
 
 ```python
 from monlight import ErrorClient, MetricsClient
@@ -167,18 +159,30 @@ except Exception as e:
     error_client.report_error_sync(e)
 
 # Metrics
-metrics = MetricsClient(
-    base_url="http://localhost:5012",
-    api_key="your-api-key",
-)
-metrics.start()  # begins background flush every 10s
+metrics = MetricsClient(base_url="http://localhost:5012", api_key="your-api-key")
+metrics.start()
 
 metrics.counter("user_signups", labels={"plan": "pro"})
 metrics.histogram("payment_duration_seconds", value=0.342)
 metrics.gauge("active_connections", value=42)
 
-# On shutdown:
-metrics.shutdown()
+metrics.shutdown()  # flush remaining on app shutdown
+```
+
+### JavaScript (Browser)
+
+```bash
+npm install @monlight/browser
+```
+
+```html
+<script type="module">
+  import { Monlight } from '@monlight/browser';
+
+  const monitor = new Monlight({
+    dsn: 'https://your-key@your-domain.com/browser-relay',
+  });
+</script>
 ```
 
 ## API Reference
@@ -220,6 +224,17 @@ All endpoints require an `X-API-Key` header unless noted otherwise.
 
 **Query parameters for `/api/metrics`:** `name` (required), `period` (1h/24h/7d/30d), `resolution` (minute/hour/auto), `labels` (format: `key:value,key2:value2`)
 
+### Browser Relay (`:5013`)
+
+| Method | Endpoint              | Description                          |
+|--------|-----------------------|--------------------------------------|
+| POST   | `/api/errors`         | Ingest browser errors (DSN auth)     |
+| POST   | `/api/metrics`        | Ingest browser metrics (DSN auth)    |
+| POST   | `/api/sourcemaps`     | Upload source maps (admin auth)      |
+| GET    | `/api/dsn-keys`       | List DSN keys (admin auth)           |
+| POST   | `/api/dsn-keys`       | Create DSN key (admin auth)          |
+| GET    | `/health`             | Health check (no auth)               |
+
 ## Environment Variables
 
 ### Error Tracker
@@ -260,12 +275,25 @@ All endpoints require an `X-API-Key` header unless noted otherwise.
 | `AGGREGATION_INTERVAL`| No       | `60`               | Seconds between aggregation runs       |
 | `LOG_LEVEL`           | No       | `INFO`             | Logging verbosity                      |
 
+### Browser Relay
+
+| Variable                  | Required | Default  | Description                                |
+|---------------------------|----------|----------|--------------------------------------------|
+| `ADMIN_API_KEY`           | Yes      |          | Admin API key for DSN key management       |
+| `ERROR_TRACKER_URL`       | Yes      |          | Internal URL of the error tracker service  |
+| `ERROR_TRACKER_API_KEY`   | Yes      |          | API key for the error tracker              |
+| `METRICS_COLLECTOR_URL`   | Yes      |          | Internal URL of the metrics collector      |
+| `METRICS_COLLECTOR_API_KEY`| Yes     |          | API key for the metrics collector          |
+| `CORS_ORIGINS`            | No       |          | Comma-separated allowed origins            |
+| `DATABASE_PATH`           | No       | `./data/browser-relay.db` | SQLite database path          |
+| `LOG_LEVEL`               | No       | `INFO`   | Logging verbosity                          |
+
 ## Operations
 
 ### Backups
 
 ```bash
-# Run a backup (SQLite .backup for WAL-safe snapshots, 7-day retention)
+# SQLite .backup for WAL-safe snapshots, 7-day retention
 bash deploy/backup.sh
 ```
 
@@ -278,8 +306,8 @@ bash deploy/upgrade.sh
 # Skip git pull (rebuild from local code)
 bash deploy/upgrade.sh --no-pull
 
-# Skip pre-upgrade backup
-bash deploy/upgrade.sh --no-backup
+# Upgrade a single service
+bash deploy/upgrade.sh error-tracker
 ```
 
 The upgrade script tags current images as `:rollback` before rebuilding, so you can revert if something goes wrong.
@@ -290,6 +318,50 @@ The upgrade script tags current images as `:rollback` before rebuilding, so you 
 # Run end-to-end tests against all services
 bash deploy/smoke-test.sh
 ```
+
+## Releasing New Versions
+
+Each component is released independently via git tags. Pushing a tag triggers the corresponding CI workflow to build, test, publish, and create a GitHub Release.
+
+### Docker images (Zig services)
+
+```bash
+# 1. Update the version in <service>/build.zig.zon
+# 2. Commit and push to main
+# 3. Tag and push
+git tag error-tracker-v0.2.0
+git push origin error-tracker-v0.2.0
+```
+
+This builds and pushes to GHCR:
+- `ghcr.io/mattmezza/monlight/error-tracker:0.2.0`
+- `ghcr.io/mattmezza/monlight/error-tracker:latest`
+
+Tag conventions: `error-tracker-v*`, `log-viewer-v*`, `metrics-collector-v*`, `browser-relay-v*`
+
+### Python client
+
+```bash
+# 1. Update version in clients/python/pyproject.toml AND clients/python/monlight/__init__.py
+# 2. Commit and push to main
+# 3. Tag and push
+git tag python-v0.2.0
+git push origin python-v0.2.0
+```
+
+Publishes to PyPI as `monlight`.
+
+### JavaScript SDK
+
+```bash
+# 1. Update version in clients/js/package.json
+# 2. Commit and push to main
+# 3. Tag and push
+git tag js-v0.2.0
+git push origin js-v0.2.0
+```
+
+Publishes to npm as `@monlight/browser`.
 
 ## Development
 
@@ -315,6 +387,15 @@ pip install -e ".[dev]"
 pytest
 ```
 
+### JS SDK development
+
+```bash
+cd clients/js
+npm install
+npm test
+npm run build
+```
+
 ### Docker images
 
 ```bash
@@ -327,11 +408,6 @@ docker compose -f deploy/docker-compose.monitoring.yml build
 
 Images are multi-stage Alpine builds, each under 20MB.
 
-## CI/CD
-
-- **Zig Services** -- Tests all three services, builds Docker images, verifies size < 20MB, pushes to `ghcr.io` on `main`
-- **Python Client** -- Tests on Python 3.10/3.11/3.12, publishes to PyPI on `python-v*` tags
-
 ## Project Structure
 
 ```
@@ -339,12 +415,16 @@ monlight/
 ├── error-tracker/       # Error tracking service (Zig)
 ├── log-viewer/          # Log aggregation service (Zig)
 ├── metrics-collector/   # Metrics collection service (Zig)
+├── browser-relay/       # Browser ingestion proxy (Zig)
 ├── shared/              # Shared Zig modules (sqlite, auth, rate limiting, config)
-├── clients/python/      # Python client library
+├── clients/
+│   ├── js/              # @monlight/browser - JS SDK (TypeScript)
+│   └── python/          # monlight - Python client library
 ├── deploy/              # Docker Compose, backup, upgrade, and smoke test scripts
+├── docker-compose.yml   # Pre-built images from GHCR (for users)
 └── .github/workflows/   # CI/CD pipelines
 ```
 
 ## License
 
-See [LICENSE](LICENSE) for details.
+MIT. See [LICENSE](LICENSE) for details.

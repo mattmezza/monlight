@@ -1,0 +1,111 @@
+name: Release Docker Image
+
+# Triggered by pushing a tag like: error-tracker-v0.2.0, log-viewer-v1.0.0, etc.
+# Each service is released independently by its tag prefix.
+
+on:
+  push:
+    tags:
+      - 'error-tracker-v*'
+      - 'log-viewer-v*'
+      - 'metrics-collector-v*'
+      - 'browser-relay-v*'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.repository }}
+
+jobs:
+  release:
+    name: Build & Push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Determine service and version from tag
+        id: parse
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          # Tag format: <service>-v<version>  e.g. error-tracker-v0.2.0
+          # Extract version (everything after the last -v)
+          VERSION="${TAG##*-v}"
+          # Extract service name (everything before the last -v)
+          SERVICE="${TAG%-v*}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "service=$SERVICE" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Releasing $SERVICE version $VERSION"
+
+      - name: Validate semver
+        run: |
+          VERSION="${{ steps.parse.outputs.version }}"
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
+            echo "::error::Invalid semver: $VERSION (expected X.Y.Z or X.Y.Z-prerelease)"
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify version matches build.zig.zon
+        run: |
+          SERVICE="${{ steps.parse.outputs.service }}"
+          VERSION="${{ steps.parse.outputs.version }}"
+          ZON_VERSION=$(grep -oP '\.version\s*=\s*"\K[^"]+' "$SERVICE/build.zig.zon")
+          if [ "$ZON_VERSION" != "$VERSION" ]; then
+            echo "::error::Tag version ($VERSION) does not match $SERVICE/build.zig.zon version ($ZON_VERSION)"
+            exit 1
+          fi
+          echo "Version check passed: $VERSION"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ${{ steps.parse.outputs.service }}/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ steps.parse.outputs.service }}:${{ steps.parse.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ steps.parse.outputs.service }}:latest
+          labels: |
+            org.opencontainers.image.version=${{ steps.parse.outputs.version }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify image size
+        run: |
+          docker build -t size-check -f ${{ steps.parse.outputs.service }}/Dockerfile .
+          SIZE=$(docker image inspect size-check --format='{{.Size}}')
+          SIZE_MB=$((SIZE / 1024 / 1024))
+          echo "Image size: ${SIZE_MB}MB"
+          if [ "$SIZE_MB" -gt 20 ]; then
+            echo "::error::Image is ${SIZE_MB}MB, exceeding 20MB limit"
+            exit 1
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.parse.outputs.tag }}
+          name: "${{ steps.parse.outputs.service }} v${{ steps.parse.outputs.version }}"
+          generate_release_notes: true
+          body: |
+            ## Docker Image
+
+            ```
+            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ steps.parse.outputs.service }}:${{ steps.parse.outputs.version }}
+            ```

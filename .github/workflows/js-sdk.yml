@@ -82,3 +82,16 @@ jobs:
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "@monlight/browser ${{ github.ref_name }}"
+          generate_release_notes: true
+          body: |
+            ## Install
+
+            ```
+            npm install @monlight/browser@${{ github.ref_name }}
+            ```

@@ -72,3 +72,16 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: clients/python/dist/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "monlight (Python) ${{ github.ref_name }}"
+          generate_release_notes: true
+          body: |
+            ## Install
+
+            ```
+            pip install monlight==${{ github.ref_name }}
+            ```

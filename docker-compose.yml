@@ -1,15 +1,22 @@
+# Monlight monitoring stack - pulls pre-built images from GHCR.
+#
+# Quick start:
+#   1. cp deploy/secrets.env.example deploy/secrets.env
+#   2. Edit deploy/secrets.env with your API keys
+#   3. docker compose up -d
+#
+# To pin a specific version, replace :latest with a version tag:
+#   image: ghcr.io/mattmezza/monlight/error-tracker:0.2.0
+
 services:
   error-tracker:
-    build:
-      context: ..
-      dockerfile: error-tracker/Dockerfile
-    container_name: error_tracker
+    image: ghcr.io/mattmezza/monlight/error-tracker:latest
     ports:
       - "5010:8000"
     volumes:
-      - ./data/errors:/app/data
+      - error-tracker-data:/app/data
     env_file:
-      - secrets.env
+      - deploy/secrets.env
     environment:
       - DATABASE_PATH=/app/data/errors.db
       - API_KEY=${ERROR_TRACKER_API_KEY}
@@ -25,27 +32,22 @@ services:
       timeout: 10s
       retries: 3
     networks:
-      - monitoring
+      - monlight
 
   log-viewer:
-    build:
-      context: ..
-      dockerfile: log-viewer/Dockerfile
-    container_name: log_viewer
+    image: ghcr.io/mattmezza/monlight/log-viewer:latest
     ports:
       - "5011:8000"
     volumes:
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - ./data/logs:/app/data
+      - log-viewer-data:/app/data
     env_file:
-      - secrets.env
+      - deploy/secrets.env
     environment:
       - DATABASE_PATH=/app/data/logs.db
       - API_KEY=${LOG_VIEWER_API_KEY}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - CONTAINERS=${CONTAINERS:-}
-      - MAX_ENTRIES=100000
-      - POLL_INTERVAL=5
     deploy:
       resources:
         limits:
@@ -57,19 +59,16 @@ services:
       timeout: 10s
       retries: 3
     networks:
-      - monitoring
+      - monlight
 
   metrics-collector:
-    build:
-      context: ..
-      dockerfile: metrics-collector/Dockerfile
-    container_name: metrics_collector
+    image: ghcr.io/mattmezza/monlight/metrics-collector:latest
     ports:
       - "5012:8000"
     volumes:
-      - ./data/metrics:/app/data
+      - metrics-collector-data:/app/data
     env_file:
-      - secrets.env
+      - deploy/secrets.env
     environment:
       - DATABASE_PATH=/app/data/metrics.db
       - API_KEY=${METRICS_COLLECTOR_API_KEY}
@@ -85,19 +84,16 @@ services:
       timeout: 10s
       retries: 3
     networks:
-      - monitoring
+      - monlight
 
   browser-relay:
-    build:
-      context: ..
-      dockerfile: browser-relay/Dockerfile
-    container_name: browser_relay
+    image: ghcr.io/mattmezza/monlight/browser-relay:latest
     ports:
       - "5013:8000"
     volumes:
-      - ./data/browser-relay:/app/data
+      - browser-relay-data:/app/data
     env_file:
-      - secrets.env
+      - deploy/secrets.env
     environment:
       - DATABASE_PATH=/app/data/browser-relay.db
       - ADMIN_API_KEY=${BROWSER_RELAY_ADMIN_API_KEY}
@@ -123,7 +119,13 @@ services:
       metrics-collector:
         condition: service_healthy
     networks:
-      - monitoring
+      - monlight
+
+volumes:
+  error-tracker-data:
+  log-viewer-data:
+  metrics-collector-data:
+  browser-relay-data:
 
 networks:
-  monitoring:
+  monlight:

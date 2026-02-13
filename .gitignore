@@ -1,3 +1,5 @@
+# Agent / personal dev files
+.agent/
 .tmux-session
 
 # Zig build artifacts
@@ -24,7 +26,7 @@ build/
 .venv/
 venv/
 
-# Node.js (Tailwind CSS build)
+# Node.js
 node_modules/
 
 # OS files
@@ -36,3 +38,9 @@ Thumbs.db
 *.swo
 *~
 .envrc
+
+# Ruff cache
+.ruff_cache/
+
+# Deploy runtime data
+deploy/data/
