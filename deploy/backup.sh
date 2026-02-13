@@ -2,7 +2,7 @@
 #
 # Monlight Database Backup Script
 #
-# Safely backs up all SQLite databases (errors.db, logs.db, metrics.db)
+# Safely backs up all SQLite databases (errors.db, logs.db, metrics.db, browser-relay.db)
 # using SQLite's .backup command, which creates a consistent snapshot
 # even while the databases are in use (WAL mode safe).
 #
@@ -42,6 +42,7 @@ declare -A DB_MAP=(
     [errors]="errors/errors.db"
     [logs]="logs/logs.db"
     [metrics]="metrics/metrics.db"
+    [browser-relay]="browser-relay/browser-relay.db"
 )
 
 # -------------------------------------------------------------------
@@ -73,7 +74,7 @@ if [ $# -gt 0 ]; then
         [[ -v DB_MAP[$target] ]] || die "Unknown database: '$target'. Valid names: ${!DB_MAP[*]}"
     done
 else
-    TARGETS=("errors" "logs" "metrics")
+    TARGETS=("errors" "logs" "metrics" "browser-relay")
 fi
 
 # -------------------------------------------------------------------

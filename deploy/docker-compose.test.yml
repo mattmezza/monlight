@@ -76,10 +76,43 @@ services:
     networks:
       - e2e_test
 
+  browser-relay:
+    build:
+      context: ..
+      dockerfile: browser-relay/Dockerfile
+    container_name: e2e_browser_relay
+    ports:
+      - "15013:8000"
+    volumes:
+      - browser-relay-data:/app/data
+    environment:
+      - DATABASE_PATH=/app/data/browser-relay.db
+      - ADMIN_API_KEY=test_admin_key_e2e_12345
+      - ERROR_TRACKER_URL=http://error-tracker:8000
+      - ERROR_TRACKER_API_KEY=test_api_key_e2e_12345
+      - METRICS_COLLECTOR_URL=http://metrics-collector:8000
+      - METRICS_COLLECTOR_API_KEY=test_api_key_e2e_12345
+      - CORS_ORIGINS=http://localhost:3000,https://example.com
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "/app/browser-relay", "--healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    depends_on:
+      error-tracker:
+        condition: service_healthy
+      metrics-collector:
+        condition: service_healthy
+    networks:
+      - e2e_test
+
 volumes:
   error-tracker-data:
   log-viewer-data:
   metrics-collector-data:
+  browser-relay-data:
   empty-log-sources:
 
 networks:

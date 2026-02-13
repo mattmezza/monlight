@@ -87,6 +87,44 @@ services:
     networks:
       - monitoring
 
+  browser-relay:
+    build:
+      context: ..
+      dockerfile: browser-relay/Dockerfile
+    container_name: browser_relay
+    ports:
+      - "5013:8000"
+    volumes:
+      - ./data/browser-relay:/app/data
+    env_file:
+      - secrets.env
+    environment:
+      - DATABASE_PATH=/app/data/browser-relay.db
+      - ADMIN_API_KEY=${BROWSER_RELAY_ADMIN_API_KEY}
+      - ERROR_TRACKER_URL=http://error-tracker:8000
+      - ERROR_TRACKER_API_KEY=${ERROR_TRACKER_API_KEY}
+      - METRICS_COLLECTOR_URL=http://metrics-collector:8000
+      - METRICS_COLLECTOR_API_KEY=${METRICS_COLLECTOR_API_KEY}
+      - CORS_ORIGINS=${CORS_ORIGINS}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    deploy:
+      resources:
+        limits:
+          memory: 30M
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/app/browser-relay", "--healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      error-tracker:
+        condition: service_healthy
+      metrics-collector:
+        condition: service_healthy
+    networks:
+      - monitoring
+
 networks:
   monitoring:
     name: flowrent_network

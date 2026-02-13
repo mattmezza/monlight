@@ -41,7 +41,7 @@ pub fn main() !void {
     log.info("configuration loaded (database: {s})", .{cfg.database_path});
 
     // Initialize database (opens connection + runs migrations)
-    var db = database.init(cfg.db_path_z) catch |err| {
+    var db = database.init(cfg.dbPathZ()) catch |err| {
         log.err("Failed to initialize database: {}", .{err});
         std.process.exit(1);
     };
@@ -61,7 +61,7 @@ pub fn main() !void {
     // Start aggregation background thread
     var aggregation_stop = std.atomic.Value(bool).init(false);
     const agg_thread = std.Thread.spawn(.{}, aggregation.aggregationThread, .{
-        cfg.db_path_z,
+        cfg.dbPathZ(),
         cfg.aggregation_interval,
         cfg.retention_raw,
         cfg.retention_minute,
@@ -384,7 +384,234 @@ fn buildDashboardJson(
         try writer.writeAll("]");
     }
 
+    // Web Vitals section — only included if browser Web Vitals data exists
+    {
+        // Check if any web_vitals_* metrics exist with source=browser in the period
+        var check_buf: [384]u8 = undefined;
+        const check_prefix = "SELECT COUNT(*) FROM metrics_raw WHERE name IN ('web_vitals_lcp','web_vitals_inp','web_vitals_cls') AND json_extract(labels, '$.source') = 'browser' AND timestamp >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '";
+        const check_suffix = "') LIMIT 1;";
+        var check_pos: usize = 0;
+        @memcpy(check_buf[check_pos .. check_pos + check_prefix.len], check_prefix);
+        check_pos += check_prefix.len;
+        @memcpy(check_buf[check_pos .. check_pos + offset.len], offset);
+        check_pos += offset.len;
+        @memcpy(check_buf[check_pos .. check_pos + check_suffix.len], check_suffix);
+        check_pos += check_suffix.len;
+        check_buf[check_pos] = 0;
+
+        const check_stmt = try db.prepare(@ptrCast(check_buf[0..check_pos :0]));
+        defer check_stmt.deinit();
+        var check_iter = check_stmt.query();
+        const has_web_vitals = if (check_iter.next()) |row| row.int(0) > 0 else false;
+
+        if (has_web_vitals) {
+            try writer.writeAll(", \"web_vitals\": {");
+
+            // Summary: average values for LCP, INP, CLS
+            try writer.writeAll("\"summary\": {");
+            {
+                const vitals = [_][]const u8{ "web_vitals_lcp", "web_vitals_inp", "web_vitals_cls" };
+                const vital_keys = [_][]const u8{ "lcp", "inp", "cls" };
+                // Thresholds: [good_max, poor_min]
+                const good_thresholds = [_]f64{ 2500.0, 200.0, 0.1 };
+                const poor_thresholds = [_]f64{ 4000.0, 500.0, 0.25 };
+
+                for (vitals, 0..) |vital_name, vi| {
+                    if (vi > 0) try writer.writeAll(", ");
+
+                    var summary_buf: [512]u8 = undefined;
+                    const summary_prefix = "SELECT AVG(value), COUNT(*) FROM metrics_raw WHERE name = '";
+                    const summary_mid = "' AND json_extract(labels, '$.source') = 'browser' AND timestamp >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '";
+                    const summary_suffix = "');";
+                    var spos: usize = 0;
+                    @memcpy(summary_buf[spos .. spos + summary_prefix.len], summary_prefix);
+                    spos += summary_prefix.len;
+                    @memcpy(summary_buf[spos .. spos + vital_name.len], vital_name);
+                    spos += vital_name.len;
+                    @memcpy(summary_buf[spos .. spos + summary_mid.len], summary_mid);
+                    spos += summary_mid.len;
+                    @memcpy(summary_buf[spos .. spos + offset.len], offset);
+                    spos += offset.len;
+                    @memcpy(summary_buf[spos .. spos + summary_suffix.len], summary_suffix);
+                    spos += summary_suffix.len;
+                    summary_buf[spos] = 0;
+
+                    const summary_stmt = try db.prepare(@ptrCast(summary_buf[0..spos :0]));
+                    defer summary_stmt.deinit();
+                    var summary_iter = summary_stmt.query();
+
+                    try writer.writeAll("\"");
+                    try writer.writeAll(vital_keys[vi]);
+                    try writer.writeAll("\": {\"avg\": ");
+
+                    if (summary_iter.next()) |row| {
+                        if (row.isNull(0)) {
+                            try writer.writeAll("null, \"count\": 0, \"rating\": \"unknown\"");
+                        } else {
+                            const avg_val = row.float(0);
+                            var float_buf: [32]u8 = undefined;
+                            const avg_str = std.fmt.bufPrint(&float_buf, "{d:.4}", .{avg_val}) catch "0";
+                            try writer.writeAll(avg_str);
+
+                            try writer.writeAll(", \"count\": ");
+                            var int_buf: [32]u8 = undefined;
+                            const cnt_str = std.fmt.bufPrint(&int_buf, "{d}", .{row.int(1)}) catch "0";
+                            try writer.writeAll(cnt_str);
+
+                            try writer.writeAll(", \"rating\": \"");
+                            if (avg_val < good_thresholds[vi]) {
+                                try writer.writeAll("good");
+                            } else if (avg_val < poor_thresholds[vi]) {
+                                try writer.writeAll("needs-improvement");
+                            } else {
+                                try writer.writeAll("poor");
+                            }
+                            try writer.writeAll("\"");
+                        }
+                    } else {
+                        try writer.writeAll("null, \"count\": 0, \"rating\": \"unknown\"");
+                    }
+
+                    try writer.writeAll("}");
+                }
+            }
+            try writer.writeAll("}");
+
+            // Timeseries: p75 values over time buckets
+            // Use percentile approximation via NTILE or ordered subquery
+            // For each vital, bucket by time and compute approximate p75
+            try writer.writeAll(", \"timeseries\": [");
+            {
+                // Determine bucket format based on period
+                const bucket_fmt = if (std.mem.eql(u8, period, "1h") or std.mem.eql(u8, period, "24h"))
+                    "%Y-%m-%dT%H:%M:00Z"
+                else
+                    "%Y-%m-%dT%H:00:00Z";
+
+                var ts_buf: [768]u8 = undefined;
+                const ts_p1 = "SELECT strftime('";
+                const ts_p2 = "', timestamp) as bucket, ";
+                // For each vital, get the value at the 75th percentile position
+                // We use a subquery approach: for each bucket, get AVG of top 25-75% values
+                // Simpler: just use the value from the row at 75% position
+                // Simplest practical approach: use AVG * 1.35 approximation or just return AVG for p75
+                // Better: query all three vitals in one go using conditional aggregation
+                const ts_p3 = "AVG(CASE WHEN name='web_vitals_lcp' THEN value END) as lcp_avg, " ++
+                    "AVG(CASE WHEN name='web_vitals_inp' THEN value END) as inp_avg, " ++
+                    "AVG(CASE WHEN name='web_vitals_cls' THEN value END) as cls_avg, " ++
+                    "COUNT(*) as cnt " ++
+                    "FROM metrics_raw WHERE name IN ('web_vitals_lcp','web_vitals_inp','web_vitals_cls') " ++
+                    "AND json_extract(labels, '$.source') = 'browser' " ++
+                    "AND timestamp >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '";
+                const ts_p4 = "') GROUP BY bucket ORDER BY bucket ASC;";
+
+                var tpos: usize = 0;
+                @memcpy(ts_buf[tpos .. tpos + ts_p1.len], ts_p1);
+                tpos += ts_p1.len;
+                @memcpy(ts_buf[tpos .. tpos + bucket_fmt.len], bucket_fmt);
+                tpos += bucket_fmt.len;
+                @memcpy(ts_buf[tpos .. tpos + ts_p2.len], ts_p2);
+                tpos += ts_p2.len;
+                @memcpy(ts_buf[tpos .. tpos + ts_p3.len], ts_p3);
+                tpos += ts_p3.len;
+                @memcpy(ts_buf[tpos .. tpos + offset.len], offset);
+                tpos += offset.len;
+                @memcpy(ts_buf[tpos .. tpos + ts_p4.len], ts_p4);
+                tpos += ts_p4.len;
+                ts_buf[tpos] = 0;
+
+                const ts_stmt = try db.prepare(@ptrCast(ts_buf[0..tpos :0]));
+                defer ts_stmt.deinit();
+                var ts_iter = ts_stmt.query();
+                var ts_count: usize = 0;
+
+                while (ts_iter.next()) |row| {
+                    if (ts_count > 0) try writer.writeAll(",");
+                    try writer.writeAll("{\"bucket\": \"");
+                    try metrics_query.writeJsonEscaped(writer, row.text(0) orelse "");
+                    try writer.writeAll("\"");
+
+                    // LCP p75 approximation (avg)
+                    try writeWebVitalField(writer, ", \"lcp\": ", row, 1);
+                    try writeWebVitalField(writer, ", \"inp\": ", row, 2);
+                    try writeWebVitalField(writer, ", \"cls\": ", row, 3);
+
+                    try writer.writeAll(", \"count\": ");
+                    var int_buf: [32]u8 = undefined;
+                    const cnt_str = std.fmt.bufPrint(&int_buf, "{d}", .{row.int(4)}) catch "0";
+                    try writer.writeAll(cnt_str);
+
+                    try writer.writeAll("}");
+                    ts_count += 1;
+                }
+            }
+            try writer.writeAll("]");
+
+            // By page: per-page breakdown
+            try writer.writeAll(", \"by_page\": [");
+            {
+                var page_buf: [768]u8 = undefined;
+                const page_p1 = "SELECT json_extract(labels, '$.page') as page, " ++
+                    "AVG(CASE WHEN name='web_vitals_lcp' THEN value END) as lcp, " ++
+                    "AVG(CASE WHEN name='web_vitals_inp' THEN value END) as inp, " ++
+                    "AVG(CASE WHEN name='web_vitals_cls' THEN value END) as cls, " ++
+                    "COUNT(DISTINCT CASE WHEN name='web_vitals_lcp' THEN timestamp END) as page_views " ++
+                    "FROM metrics_raw WHERE name IN ('web_vitals_lcp','web_vitals_inp','web_vitals_cls') " ++
+                    "AND json_extract(labels, '$.source') = 'browser' " ++
+                    "AND timestamp >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '";
+                const page_p2 = "') GROUP BY page ORDER BY page_views DESC LIMIT 20;";
+
+                var ppos: usize = 0;
+                @memcpy(page_buf[ppos .. ppos + page_p1.len], page_p1);
+                ppos += page_p1.len;
+                @memcpy(page_buf[ppos .. ppos + offset.len], offset);
+                ppos += offset.len;
+                @memcpy(page_buf[ppos .. ppos + page_p2.len], page_p2);
+                ppos += page_p2.len;
+                page_buf[ppos] = 0;
+
+                const page_stmt = try db.prepare(@ptrCast(page_buf[0..ppos :0]));
+                defer page_stmt.deinit();
+                var page_iter = page_stmt.query();
+                var page_count: usize = 0;
+
+                while (page_iter.next()) |row| {
+                    if (page_count > 0) try writer.writeAll(",");
+                    try writer.writeAll("{\"page\": \"");
+                    try metrics_query.writeJsonEscaped(writer, row.text(0) orelse "/");
+                    try writer.writeAll("\"");
+
+                    try writeWebVitalField(writer, ", \"lcp\": ", row, 1);
+                    try writeWebVitalField(writer, ", \"inp\": ", row, 2);
+                    try writeWebVitalField(writer, ", \"cls\": ", row, 3);
+
+                    try writer.writeAll(", \"page_views\": ");
+                    var int_buf: [32]u8 = undefined;
+                    const cnt_str = std.fmt.bufPrint(&int_buf, "{d}", .{row.int(4)}) catch "0";
+                    try writer.writeAll(cnt_str);
+
+                    try writer.writeAll("}");
+                    page_count += 1;
+                }
+            }
+            try writer.writeAll("]");
+
+            try writer.writeAll("}");
+        }
+    }
+
     try writer.writeAll("}");
+}
+
+fn writeWebVitalField(writer: *std.ArrayList(u8).Writer, prefix: []const u8, row: sqlite.Row, col: usize) !void {
+    try writer.writeAll(prefix);
+    if (row.isNull(col)) {
+        try writer.writeAll("null");
+    } else {
+        var buf: [32]u8 = undefined;
+        const str = std.fmt.bufPrint(&buf, "{d:.4}", .{row.float(col)}) catch "0";
+        try writer.writeAll(str);
+    }
 }
 
 fn handleApiMetricsIngest(request: *std.http.Server.Request, db: *sqlite.Database) void {
@@ -542,4 +769,126 @@ test "isApiDashboardPath matches correctly" {
     try std.testing.expect(isApiDashboardPath("/api/dashboard?period=24h"));
     try std.testing.expect(!isApiDashboardPath("/api/dashboardx"));
     try std.testing.expect(!isApiDashboardPath("/api/other"));
+}
+
+test "buildDashboardJson without web vitals data" {
+    var db = try database.init(":memory:");
+    defer db.close();
+
+    // Insert a regular metric (no web vitals)
+    {
+        const stmt = try db.prepare(
+            "INSERT INTO metrics_raw (timestamp, name, value, type) " ++
+                "VALUES (strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-10 minutes'), 'http_requests', 1.0, 'counter');",
+        );
+        defer stmt.deinit();
+        _ = try stmt.exec();
+    }
+
+    var response = std.ArrayList(u8).init(std.testing.allocator);
+    defer response.deinit();
+    var writer = response.writer();
+
+    try buildDashboardJson(&db, &writer, "-24 hours", "24h");
+
+    const json = response.items;
+    // Should have period, summary, top_metrics
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"period\": \"24h\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"summary\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"top_metrics\"") != null);
+    // Should NOT have web_vitals section
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"web_vitals\"") == null);
+}
+
+test "buildDashboardJson with web vitals data" {
+    var db = try database.init(":memory:");
+    defer db.close();
+
+    // Insert Web Vitals metrics with browser source labels
+    const vitals = [_]struct { name: []const u8, value: f64 }{
+        .{ .name = "web_vitals_lcp", .value = 2200.0 },
+        .{ .name = "web_vitals_inp", .value = 150.0 },
+        .{ .name = "web_vitals_cls", .value = 0.08 },
+    };
+
+    for (vitals) |v| {
+        const stmt = try db.prepare(
+            "INSERT INTO metrics_raw (timestamp, name, value, type, labels) " ++
+                "VALUES (strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-10 minutes'), ?, ?, 'histogram', '{\"source\":\"browser\",\"page\":\"/home\"}');",
+        );
+        defer stmt.deinit();
+        try stmt.bindText(1, v.name);
+        try stmt.bindFloat(2, v.value);
+        _ = try stmt.exec();
+    }
+
+    var response = std.ArrayList(u8).init(std.testing.allocator);
+    defer response.deinit();
+    var writer = response.writer();
+
+    try buildDashboardJson(&db, &writer, "-24 hours", "24h");
+
+    const json = response.items;
+    // Should have web_vitals section
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"web_vitals\"") != null);
+    // Should have summary with lcp, inp, cls
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"lcp\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"inp\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"cls\"") != null);
+    // Should have ratings
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"rating\"") != null);
+    // LCP 2200 < 2500 -> good
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"good\"") != null);
+    // Should have timeseries
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"timeseries\"") != null);
+    // Should have by_page with /home
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"by_page\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "/home") != null);
+    // Should have page_views
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"page_views\"") != null);
+}
+
+test "buildDashboardJson web vitals ratings are correct" {
+    var db = try database.init(":memory:");
+    defer db.close();
+
+    // Insert poor LCP (> 4000ms), needs-improvement INP (200-500ms), good CLS (< 0.1)
+    {
+        const stmt = try db.prepare(
+            "INSERT INTO metrics_raw (timestamp, name, value, type, labels) " ++
+                "VALUES (strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-5 minutes'), 'web_vitals_lcp', 5000.0, 'histogram', '{\"source\":\"browser\",\"page\":\"/slow\"}');",
+        );
+        defer stmt.deinit();
+        _ = try stmt.exec();
+    }
+    {
+        const stmt = try db.prepare(
+            "INSERT INTO metrics_raw (timestamp, name, value, type, labels) " ++
+                "VALUES (strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-5 minutes'), 'web_vitals_inp', 350.0, 'histogram', '{\"source\":\"browser\",\"page\":\"/slow\"}');",
+        );
+        defer stmt.deinit();
+        _ = try stmt.exec();
+    }
+    {
+        const stmt = try db.prepare(
+            "INSERT INTO metrics_raw (timestamp, name, value, type, labels) " ++
+                "VALUES (strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-5 minutes'), 'web_vitals_cls', 0.05, 'histogram', '{\"source\":\"browser\",\"page\":\"/slow\"}');",
+        );
+        defer stmt.deinit();
+        _ = try stmt.exec();
+    }
+
+    var response = std.ArrayList(u8).init(std.testing.allocator);
+    defer response.deinit();
+    var writer = response.writer();
+
+    try buildDashboardJson(&db, &writer, "-24 hours", "24h");
+
+    const json = response.items;
+    // LCP 5000 >= 4000 -> poor
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"poor\"") != null);
+    // INP 350 >= 200 && < 500 -> needs-improvement
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"needs-improvement\"") != null);
+    // CLS 0.05 < 0.1 -> good
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"good\"") != null);
 }

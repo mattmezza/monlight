@@ -51,7 +51,7 @@ pub fn main() !void {
     });
 
     // Initialize database (opens connection + runs migrations)
-    var db = database.init(cfg.db_path_z) catch |err| {
+    var db = database.init(cfg.dbPathZ()) catch |err| {
         log.err("Failed to initialize database: {}", .{err});
         std.process.exit(1);
     };
@@ -80,7 +80,7 @@ pub fn main() !void {
     // Start retention cleanup background thread
     var retention_stop = std.atomic.Value(bool).init(false);
     const retention_thread = std.Thread.spawn(.{}, retention.retentionThread, .{
-        cfg.db_path_z,
+        cfg.dbPathZ(),
         cfg.retention_days,
         retention_cleanup_interval_ns,
         &retention_stop,

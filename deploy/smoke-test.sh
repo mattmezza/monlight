@@ -15,9 +15,11 @@
 set -euo pipefail
 
 API_KEY="test_api_key_e2e_12345"
+ADMIN_KEY="test_admin_key_e2e_12345"
 ERROR_TRACKER_URL="http://localhost:15010"
 LOG_VIEWER_URL="http://localhost:15011"
 METRICS_COLLECTOR_URL="http://localhost:15012"
+BROWSER_RELAY_URL="http://localhost:15013"
 
 PASS=0
 FAIL=0
@@ -64,6 +66,7 @@ wait_for_health() {
 wait_for_health "Error Tracker" "$ERROR_TRACKER_URL"
 wait_for_health "Log Viewer" "$LOG_VIEWER_URL"
 wait_for_health "Metrics Collector" "$METRICS_COLLECTOR_URL"
+wait_for_health "Browser Relay" "$BROWSER_RELAY_URL"
 
 # ---------------------------------------------------------------------------
 # 1. Health check endpoints (no auth required)
@@ -91,6 +94,7 @@ check_health() {
 check_health "Error Tracker" "$ERROR_TRACKER_URL"
 check_health "Log Viewer" "$LOG_VIEWER_URL"
 check_health "Metrics Collector" "$METRICS_COLLECTOR_URL"
+check_health "Browser Relay" "$BROWSER_RELAY_URL"
 
 # ---------------------------------------------------------------------------
 # 2. Error Tracker: POST /api/errors returns 201
@@ -325,8 +329,249 @@ check_web_ui "Log Viewer UI" "$LOG_VIEWER_URL/"
 check_web_ui "Metrics Collector UI" "$METRICS_COLLECTOR_URL/"
 
 # ---------------------------------------------------------------------------
-# 6. Graceful shutdown (SIGTERM → clean exit within 10 seconds)
+# 6. Browser Relay: DSN key management
 # ---------------------------------------------------------------------------
+section "Browser Relay: DSN key management"
+
+# Create a DSN key
+HTTP_CODE_DSN=$(curl -s -o /tmp/e2e_dsn_response.txt -w "%{http_code}" \
+  -X POST "$BROWSER_RELAY_URL/api/dsn-keys" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $ADMIN_KEY" \
+  -d '{"project": "e2e-test"}')
+
+DSN_RESPONSE=$(cat /tmp/e2e_dsn_response.txt)
+
+if [ "$HTTP_CODE_DSN" = "201" ]; then
+  pass "POST /api/dsn-keys returns 201 (key created)"
+else
+  fail "POST /api/dsn-keys returned $HTTP_CODE_DSN, expected 201. Response: $DSN_RESPONSE"
+fi
+
+# Extract the public key
+DSN_KEY=$(echo "$DSN_RESPONSE" | grep -o '"public_key":"[^"]*"' | cut -d'"' -f4)
+
+if [ -n "$DSN_KEY" ] && [ ${#DSN_KEY} -eq 32 ]; then
+  pass "DSN key is a 32-character hex string: $DSN_KEY"
+else
+  fail "DSN key is missing or malformed: $DSN_KEY"
+fi
+
+# List DSN keys
+HTTP_CODE_DSNL=$(curl -s -o /tmp/e2e_dsn_list.txt -w "%{http_code}" \
+  "$BROWSER_RELAY_URL/api/dsn-keys" \
+  -H "X-API-Key: $ADMIN_KEY")
+
+DSN_LIST=$(cat /tmp/e2e_dsn_list.txt)
+
+if [ "$HTTP_CODE_DSNL" = "200" ]; then
+  pass "GET /api/dsn-keys returns 200"
+else
+  fail "GET /api/dsn-keys returned $HTTP_CODE_DSNL"
+fi
+
+if echo "$DSN_LIST" | grep -q "$DSN_KEY"; then
+  pass "DSN key list contains the created key"
+else
+  fail "DSN key list missing the created key: $DSN_LIST"
+fi
+
+# ---------------------------------------------------------------------------
+# 7. Browser Relay: submit browser error via DSN key
+# ---------------------------------------------------------------------------
+section "Browser Relay: submit browser error"
+
+BROWSER_ERROR_PAYLOAD='{
+  "type": "TypeError",
+  "message": "Cannot read property of undefined",
+  "stack": "TypeError: Cannot read property of undefined\n    at onClick (app.min.js:1:2345)\n    at HTMLButtonElement.dispatch (vendor.min.js:2:6789)",
+  "url": "https://example.com/dashboard",
+  "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
+  "session_id": "e2e-test-session-001",
+  "environment": "test"
+}'
+
+HTTP_CODE_BE=$(curl -s -o /tmp/e2e_browser_error.txt -w "%{http_code}" \
+  -X POST "$BROWSER_RELAY_URL/api/browser/errors" \
+  -H "Content-Type: application/json" \
+  -H "X-Monlight-Key: $DSN_KEY" \
+  -H "Origin: http://localhost:3000" \
+  -d "$BROWSER_ERROR_PAYLOAD")
+
+BE_RESPONSE=$(cat /tmp/e2e_browser_error.txt)
+
+if [ "$HTTP_CODE_BE" = "201" ]; then
+  pass "POST /api/browser/errors returns 201 (error forwarded)"
+else
+  fail "POST /api/browser/errors returned $HTTP_CODE_BE, expected 201. Response: $BE_RESPONSE"
+fi
+
+# ---------------------------------------------------------------------------
+# 8. Browser Relay: submit browser metrics via DSN key
+# ---------------------------------------------------------------------------
+section "Browser Relay: submit browser metrics"
+
+BROWSER_METRICS_PAYLOAD='{
+  "metrics": [
+    {"name": "web_vitals_lcp", "type": "histogram", "value": 2500},
+    {"name": "web_vitals_inp", "type": "histogram", "value": 150},
+    {"name": "web_vitals_cls", "type": "histogram", "value": 0.05}
+  ],
+  "session_id": "e2e-test-session-001",
+  "url": "https://example.com/dashboard?tab=1"
+}'
+
+HTTP_CODE_BM=$(curl -s -o /tmp/e2e_browser_metrics.txt -w "%{http_code}" \
+  -X POST "$BROWSER_RELAY_URL/api/browser/metrics" \
+  -H "Content-Type: application/json" \
+  -H "X-Monlight-Key: $DSN_KEY" \
+  -H "Origin: http://localhost:3000" \
+  -d "$BROWSER_METRICS_PAYLOAD")
+
+BM_RESPONSE=$(cat /tmp/e2e_browser_metrics.txt)
+
+if [ "$HTTP_CODE_BM" = "202" ]; then
+  pass "POST /api/browser/metrics returns 202 (metrics forwarded)"
+else
+  fail "POST /api/browser/metrics returned $HTTP_CODE_BM, expected 202. Response: $BM_RESPONSE"
+fi
+
+if echo "$BM_RESPONSE" | grep -q '"accepted"'; then
+  pass "Metrics response contains status=accepted"
+else
+  fail "Metrics response missing 'accepted': $BM_RESPONSE"
+fi
+
+# ---------------------------------------------------------------------------
+# 9. Verify browser error appears in Error Tracker
+# ---------------------------------------------------------------------------
+section "Verify browser error in Error Tracker"
+
+# Give error-tracker a moment to process
+sleep 1
+
+HTTP_CODE_VE=$(curl -s -o /tmp/e2e_verify_error.txt -w "%{http_code}" \
+  "$ERROR_TRACKER_URL/api/errors?project=e2e-test&source=browser" \
+  -H "X-API-Key: $API_KEY")
+
+VERIFY_ERROR=$(cat /tmp/e2e_verify_error.txt)
+
+if [ "$HTTP_CODE_VE" = "200" ]; then
+  pass "GET /api/errors?source=browser returns 200"
+else
+  fail "GET /api/errors?source=browser returned $HTTP_CODE_VE"
+fi
+
+if echo "$VERIFY_ERROR" | grep -q '"TypeError"'; then
+  pass "Error Tracker contains the browser TypeError"
+else
+  fail "Error Tracker missing browser error: $VERIFY_ERROR"
+fi
+
+# ---------------------------------------------------------------------------
+# 10. Verify browser metrics appear in Metrics Collector
+# ---------------------------------------------------------------------------
+section "Verify browser metrics in Metrics Collector"
+
+HTTP_CODE_VM=$(curl -s -o /tmp/e2e_verify_metrics.txt -w "%{http_code}" \
+  "$METRICS_COLLECTOR_URL/api/metrics/names" \
+  -H "X-API-Key: $API_KEY")
+
+VERIFY_METRICS=$(cat /tmp/e2e_verify_metrics.txt)
+
+if [ "$HTTP_CODE_VM" = "200" ]; then
+  pass "GET /api/metrics/names returns 200"
+else
+  fail "GET /api/metrics/names returned $HTTP_CODE_VM"
+fi
+
+if echo "$VERIFY_METRICS" | grep -q 'web_vitals_lcp'; then
+  pass "Metrics Collector has web_vitals_lcp metric"
+else
+  fail "Metrics Collector missing web_vitals_lcp: $VERIFY_METRICS"
+fi
+
+# ---------------------------------------------------------------------------
+# 11. Browser Relay: source map upload
+# ---------------------------------------------------------------------------
+section "Browser Relay: source map upload"
+
+SOURCE_MAP_PAYLOAD='{
+  "project": "e2e-test",
+  "release": "1.0.0",
+  "file_url": "/static/app.min.js",
+  "map_content": "{\"version\":3,\"sources\":[\"app.ts\"],\"mappings\":\"AAAA\"}"
+}'
+
+HTTP_CODE_SM=$(curl -s -o /tmp/e2e_source_map.txt -w "%{http_code}" \
+  -X POST "$BROWSER_RELAY_URL/api/source-maps" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $ADMIN_KEY" \
+  -d "$SOURCE_MAP_PAYLOAD")
+
+SM_RESPONSE=$(cat /tmp/e2e_source_map.txt)
+
+if [ "$HTTP_CODE_SM" = "201" ]; then
+  pass "POST /api/source-maps returns 201 (source map uploaded)"
+else
+  fail "POST /api/source-maps returned $HTTP_CODE_SM, expected 201. Response: $SM_RESPONSE"
+fi
+
+if echo "$SM_RESPONSE" | grep -q '"uploaded"'; then
+  pass "Source map response contains status=uploaded"
+else
+  fail "Source map response missing 'uploaded': $SM_RESPONSE"
+fi
+
+# ---------------------------------------------------------------------------
+# 12. Browser Relay: CORS headers present
+# ---------------------------------------------------------------------------
+section "Browser Relay: CORS headers"
+
+CORS_RESPONSE=$(curl -s -D - -o /dev/null \
+  -X OPTIONS "$BROWSER_RELAY_URL/api/browser/errors" \
+  -H "Origin: http://localhost:3000" \
+  -H "Access-Control-Request-Method: POST" 2>&1)
+
+if echo "$CORS_RESPONSE" | grep -qi "access-control-allow-origin"; then
+  pass "CORS preflight includes Access-Control-Allow-Origin"
+else
+  fail "CORS preflight missing Access-Control-Allow-Origin header"
+fi
+
+if echo "$CORS_RESPONSE" | grep -qi "access-control-allow-methods"; then
+  pass "CORS preflight includes Access-Control-Allow-Methods"
+else
+  fail "CORS preflight missing Access-Control-Allow-Methods header"
+fi
+
+# ---------------------------------------------------------------------------
+# 13. Browser Relay: rate limiting works
+# ---------------------------------------------------------------------------
+section "Browser Relay: rate limiting"
+
+# Send 301 requests rapidly (rate limit is 300 per 60s window)
+RATE_LIMITED=false
+for i in $(seq 1 301); do
+  HTTP_CODE_RL=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$BROWSER_RELAY_URL/api/browser/errors" \
+    -X POST \
+    -H "Content-Type: application/json" \
+    -H "X-Monlight-Key: $DSN_KEY" \
+    -d '{"type":"RateTest","message":"test","stack":"test"}')
+
+  if [ "$HTTP_CODE_RL" = "429" ]; then
+    RATE_LIMITED=true
+    pass "Rate limited at request $i (got 429)"
+    break
+  fi
+done
+
+if ! $RATE_LIMITED; then
+  fail "No rate limiting after 301 requests (expected 429)"
+fi
+
+section "Graceful shutdown"
 section "Graceful shutdown"
 
 check_graceful_shutdown() {
@@ -361,6 +606,7 @@ check_graceful_shutdown() {
   docker kill "$container" > /dev/null 2>&1 || true
 }
 
+check_graceful_shutdown "Browser Relay" "e2e_browser_relay"
 check_graceful_shutdown "Error Tracker" "e2e_error_tracker"
 check_graceful_shutdown "Log Viewer" "e2e_log_viewer"
 check_graceful_shutdown "Metrics Collector" "e2e_metrics_collector"

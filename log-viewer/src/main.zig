@@ -45,7 +45,7 @@ pub fn main() !void {
     });
 
     // Initialize database (opens connection + runs migrations)
-    var db = database.init(cfg.db_path_z) catch |err| {
+    var db = database.init(cfg.dbPathZ()) catch |err| {
         log.err("Failed to initialize database: {}", .{err});
         std.process.exit(1);
     };
@@ -57,7 +57,7 @@ pub fn main() !void {
     // Start ingestion background thread
     var ingestion_stop = std.atomic.Value(bool).init(false);
     const ingestion_thread = std.Thread.spawn(.{}, ingestion.ingestionThread, .{
-        cfg.db_path_z,
+        cfg.dbPathZ(),
         cfg.log_sources,
         cfg.containers,
         cfg.poll_interval,
@@ -96,7 +96,7 @@ pub fn main() !void {
             log.err("Failed to accept connection: {}", .{err});
             continue;
         };
-        handleConnection(conn, cfg.api_key, &limiter, &db, cfg.db_path_z) catch |err| {
+        handleConnection(conn, cfg.api_key, &limiter, &db, cfg.dbPathZ()) catch |err| {
             log.err("Failed to handle connection: {}", .{err});
         };
     }

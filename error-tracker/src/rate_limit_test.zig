@@ -28,7 +28,6 @@ fn makeTestConfig() app_config.Config {
     const path = ":memory:";
     @memcpy(cfg._db_path_buf[0..path.len], path);
     cfg._db_path_buf[path.len] = 0;
-    cfg.db_path_z = cfg._db_path_buf[0..path.len :0];
     return cfg;
 }
 

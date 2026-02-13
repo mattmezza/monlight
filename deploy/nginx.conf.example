@@ -1,0 +1,61 @@
+# Monlight Nginx Reverse Proxy Configuration
+#
+# This is an example nginx snippet for proxying to Monlight services.
+# Add these location blocks to your existing nginx server block.
+#
+# All monitoring endpoints require basic auth EXCEPT browser-relay,
+# which must be publicly accessible for the browser JS SDK to reach it.
+#
+# Service ports:
+#   error-tracker:     5010
+#   log-viewer:        5011
+#   metrics-collector: 5012
+#   browser-relay:     5013
+
+# --- Error Tracker (protected) ---
+location /error-tracker/ {
+    auth_basic "Monlight";
+    auth_basic_user_file /etc/nginx/.htpasswd;
+
+    proxy_pass http://127.0.0.1:5010/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+# --- Log Viewer (protected) ---
+location /log-viewer/ {
+    auth_basic "Monlight";
+    auth_basic_user_file /etc/nginx/.htpasswd;
+
+    proxy_pass http://127.0.0.1:5011/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+# --- Metrics Collector (protected) ---
+location /metrics-collector/ {
+    auth_basic "Monlight";
+    auth_basic_user_file /etc/nginx/.htpasswd;
+
+    proxy_pass http://127.0.0.1:5012/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+# --- Browser Relay (PUBLIC - no basic auth) ---
+# This endpoint must be publicly accessible for the browser JS SDK.
+# Authentication is handled by DSN keys, not basic auth.
+# TLS termination happens at nginx; the relay listens on plain HTTP.
+location /browser-relay/ {
+    proxy_pass http://127.0.0.1:5013/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}

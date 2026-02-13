@@ -22,11 +22,15 @@ pub const Config = struct {
     /// Aggregation interval in seconds (default: 60).
     aggregation_interval: i64,
 
-    /// Null-terminated copy of database_path for SQLite C API.
-    db_path_z: [*:0]const u8,
-
-    // Internal storage for the null-terminated path
+    // Internal storage for the null-terminated database path
     _db_path_buf: [512]u8,
+
+    /// Returns a null-terminated pointer to the database path.
+    /// Must be called on a stable (non-temporary) Config instance,
+    /// since the returned pointer borrows from `_db_path_buf`.
+    pub fn dbPathZ(self: *const Config) [*:0]const u8 {
+        return self._db_path_buf[0..self.database_path.len :0];
+    }
 };
 
 /// Load metrics collector configuration from environment variables.
@@ -61,7 +65,6 @@ pub fn load() config_mod.ConfigError!Config {
         .retention_minute = retention_minute,
         .retention_hourly = retention_hourly,
         .aggregation_interval = aggregation_interval,
-        .db_path_z = db_path_buf[0..database_path.len :0],
         ._db_path_buf = db_path_buf,
     };
 }

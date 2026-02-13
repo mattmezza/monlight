@@ -1,0 +1,40 @@
+.git/
+.github/
+
+# Zig build artifacts
+zig-out/
+zig-cache/
+.zig-cache/
+*/.zig-cache/
+*/zig-out/
+
+# SQLite database files
+*.db
+*.db-wal
+*.db-shm
+
+# Environment / secrets
+secrets.env
+.env
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Node.js
+node_modules/
+
+# OS / editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.tmux-session
+.ruff_cache/

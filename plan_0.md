@@ -1,0 +1,578 @@
+# Monlight — Implementation Plan
+
+- ~~Repository setup~~
+  - ~~Initialize monorepo structure~~
+    - ~~Create top-level directories: `error-tracker/`, `log-viewer/`, `metrics-collector/`, `clients/python/`, `deploy/`~~
+      - ~~All directories exist and contain placeholder files or initial build configs~~
+    - ~~Create `.gitignore` with Zig build artifacts (`zig-out/`, `zig-cache/`, `.zig-cache/`), SQLite files (`*.db`), env files (`secrets.env`), and Python artifacts (`__pycache__/`, `*.egg-info/`, `dist/`, `build/`)~~
+      - ~~`.gitignore` covers all relevant patterns and is committed~~
+  - ~~Set up shared deployment config~~
+    - ~~Create `deploy/docker-compose.monitoring.yml` with all three services defined (error-tracker, log-viewer, metrics-collector)~~
+      - ~~Each service has correct port mapping (5010:8000, 5011:8000, 5012:8000)~~
+      - ~~Each service has correct volume mounts for SQLite persistence~~
+      - ~~Services use `flowrent_network` external network~~
+      - ~~Health checks configured for each service~~
+      - ~~`env_file` references `secrets.env` where needed~~
+    - ~~Create `deploy/secrets.env.example` with placeholder values for all required env vars~~
+      - ~~Contains `ERROR_TRACKER_API_KEY`, `LOG_VIEWER_API_KEY`, `METRICS_COLLECTOR_API_KEY`, `POSTMARK_API_TOKEN`, `POSTMARK_FROM_EMAIL`, `ALERT_EMAILS`~~
+
+- Error Tracker service (`error-tracker/`)
+  - ~~Bootstrap Zig project~~
+    - ~~Create `build.zig` and `build.zig.zon` with SQLite C library dependency~~
+      - ~~`zig build` succeeds and produces a binary~~
+    - ~~Create `Dockerfile` (multi-stage: Alpine + Zig build → Alpine runtime with sqlite-libs)~~
+      - ~~`docker build` produces a working image under 20MB~~
+    - ~~Create `src/main.zig` with HTTP server skeleton listening on port 8000~~
+      - ~~Server starts and responds to requests~~
+   - ~~SQLite database layer~~
+    - ~~Implement SQLite initialization using shared SQLite module~~
+      - ~~Database file is created at configurable `DATABASE_PATH`~~
+      - ~~WAL mode, busy timeout, and pragmas applied automatically by shared module~~
+    - ~~Create schema migrations:~~
+      - ~~Migration 1: `errors` table with fields (id, fingerprint, project, environment, exception_type, message, traceback, count, first_seen, last_seen, resolved, resolved_at)~~
+        - ~~Table is created on first startup~~
+        - ~~All columns have correct types and defaults~~
+      - ~~Migration 2: `error_occurrences` table with fields (id, error_id FK, timestamp, request_url, request_method, request_headers, user_id, extra, traceback)~~
+        - ~~Table is created on first startup~~
+        - ~~Foreign key references errors.id~~
+      - ~~Migration 3: All indexes: `idx_fingerprint_resolved`, `idx_project_env`, `idx_last_seen`, `idx_resolved`, `idx_occurrence_error_id`~~
+        - ~~Indexes are created on startup~~
+        - ~~Query planner uses indexes (verified with EXPLAIN QUERY PLAN)~~
+  - ~~Configuration module~~
+    - ~~Parse environment variables: `DATABASE_PATH`, `API_KEY`, `POSTMARK_API_TOKEN`, `POSTMARK_FROM_EMAIL`, `ALERT_EMAILS`, `RETENTION_DAYS`, `BASE_URL`, `LOG_LEVEL`~~
+      - ~~All variables are read from env~~
+      - ~~Missing required variables (`API_KEY`) cause a clear startup error~~
+      - ~~Defaults are applied for optional variables~~
+  - ~~API key authentication~~
+    - ~~Use shared auth middleware configured with `API_KEY`~~
+      - ~~Requests without `X-API-Key` header return 401 with `{"detail": "Invalid API key"}`~~
+      - ~~Requests with wrong key return 401~~
+      - ~~Requests with correct key pass through to handler~~
+      - ~~`/health` endpoint is excluded from auth~~
+  - ~~Request limits~~
+    - ~~Use shared rate limiting middleware (100 requests/minute) and body size enforcement (256KB max)~~
+      - ~~Oversized requests return 413~~
+      - ~~Rate-limited requests return 429~~
+   - ~~Fingerprinting algorithm~~
+    - ~~Implement fingerprint generation: extract exception type + last app code location from traceback, concatenate with project, MD5 hash~~
+      - ~~Given the same project, exception_type, and traceback, the same fingerprint is produced~~
+      - ~~Different stack trace locations produce different fingerprints~~
+      - ~~Output is a 32-character hex string~~
+  - ~~Error ingestion endpoint (`POST /api/errors`)~~
+    - ~~Parse and validate JSON request body (project required, exception_type required, message required, traceback required; optional fields: environment, request_url, request_method, request_headers, user_id, extra)~~
+      - ~~Invalid JSON returns 400~~
+      - ~~Missing required fields return 400 with descriptive error~~
+      - ~~Field length limits are enforced (project max 100, exception_type max 200)~~
+    - ~~Compute fingerprint and check for existing unresolved error with same fingerprint~~
+      - ~~Existing unresolved error: increment count, update last_seen, return 200 with `{"status": "incremented", "id": ..., "count": ...}`~~
+      - ~~Existing resolved error with same fingerprint: reopen it (set resolved=false, increment count, update last_seen), return 201~~
+      - ~~New fingerprint: insert new error row, return 201 with `{"status": "created", "id": ..., "fingerprint": ...}`~~
+    - ~~Create an `error_occurrences` record for every ingestion (new or existing error)~~
+      - ~~Occurrence stores the per-request context (request_url, request_method, request_headers, user_id, extra, traceback)~~
+      - ~~If the error already has 5 occurrences, delete the oldest before inserting the new one~~
+    - ~~Trigger email alert on new error fingerprint (first occurrence only)~~
+      - ~~Alert is sent asynchronously (does not block response)~~
+      - ~~If Postmark is not configured, alert is skipped silently~~
+  - ~~Error listing endpoint (`GET /api/errors`)~~
+    - ~~Support query parameters: `project`, `environment`, `resolved` (default false), `limit` (default 50, max 200), `offset` (default 0)~~
+      - ~~Filtering by project returns only matching errors~~
+      - ~~Filtering by environment returns only matching errors~~
+      - ~~Pagination works correctly (total count is accurate, offset skips correct number)~~
+      - ~~Response shape matches spec: `{"errors": [...], "total": N, "limit": N, "offset": N}`~~
+  - ~~Error detail endpoint (`GET /api/errors/{id}`)~~
+    - ~~Return full error details including traceback and recent occurrences~~
+      - ~~Existing error returns 200 with all group fields plus `occurrences` array (last 5 occurrences with request context)~~
+      - ~~Non-existent ID returns 404~~
+  - ~~Error resolve endpoint (`POST /api/errors/{id}/resolve`)~~
+    - ~~Mark error as resolved, set resolved_at timestamp~~
+      - ~~Returns `{"status": "resolved", "id": ...}`~~
+      - ~~Already-resolved error is idempotent (returns 200)~~
+      - ~~Non-existent ID returns 404~~
+  - ~~Projects listing endpoint (`GET /api/projects`)~~
+    - ~~Return distinct project names from errors table~~
+      - ~~Response shape: `{"projects": ["flowrent", ...]}`~~
+  - ~~Health check endpoint (`GET /health`)~~
+    - ~~Return `{"status": "ok"}` with 200, no auth required~~
+      - ~~Endpoint responds without API key~~
+  - ~~Email alerting~~
+    - ~~Implement Postmark API HTTP client for sending email alerts~~
+      - ~~Sends POST to `https://api.postmarkapp.com/email` with correct headers~~
+      - ~~Uses configured `POSTMARK_API_TOKEN` and `POSTMARK_FROM_EMAIL`~~
+    - ~~Format alert email with subject `[{project}] {exception_type}: {message_truncated_50_chars}` and body per spec template~~
+      - ~~Subject is correctly formatted and truncated~~
+      - ~~Body contains all fields: project, environment, exception_type, message, request info, traceback, dashboard link~~
+    - ~~Send to all comma-separated `ALERT_EMAILS` recipients~~
+      - ~~Multiple recipients each receive the alert~~
+    - ~~Handle Postmark API failures gracefully (log warning, don't crash)~~
+      - ~~Network error or 4xx/5xx from Postmark is logged but does not affect error ingestion~~
+  - ~~Data retention cleanup~~
+    - ~~Implement background job that deletes resolved errors older than `RETENTION_DAYS`~~
+      - ~~Job runs periodically (e.g., daily)~~
+      - ~~Only resolved errors are deleted~~
+      - ~~Associated `error_occurrences` records are cascade-deleted~~
+      - ~~Unresolved errors are never deleted regardless of age~~
+  - ~~Web UI~~
+    - ~~Create HTML page listing unresolved errors with columns: exception_type, message (truncated), project, environment, count, first_seen, last_seen~~
+      - ~~Page loads and displays error list~~
+      - ~~Errors are sorted by last_seen descending~~
+    - ~~Add filter controls: project dropdown, environment dropdown, resolved toggle~~
+      - ~~Filters update the displayed list~~
+    - ~~Add error detail view: click an error to see full traceback, and a list of recent occurrences with their individual request context~~
+      - ~~Full traceback is displayed with proper formatting (monospace, preserved newlines)~~
+      - ~~Occurrences are listed with timestamp, request_url, request_method, user_id~~
+    - ~~Add "Mark as Resolved" button on error detail view~~
+      - ~~Clicking the button marks the error as resolved and updates the UI~~
+    - ~~Style all pages with embedded Tailwind CSS~~
+      - ~~CSS is embedded in the binary at compile time~~
+      - ~~Pages render correctly with Tailwind utility classes~~
+      - ~~Log levels / error states are color-coded~~
+  - ~~Tests~~
+    - ~~Write tests for fingerprinting algorithm (deterministic output, different inputs produce different fingerprints)~~
+      - ~~Tests pass with `zig build test`~~
+    - ~~Write tests for error ingestion logic (create, increment, reopen)~~
+      - ~~Tests cover all three code paths~~
+      - ~~Tests verify occurrence records are created on each ingestion~~
+      - ~~Tests verify oldest occurrence is deleted when limit (5) is exceeded~~
+    - ~~Write tests for API key validation (accept, reject, skip on /health)~~
+      - ~~Tests cover auth middleware behavior~~
+    - ~~Write tests for rate limiting (accept under limit, reject over limit, sliding window reset)~~
+      - ~~Tests verify 429 response when rate limit exceeded~~
+    - ~~Write tests for retention cleanup (deletes old resolved, keeps unresolved, cascades occurrences)~~
+      - ~~Tests verify correct deletion behavior~~
+
+- Log Viewer service (`log-viewer/`)
+  - ~~Bootstrap Zig project~~
+    - ~~Create `build.zig` and `build.zig.zon` with SQLite C library dependency~~
+      - ~~`zig build` succeeds and produces a binary~~
+    - ~~Create `Dockerfile` (multi-stage: Alpine + Zig build → Alpine runtime with sqlite-libs)~~
+      - ~~`docker build` produces a working image under 20MB~~
+    - ~~Create `src/main.zig` with HTTP server skeleton listening on port 8000~~
+      - ~~Server starts and responds to requests~~
+  - ~~SQLite database layer~~
+    - ~~Implement SQLite initialization using shared SQLite module~~
+      - ~~Database file is created at configurable `DATABASE_PATH`~~
+      - ~~WAL mode, busy timeout, and pragmas applied automatically by shared module~~
+    - ~~Create schema migrations:~~
+      - ~~Migration 1: `log_entries` table (id, timestamp, container, stream, level, message, raw)~~
+        - ~~Table is created on first startup~~
+      - ~~Migration 2: FTS5 virtual table on message field for full-text search~~
+        - ~~FTS5 table is created and linked to log_entries~~
+        - ~~Full-text queries return matching results~~
+      - ~~Migration 3: `cursors` table (id, container_id, file_path, position, inode, updated_at) for tracking read positions~~
+        - ~~Table is created on first startup~~
+      - ~~Migration 4: Indexes: `idx_timestamp`, `idx_container`, `idx_level`, `idx_container_timestamp`~~
+        - ~~Indexes exist and are used by query planner~~
+  - ~~Configuration module~~
+    - ~~Parse environment variables: `DATABASE_PATH`, `API_KEY`, `LOG_SOURCES`, `CONTAINERS`, `MAX_ENTRIES`, `POLL_INTERVAL`, `TAIL_BUFFER`, `LOG_LEVEL`~~
+      - ~~All variables are read from env~~
+      - ~~Missing required variables (`CONTAINERS`, `API_KEY`) cause a clear startup error~~
+      - ~~Defaults are applied for optional variables~~
+  - ~~API key authentication~~
+    - ~~Use shared auth middleware configured with `API_KEY`~~
+      - ~~All API endpoints require valid `X-API-Key` header~~
+      - ~~`/health` endpoint is excluded from auth~~
+  - ~~Request limits~~
+    - ~~Use shared rate limiting middleware (60 requests/minute)~~
+      - ~~Rate-limited requests return 429~~
+  - ~~Log level extraction~~
+    - ~~Implement log level parser that handles multiple formats:~~
+      - ~~`[LEVEL]` pattern (e.g., `[INFO]`, `[ERROR]`)~~
+      - ~~`level=LEVEL` pattern (e.g., `level=info`)~~
+      - ~~`LEVEL:` at start pattern (e.g., `INFO: message`)~~
+      - ~~Uvicorn format (e.g., `INFO:     127.0.0.1...`)~~
+      - ~~Default to INFO for unrecognized formats~~
+      - ~~Default to ERROR for stderr stream when no level detected~~
+    - ~~Handle both plain text log lines and JSON-formatted log lines (`{"ts":..., "level":..., "msg":...}`)~~
+      - ~~JSON logs have their level field extracted directly~~
+      - ~~Plain text logs use pattern matching~~
+  - ~~Docker log file ingestion~~
+    - ~~Implement Docker JSON log file reader: parse `{"log": "...", "stream": "stdout|stderr", "time": "ISO8601"}` format~~
+      - ~~Correctly parses Docker's JSON log format~~
+      - ~~Extracts timestamp, stream, and message from each line~~
+    - ~~Implement multiline log reassembly~~
+      - ~~Buffer incoming lines per container~~
+      - ~~Detect new log entry start by matching log level patterns or timestamp patterns at line start~~
+      - ~~Continuation lines (e.g., traceback frames) are appended to the current buffered entry~~
+      - ~~Flush buffered entry when a new start pattern is detected or when entry is older than 2 seconds~~
+      - ~~Python tracebacks spanning multiple Docker JSON lines become a single log entry~~
+    - ~~Implement file cursor tracking: save byte offset and inode per log file in cursors table~~
+      - ~~After restart, ingestion resumes from last saved position (no duplicates)~~
+    - ~~Detect log file rotation by comparing inode numbers~~
+      - ~~When inode changes, reading starts from beginning of new file~~
+    - ~~Implement polling loop that runs every `POLL_INTERVAL` seconds on a background thread~~
+      - ~~New log lines are picked up within POLL_INTERVAL seconds of being written~~
+    - ~~Scan `LOG_SOURCES` directory and filter to containers matching `CONTAINERS` config~~
+      - ~~Only configured containers are watched~~
+      - ~~Unknown containers are ignored~~
+  - ~~Ring buffer cleanup~~
+    - ~~Implement cleanup that deletes oldest entries when total exceeds `MAX_ENTRIES`~~
+      - ~~Log count stays at or below MAX_ENTRIES + buffer~~
+      - ~~Oldest logs are deleted first~~
+      - ~~FTS index remains consistent after deletion~~
+  - ~~Log query endpoint (`GET /api/logs`)~~
+    - ~~Support query parameters: `container`, `level`, `search` (full-text), `since`, `until`, `limit` (default 100, max 500), `offset`~~
+      - ~~Full-text search returns relevant results ranked appropriately~~
+      - ~~Time range filtering works with ISO8601 timestamps~~
+      - ~~Combined filters (container + level + search + time range) work together~~
+      - ~~Pagination is correct~~
+      - ~~Response shape: `{"logs": [...], "total": N, "limit": N, "offset": N}`~~
+  - ~~Live tail endpoint (`GET /api/logs/tail`)~~
+    - ~~Implement Server-Sent Events (SSE) stream~~
+      - ~~Connection stays open and streams new log entries as they are ingested~~
+    - ~~Support optional `container` and `level` query parameter filters~~
+      - ~~Only matching logs are streamed~~
+    - ~~Send `event: log` with JSON data for each new entry~~
+      - ~~Events conform to SSE spec and can be consumed by EventSource API~~
+    - ~~Implement SSE lifecycle management~~
+      - ~~Maximum connection duration: 30 minutes (client must reconnect)~~
+      - ~~Heartbeat: send `event: heartbeat` every 15 seconds to detect dead connections~~
+      - ~~Maximum concurrent SSE connections: 5 (return 503 when exceeded)~~
+      - ~~Clean up connection resources immediately on client disconnect~~
+      - ~~Drop log events if client cannot keep up (don't buffer unboundedly)~~
+  - ~~Containers listing endpoint (`GET /api/containers`)~~
+    - ~~Return known containers with log counts~~
+      - ~~Response shape: `{"containers": [{"name": "...", "log_count": N}, ...]}`~~
+  - ~~Stats endpoint (`GET /api/stats`)~~
+    - ~~Return total_logs, oldest_log, newest_log, by_level counts, by_container counts~~
+      - ~~All fields are populated and accurate~~
+  - ~~Health check endpoint (`GET /health`)~~
+    - ~~Return `{"status": "ok", "logs_indexed": N, "last_ingest": "..."}` with 200, no auth required~~
+      - ~~Returns current log count and last ingestion timestamp~~
+  - ~~Web UI~~
+    - ~~Create HTML page displaying log entries in a scrollable list~~
+      - ~~Logs are displayed with timestamp, container, level, message~~
+      - ~~Log entries are color-coded by level (DEBUG=gray, INFO=default, WARNING=yellow, ERROR=red)~~
+    - ~~Add search box for full-text search~~
+      - ~~Search results update the list~~
+    - ~~Add filter dropdowns for container and level~~
+      - ~~Filters update the list~~
+    - ~~Add time range selector (last 1h, 24h, 7d, custom)~~
+      - ~~Time range filtering works~~
+    - ~~Add live tail mode (auto-refresh using SSE)~~
+      - ~~New logs appear in real-time without page refresh~~
+    - ~~Add click-to-expand for full log entry (including raw JSON)~~
+      - ~~Clicking a log entry shows the full raw content~~
+    - ~~Style all pages with embedded Tailwind CSS~~
+      - ~~CSS is embedded in the binary at compile time~~
+      - ~~Pages render correctly with Tailwind utility classes~~
+  - ~~Tests~~
+    - ~~Write tests for Docker JSON log file parsing~~
+      - ~~Tests cover valid JSON lines, malformed lines, multiline logs~~
+    - ~~Write tests for multiline log reassembly~~
+      - ~~Python traceback spanning multiple Docker JSON lines produces a single log entry~~
+      - ~~Non-continuation lines correctly start new entries~~
+      - ~~Timeout flush works for partial entries~~
+    - ~~Write tests for log level extraction (all four patterns + defaults)~~
+      - ~~Tests cover each pattern and fallback behavior~~
+    - ~~Write tests for FTS5 search queries~~
+      - ~~Tests verify search returns correct results~~
+    - ~~Write tests for ring buffer cleanup (entries are deleted, count stays within limit)~~
+      - ~~Tests verify oldest entries are removed~~
+    - ~~Write tests for SSE endpoint~~
+      - ~~Tests verify SSE event format, heartbeat delivery, and max connection enforcement~~
+
+- ~~Metrics Collector service (`metrics-collector/`)~~
+  - ~~Bootstrap Zig project~~
+    - ~~Create `build.zig` and `build.zig.zon` with SQLite C library dependency~~
+      - ~~`zig build` succeeds and produces a binary~~
+    - ~~Create `Dockerfile` (multi-stage: Alpine + Zig build → Alpine runtime with sqlite-libs)~~
+      - ~~`docker build` produces a working image under 20MB~~
+    - ~~Create `src/main.zig` with HTTP server skeleton listening on port 8000~~
+      - ~~Server starts and responds to requests~~
+  - ~~SQLite database layer~~
+    - ~~Implement SQLite initialization using shared SQLite module~~
+      - ~~Database file is created at configurable `DATABASE_PATH`~~
+      - ~~WAL mode, busy timeout, and pragmas applied automatically by shared module~~
+    - ~~Create schema migrations:~~
+      - ~~Migration 1: `metrics_raw` table (id, timestamp, name, labels, value, type)~~
+        - ~~Table is created on first startup~~
+      - ~~Migration 2: `metrics_aggregated` table (id, bucket, resolution, name, labels, count, sum, min, max, avg, p50, p95, p99)~~
+        - ~~Table is created on first startup~~
+      - ~~Migration 3: All indexes: `idx_raw_timestamp`, `idx_raw_name`, `idx_raw_name_timestamp`, `idx_agg_bucket`, `idx_agg_name_resolution`, `idx_agg_name_resolution_bucket`~~
+        - ~~Indexes exist and are used by query planner~~
+  - ~~Configuration module~~
+    - ~~Parse environment variables: `DATABASE_PATH`, `API_KEY`, `RETENTION_RAW`, `RETENTION_MINUTE`, `RETENTION_HOURLY`, `AGGREGATION_INTERVAL`, `LOG_LEVEL`~~
+      - ~~All variables are read from env~~
+      - ~~Missing required variables (`API_KEY`) cause a clear startup error~~
+      - ~~Defaults are applied for optional variables~~
+  - ~~API key authentication~~
+    - ~~Use shared auth middleware configured with `API_KEY`~~
+      - ~~Same acceptance criteria as Error Tracker auth~~
+  - ~~Request limits~~
+    - ~~Use shared rate limiting middleware (200 requests/minute) and body size enforcement (512KB max)~~
+      - ~~Oversized requests return 413~~
+      - ~~Rate-limited requests return 429~~
+  - ~~Metrics ingestion endpoint (`POST /api/metrics`)~~
+    - ~~Parse and validate JSON batch request body: array of metrics, each with name (required), type (required: counter/histogram/gauge), value (required), labels (optional object), timestamp (optional, defaults to now)~~
+      - ~~Invalid JSON returns 400~~
+      - ~~Missing required fields return 400~~
+      - ~~Valid batch returns 202 with `{"status": "accepted", "count": N}`~~
+    - ~~Buffer incoming metrics and batch-insert into `metrics_raw` table for efficiency~~
+      - ~~Metrics are persisted to SQLite~~
+      - ~~Batch insert is used (not one INSERT per metric)~~
+  - ~~Aggregation engine~~
+    - ~~Implement minute-level aggregation: every minute, query raw metrics from previous minute, group by (name, labels), compute count/sum/min/max/avg, compute p50/p95/p99 for histograms~~
+      - ~~Minute aggregates are correctly computed~~
+      - ~~Percentiles are calculated by sorting values and picking positional indices~~
+      - ~~Non-histogram metrics have NULL percentile fields~~
+    - ~~Implement hour-level aggregation: every hour, merge minute aggregates into hourly buckets~~
+      - ~~Hourly count = sum of minute counts~~
+      - ~~Hourly sum = sum of minute sums~~
+      - ~~Hourly min = min of minute mins~~
+      - ~~Hourly max = max of minute maxes~~
+      - ~~Hourly avg = total sum / total count~~
+      - ~~Hourly percentiles are approximated from minute percentiles~~
+    - ~~Run aggregation loop on a timer (`AGGREGATION_INTERVAL` seconds) on a background thread~~
+      - ~~Aggregation runs automatically in the background~~
+      - ~~Uses its own SQLite connection (separate from HTTP thread)~~
+  - ~~Data retention cleanup~~
+    - ~~Delete raw metrics older than `RETENTION_RAW` (default 1 hour)~~
+      - ~~Raw metrics older than 1 hour are deleted~~
+    - ~~Delete minute aggregates older than `RETENTION_MINUTE` (default 24 hours)~~
+      - ~~Minute aggregates older than 24 hours are deleted~~
+    - ~~Delete hourly aggregates older than `RETENTION_HOURLY` (default 30 days)~~
+      - ~~Hourly aggregates older than 30 days are deleted~~
+    - ~~Run cleanup daily~~
+      - ~~Cleanup executes automatically~~
+  - ~~Metrics query endpoint (`GET /api/metrics`)~~
+    - ~~Support query parameters: `name` (required), `period` (1h/24h/7d/30d, default 24h), `resolution` (minute/hour/auto, default auto), `labels` (format: `key:value,key2:value2`)~~
+      - ~~Auto resolution selects minute for <=24h, hour for >24h~~
+      - ~~Label filtering works correctly~~
+      - ~~Response contains time-bucketed data with count, avg, p50, p95, p99~~
+  - ~~Metrics names endpoint (`GET /api/metrics/names`)~~
+    - ~~Return distinct metric names with their types~~
+      - ~~Response shape: `{"metrics": [{"name": "...", "type": "..."}, ...]}`~~
+  - ~~Dashboard data endpoint (`GET /api/dashboard`)~~
+    - ~~Support query parameter: `period` (1h/24h/7d, default 24h)~~
+    - ~~Return pre-computed dashboard data: summary (total_requests, error_rate, avg_latency_ms, p95_latency_ms), request_rate timeseries, latency timeseries, error_rate timeseries, top_endpoints table~~
+      - ~~All fields are populated from aggregated data~~
+      - ~~Top endpoints are sorted by request count descending~~
+  - ~~Health check endpoint (`GET /health`)~~
+    - ~~Return `{"status": "ok", "metrics_received_24h": N, "last_aggregation": "..."}` with 200, no auth required~~
+      - ~~Returns count of metrics received in last 24h and last aggregation timestamp~~
+  - ~~Web UI~~
+    - ~~Create dashboard page with summary stats: total requests, error rate, avg latency, p95 latency~~
+      - ~~Summary numbers are displayed prominently~~
+    - ~~Add request rate chart (requests per minute over time)~~
+      - ~~Chart renders with time on x-axis and request count on y-axis~~
+    - ~~Add response time chart (p50, p95, p99 lines)~~
+      - ~~Chart renders with three percentile lines~~
+    - ~~Add error rate chart (4xx and 5xx rates over time)~~
+      - ~~Chart renders showing error rates~~
+    - ~~Add top endpoints table: endpoint, requests, avg_ms, error_rate~~
+      - ~~Table is sorted by request count~~
+    - ~~Add time range selector (1h, 24h, 7d)~~
+      - ~~Selecting a range reloads the dashboard data~~
+    - ~~Style all pages with embedded Tailwind CSS~~
+      - ~~CSS is embedded in the binary at compile time~~
+      - ~~Pages render correctly with Tailwind utility classes~~
+    - ~~Include uPlot charting library (embedded via `@embedFile` from shared infrastructure) for rendering charts~~
+      - ~~Charts render without external CDN dependencies~~
+  - ~~Tests~~
+    - ~~Write tests for metrics ingestion (batch insert, validation)~~
+      - ~~Tests cover valid batches, invalid data, edge cases~~
+    - ~~Write tests for minute-level aggregation (count, sum, min, max, avg, percentiles)~~
+      - ~~Tests verify correct computation for each aggregate~~
+    - ~~Write tests for hour-level aggregation (merging minute aggregates)~~
+      - ~~Tests verify correct merging logic~~
+    - ~~Write tests for retention cleanup~~
+      - ~~Tests verify correct deletion at each retention tier~~
+    - ~~Write tests for auto-resolution selection~~
+      - ~~Tests verify minute is chosen for <=24h, hour for >24h~~
+    - ~~Write tests for label filtering via json_extract~~
+      - ~~Tests verify correct filtering by label key:value pairs~~
+
+- ~~Shared infrastructure (built before individual services)~~
+  - ~~Shared Zig modules (`shared/`)~~
+    - ~~Decide on shared vs. independent approach for common code~~
+      - ~~Create a `shared/` directory with reusable Zig modules referenced by each service's `build.zig`~~
+      - ~~Modules are importable via `build.zig` dependency path~~
+    - ~~HTTP server and router module (`shared/http.zig`)~~
+      - ~~Implement a thin router on top of `std.http.Server` that supports:~~
+        - ~~Path registration with method dispatch (GET, POST)~~
+        - ~~Path parameter extraction (e.g., `/api/errors/{id}` → extracts `id`)~~
+        - ~~Middleware chain (auth, rate limiting, body size enforcement)~~
+        - ~~Static file serving (for embedded CSS/JS assets)~~
+      - ~~Router matches registered routes and dispatches to handler functions~~
+      - ~~Unmatched routes return 404 with `{"detail": "Not found"}`~~
+      - ~~Method not allowed returns 405~~
+    - ~~JSON module (`shared/json.zig`)~~
+      - ~~Implement JSON parsing and serialization helpers on top of `std.json`~~
+        - ~~Parse JSON request bodies into Zig structs with optional field support~~
+        - ~~Serialize Zig structs/values to JSON response bodies~~
+        - ~~Handle malformed JSON gracefully (return 400, don't crash)~~
+        - ~~Support nested objects, arrays, nullable fields~~
+      - ~~Provide helper for JSON error responses: `json_error(status, detail)`~~
+    - ~~HTML templating module (`shared/html.zig`)~~
+      - ~~Implement a simple runtime HTML template engine (comptime generation is impractical for dynamic content)~~
+        - ~~Templates are HTML strings with `{{variable}}` placeholders~~
+        - ~~Template strings are embedded in the binary via `@embedFile`~~
+        - ~~Support iteration (`{{#each items}}...{{/each}}`) and conditionals (`{{#if condition}}...{{/if}}`)~~
+        - ~~HTML-escape all variable output by default to prevent XSS~~
+      - ~~Template rendering produces a complete HTML string for the HTTP response~~
+    - ~~SQLite module (`shared/sqlite.zig`)~~
+      - ~~Implement SQLite connection wrapper via `@cImport` of sqlite3.h~~
+        - ~~Open database at configurable path~~
+        - ~~Execute `PRAGMA journal_mode=WAL;`, `PRAGMA busy_timeout=5000;`, `PRAGMA synchronous=NORMAL;`, `PRAGMA foreign_keys=ON;` on connection open~~
+        - ~~Provide prepared statement helpers with parameter binding (prevents SQL injection)~~
+        - ~~Provide query helpers that return rows as iterators~~
+        - ~~Handle SQLite errors with descriptive error messages (log and/or return to caller)~~
+      - ~~Implement schema migration runner~~
+        - ~~Create `_meta` table on first run: `CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT);`~~
+        - ~~Read `schema_version` from `_meta` (default "0")~~
+        - ~~Accept an ordered list of migration SQL strings~~
+        - ~~Execute migrations with version > current inside a transaction~~
+        - ~~Update `schema_version` after successful migration~~
+        - ~~Log each migration applied at INFO level~~
+        - ~~If migration fails, log error and exit with non-zero code~~
+    - ~~Configuration module (`shared/config.zig`)~~
+      - ~~Parse environment variables with type coercion (string, int, bool)~~
+        - ~~Missing required variables cause a clear startup error with variable name~~
+        - ~~Optional variables use provided defaults~~
+        - ~~`LOG_LEVEL` is parsed and applied globally (default: INFO)~~
+    - ~~Auth middleware (`shared/auth.zig`)~~
+      - ~~Validate `X-API-Key` header against configured `API_KEY`~~
+        - ~~Requests without header or with wrong key return 401 `{"detail": "Invalid API key"}`~~
+        - ~~Requests with correct key pass through~~
+        - ~~Configurable path exclusions (e.g., `/health`)~~
+    - ~~Rate limiting middleware (`shared/rate_limit.zig`)~~
+      - ~~Implement in-memory sliding window counter per API key~~
+        - ~~Configurable max requests per minute~~
+        - ~~Returns 429 `{"detail": "Rate limit exceeded", "retry_after": N}` when limit exceeded~~
+        - ~~Counters reset on service restart~~
+    - ~~Request body size enforcement~~
+      - ~~Reject request bodies exceeding configured max size before reading into memory~~
+        - ~~Returns 413 `{"detail": "Request body exceeds maximum size"}`~~
+        - ~~Configurable per-service (256KB for Error Tracker, 512KB for Metrics Collector)~~
+    - ~~Graceful shutdown handler (`shared/shutdown.zig`)~~
+      - ~~Register SIGTERM and SIGINT signal handlers~~
+        - ~~On signal: set shutdown flag, stop accepting new connections~~
+        - ~~Wait for in-flight requests (max 5 second timeout)~~
+        - ~~Call registered cleanup callbacks (stop background threads, flush writes, close SQLite)~~
+        - ~~Exit with code 0~~
+    - ~~Structured logging module (`shared/log.zig`)~~
+      - ~~Output JSON-formatted log lines to stdout~~
+        - ~~Format: `{"ts": "...", "level": "...", "service": "...", "msg": "..."}`~~
+        - ~~Support log levels: ERROR, WARN, INFO, DEBUG~~
+        - ~~Respect `LOG_LEVEL` configuration (suppress messages below threshold)~~
+        - ~~Service name is set once at startup~~
+  - ~~Tailwind CSS embedding~~
+    - ~~Set up Tailwind CSS build pipeline~~
+      - ~~Create `shared/styles/` directory with `tailwind.config.js`, `input.css`, and `package.json`~~
+      - ~~Configure `tailwind.config.js` to scan Zig template strings (HTML embedded in `.zig` files and `@embedFile` template files) for class usage~~
+      - ~~Add `npm run build:css` script that produces `dist/tailwind.min.css`~~
+      - ~~CSS output is under 50KB (minified + purged)~~
+    - ~~Integrate CSS into Zig build~~
+      - ~~Each service's `build.zig` references the built CSS file via `@embedFile`~~
+      - ~~CSS is served from each service at `/static/tailwind.css`~~
+      - ~~No external network requests needed for styling~~
+    - ~~Add CSS build step to Dockerfiles (run `npm run build:css` before `zig build`)~~
+      - ~~Dockerfile installs Node.js in the builder stage for Tailwind compilation~~
+  - ~~JavaScript charting library embedding (Metrics Collector only)~~
+    - ~~Select and vendor a lightweight charting library: **uPlot** (~35KB min+gz, no dependencies, fast canvas-based rendering)~~
+      - ~~Download uPlot release files (`uPlot.min.js`, `uPlot.min.css`) into `metrics-collector/static/`~~
+      - ~~Embed via `@embedFile` and serve at `/static/uplot.js` and `/static/uplot.css`~~
+      - ~~Charts render without external CDN dependencies~~
+      - ~~Total embedded JS+CSS under 50KB~~
+
+- Python client package (`clients/python/`)
+  - ~~Package scaffolding~~
+    - ~~Create `pyproject.toml` with package metadata, dependencies (httpx for async HTTP), and entry points~~
+      - ~~Package is installable with `pip install -e .`~~
+    - ~~Create package directory structure: `monlight/error_client.py`, `monlight/metrics_client.py`, `monlight/integrations/fastapi.py`, `monlight/__init__.py`~~
+      - ~~Package imports work: `from monlight import ErrorClient, MetricsClient`~~
+      - ~~FastAPI integration imports work: `from monlight.integrations.fastapi import MonlightMiddleware, MonlightExceptionHandler`~~
+  - ~~Error client (`monlight/error_client.py`)~~
+    - ~~Implement `ErrorClient` class with `report_error(exception, request_context=None)` method~~
+      - ~~Sends POST to `{base_url}/api/errors` with correct JSON body and `X-API-Key` header~~
+      - ~~Extracts exception_type, message, traceback from Python exception object~~
+      - ~~Optionally extracts request_url, request_method, request_headers from request context~~
+    - ~~Implement fire-and-forget behavior: use async HTTP with 5-second timeout, no retries~~
+      - ~~Connection failures are caught and logged (warning level), never raised~~
+      - ~~Caller is not blocked waiting for error reporting~~
+    - ~~Implement PII filtering: strip sensitive headers (Authorization, Cookie), allow configurable field exclusions~~
+      - ~~Authorization and Cookie headers are never sent~~
+  - ~~Metrics client (`monlight/metrics_client.py`)~~
+    - ~~Implement `MetricsClient` class with `counter(name, labels=None, value=1)`, `histogram(name, labels=None, value)`, `gauge(name, labels=None, value)` methods~~
+      - ~~Each method buffers a metric in memory~~
+    - ~~Implement in-memory buffer with periodic flush: `flush()` sends buffered metrics as batch POST to `{base_url}/api/metrics`~~
+      - ~~Flush sends all buffered metrics in a single HTTP request~~
+      - ~~Buffer is cleared after successful flush~~
+    - ~~Implement configurable flush interval with background task (threading or asyncio)~~
+      - ~~Metrics are automatically flushed every N seconds (configurable, default 10)~~
+    - ~~Implement `shutdown()` method that flushes remaining metrics~~
+      - ~~On shutdown, all buffered metrics are sent before process exits~~
+    - ~~Handle connection failures gracefully (log warning, drop metrics)~~
+      - ~~Network errors do not crash the application~~
+  - ~~FastAPI integration helpers (`monlight/integrations/fastapi.py`)~~
+    - ~~Implement `MonlightExceptionHandler` — a global exception handler for FastAPI~~
+      - ~~Catches all unhandled exceptions (excluding HTTPException and RequestValidationError)~~
+      - ~~Calls `ErrorClient.report_error()` with the request and exception~~
+      - ~~Logs the error locally and returns a 500 JSON response~~
+      - ~~Installable via `app.add_exception_handler(Exception, handler)`~~
+    - ~~Implement `MonlightMiddleware` — an ASGI middleware for request metrics~~
+      - ~~Records request start time, processes request, records end time~~
+      - ~~Emits `http_requests_total` (counter) and `http_request_duration_seconds` (histogram)~~
+      - ~~Labels: method, endpoint (normalized path template from FastAPI route), status code~~
+      - ~~Endpoint normalization: uses `request.scope["route"].path` if available (e.g., `/bookings/{id}` not `/bookings/123`)~~
+      - ~~Installable via `app.add_middleware(MonlightMiddleware, metrics_client=client)`~~
+    - ~~Provide setup helper: `setup_monlight(app, error_tracker_url, metrics_collector_url, api_key)` that wires up both~~
+      - ~~Single function call in FlowRent's `main.py` to enable all monitoring~~
+  - ~~Tests~~
+    - ~~Write unit tests for error client (payload formatting, PII filtering, timeout handling)~~
+      - ~~Tests pass with `pytest`~~
+    - ~~Write unit tests for metrics client (buffering, flush, counter/histogram/gauge)~~
+      - ~~Tests pass with `pytest`~~
+    - ~~Write integration tests that send to a mock HTTP server and verify payloads~~
+      - ~~Tests verify correct HTTP requests are made~~
+    - ~~Write tests for FastAPI exception handler (catches exceptions, skips HTTPException, calls ErrorClient)~~
+      - ~~Tests use a test FastAPI app~~
+    - ~~Write tests for FastAPI middleware (records timing, normalizes endpoints, emits correct metrics)~~
+      - ~~Tests use a test FastAPI app with parameterized routes~~
+
+- CI/CD (`.github/workflows/`)
+  - ~~Create workflow for Zig services~~
+    - ~~Trigger on push to main and pull requests~~
+      - ~~Workflow runs on PR creation and merges to main~~
+    - ~~Run `zig build test` for each service (and shared modules)~~
+      - ~~All tests pass in CI~~
+    - ~~Build Docker images for each service~~
+      - ~~Docker build succeeds in CI environment~~
+    - ~~Verify Docker image size is under 20MB for each service~~
+      - ~~CI step runs `docker image inspect --format='{{.Size}}'` and fails if size exceeds 20MB~~
+    - ~~Push images to GitHub Container Registry (ghcr.io) on main branch only~~
+      - ~~Images are tagged with commit SHA and `latest`~~
+      - ~~Images are pushed only from main, not from PRs~~
+    - ~~Cache Zig build artifacts to speed up CI~~
+      - ~~Subsequent builds are faster due to caching~~
+  - ~~Create workflow for Python client~~
+    - ~~Trigger on push to main and pull requests (when `clients/python/` changes)~~
+      - ~~Workflow runs only when Python client files change~~
+    - ~~Run `pytest` for client tests~~
+      - ~~All tests pass in CI~~
+    - ~~Optionally publish to PyPI on tagged releases~~
+      - ~~Package version matches git tag~~
+
+- ~~End-to-end validation~~
+  - ~~Create a `docker-compose.test.yml` or script that starts all three services and runs smoke tests~~
+    - ~~All three services start and respond to `/health`~~
+    - ~~Error Tracker accepts a POST to `/api/errors` and returns 201~~
+    - ~~Log Viewer starts ingesting logs (or handles empty log directory gracefully)~~
+    - ~~Metrics Collector accepts a POST to `/api/metrics` and returns 202~~
+    - ~~Web UIs are accessible and render HTML~~
+    - ~~Graceful shutdown works (send SIGTERM, verify clean exit within 10 seconds)~~
+
+- Deployment and operations (`deploy/`)
+  - ~~Create backup script (`deploy/backup.sh`)~~
+    - ~~Script uses SQLite `.backup` command to safely copy `errors.db`~~
+    - ~~Retains last 7 daily backups (deletes older ones)~~
+    - ~~Optionally uploads to S3 (commented out by default, with instructions)~~
+    - ~~Script is executable and documented~~
+  - ~~Create upgrade script or document (`deploy/upgrade.sh`)~~
+    - ~~Pulls latest code, builds images, restarts services one at a time~~
+    - ~~Verifies health after each service restart~~
+    - ~~Documents rollback procedure (re-tag previous image, restart)~~
+  - ~~Verify deployment config completeness~~
+    - ~~`docker-compose.monitoring.yml` includes `LOG_VIEWER_API_KEY` in secrets.env references~~
+    - ~~All three services have `LOG_LEVEL` environment variable documented~~
+    - ~~Memory limits are set via `deploy` section in docker-compose (30MB per service)~~
