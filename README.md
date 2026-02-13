@@ -321,47 +321,41 @@ bash deploy/smoke-test.sh
 
 ## Releasing New Versions
 
-Each component is released independently via git tags. Pushing a tag triggers the corresponding CI workflow to build, test, publish, and create a GitHub Release.
-
-### Docker images (Zig services)
+Each component is released independently. The `Makefile` automates the entire flow: bumping version files, committing, tagging, and pushing. CI then builds, publishes, and creates a GitHub Release.
 
 ```bash
-# 1. Update the version in <service>/build.zig.zon
-# 2. Commit and push to main
-# 3. Tag and push
-git tag error-tracker-v0.2.0
-git push origin error-tracker-v0.2.0
+# Show current versions of all components
+make versions
+
+# Release a single service (Docker image to GHCR)
+make release-error-tracker V=0.2.0
+make release-log-viewer V=0.2.0
+make release-metrics-collector V=0.2.0
+make release-browser-relay V=0.2.0
+
+# Release all 4 Docker services at the same version
+make release-services V=0.2.0
+
+# Release the Python client to PyPI
+make release-python V=0.2.0
+
+# Release the JS SDK to npm
+make release-js V=0.2.0
+
+# Release everything at once
+make release-all V=0.2.0
 ```
 
-This builds and pushes to GHCR:
-- `ghcr.io/mattmezza/monlight/error-tracker:0.2.0`
-- `ghcr.io/mattmezza/monlight/error-tracker:latest`
+Each target validates semver, checks for a clean working tree, updates the version in the right files, commits, tags, and pushes. CI takes over from there.
 
-Tag conventions: `error-tracker-v*`, `log-viewer-v*`, `metrics-collector-v*`, `browser-relay-v*`
-
-### Python client
-
-```bash
-# 1. Update version in clients/python/pyproject.toml AND clients/python/monlight/__init__.py
-# 2. Commit and push to main
-# 3. Tag and push
-git tag python-v0.2.0
-git push origin python-v0.2.0
-```
-
-Publishes to PyPI as `monlight`.
-
-### JavaScript SDK
-
-```bash
-# 1. Update version in clients/js/package.json
-# 2. Commit and push to main
-# 3. Tag and push
-git tag js-v0.2.0
-git push origin js-v0.2.0
-```
-
-Publishes to npm as `@monlight/browser`.
+| Component | Tag | Publishes to |
+|---|---|---|
+| error-tracker | `error-tracker-v*` | `ghcr.io/mattmezza/monlight/error-tracker` |
+| log-viewer | `log-viewer-v*` | `ghcr.io/mattmezza/monlight/log-viewer` |
+| metrics-collector | `metrics-collector-v*` | `ghcr.io/mattmezza/monlight/metrics-collector` |
+| browser-relay | `browser-relay-v*` | `ghcr.io/mattmezza/monlight/browser-relay` |
+| Python client | `python-v*` | [PyPI](https://pypi.org/project/monlight/) |
+| JS SDK | `js-v*` | [npm](https://www.npmjs.com/package/@monlight/browser) |
 
 ## Development
 
