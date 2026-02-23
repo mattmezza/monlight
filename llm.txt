@@ -1,0 +1,136 @@
+# Monlight
+
+> Self-hosted lightweight monitoring stack. Four Zig+SQLite services, each <20MB, <50MB RAM total.
+
+## Quick Start
+
+```bash
+git clone https://github.com/mattmezza/monlight.git && cd monlight
+cp deploy/secrets.env.example deploy/secrets.env
+# Set API keys (openssl rand -hex 16)
+docker compose up -d
+```
+
+Services: error-tracker(:5010), log-viewer(:5011), metrics-collector(:5012), browser-relay(:5013).
+
+## Architecture
+
+Browser JS SDK → Browser Relay (DSN auth, CORS, source maps) → Error Tracker / Metrics Collector
+Python backend → Error Tracker / Metrics Collector (direct, X-API-Key header)
+Docker containers → Log Viewer (reads /var/lib/docker/containers directly)
+
+Auth: backends use X-API-Key header. Browsers use X-Monlight-Key header with DSN public keys (safe to expose in client code). Browser relay holds internal API keys and forwards on behalf of browsers.
+
+Storage: each service has its own SQLite DB in WAL mode. No external DB/queue.
+
+## Error Tracker API (:5010)
+
+POST /api/errors — submit error. Body: {"project","environment","exception_type","message","traceback","request_url","request_method","request_headers","user_id","extra"}. Returns 201 (new) or 200 (deduped by fingerprint: MD5 of project:type:file:line).
+GET /api/errors?project=&environment=&resolved=&search=&limit=&offset= — list errors.
+GET /api/errors/{id} — detail with occurrences.
+POST /api/errors/{id}/resolve — resolve (reopens on recurrence).
+GET /api/projects — list projects.
+
+Config: API_KEY (required), DATABASE_PATH, LOG_LEVEL, RETENTION_DAYS=90, POSTMARK_API_TOKEN, POSTMARK_FROM_EMAIL, ALERT_EMAILS.
+
+## Log Viewer API (:5011)
+
+GET /api/logs?container=&level=&search=&since=&until=&limit=&offset= — query logs. search uses FTS5 MATCH syntax.
+GET /api/logs/tail?container=&level= — SSE stream. Events: "log" (JSON), "heartbeat", "close". Max 5 connections, 30min timeout.
+GET /api/logs/containers — list containers with counts.
+GET /api/logs/stats — aggregated stats.
+
+Config: API_KEY (required), DATABASE_PATH, CONTAINERS (comma-separated, empty=all), LOG_SOURCES=/var/lib/docker/containers, MAX_ENTRIES=100000, POLL_INTERVAL=2, TAIL_BUFFER=65536, LOG_LEVEL.
+
+## Metrics Collector API (:5012)
+
+POST /api/metrics — batch submit. Body: [{"name","type":"counter|histogram|gauge","value","labels":{},"timestamp"}]. Max 1000 items. Returns 202.
+GET /api/metrics?name=&period=1h|24h|7d|30d&resolution=minute|hour|auto&labels=key:value — query aggregated data. Returns {data:[{bucket,count,sum,min,max,avg,p50,p95,p99}]}.
+GET /api/metrics/names — list metric names.
+GET /api/dashboard — Web Vitals dashboard data.
+
+Aggregation: raw→minute (every 60s), minute→hourly (every 60 cycles). Percentiles (p50/p95/p99) for histograms.
+Retention: raw 1h, minute 24h, hourly 30d (all configurable).
+
+Config: API_KEY (required), DATABASE_PATH, RETENTION_RAW=1, RETENTION_MINUTE=24, RETENTION_HOURLY=30, AGGREGATION_INTERVAL=60, LOG_LEVEL.
+
+## Browser Relay API (:5013)
+
+Admin (X-API-Key with ADMIN_API_KEY):
+POST /api/dsn-keys {"project":"..."} — create DSN key. Returns {"public_key":"32-char-hex"}.
+GET /api/dsn-keys — list keys.
+DELETE /api/dsn-keys/{id} — deactivate (soft delete).
+POST /api/source-maps {"project","release","file_url","map_content"} — upload source map (max 5MB, validates v3 format).
+GET /api/source-maps?project= — list maps.
+DELETE /api/source-maps/{id} — delete map.
+
+Browser (X-Monlight-Key with DSN public key):
+POST /api/browser/errors {"type","message","stack","url","user_agent","session_id","release","environment","context"} — forwards to error tracker (deobfuscates stack if source map + release match).
+POST /api/browser/metrics {"metrics":[{"name","type","value","labels"}],"session_id","url"} — enriches labels with project/source/session_id/page, forwards to metrics collector.
+
+Config: ADMIN_API_KEY, ERROR_TRACKER_URL, ERROR_TRACKER_API_KEY, METRICS_COLLECTOR_URL, METRICS_COLLECTOR_API_KEY (all required), DATABASE_PATH, CORS_ORIGINS, MAX_BODY_SIZE=65536, RATE_LIMIT=300, RETENTION_DAYS=90, LOG_LEVEL.
+
+## Python SDK (monlight)
+
+pip install monlight  # or: pip install monlight[fastapi]
+
+```python
+from monlight import ErrorClient, MetricsClient
+
+errors = ErrorClient(base_url="http://localhost:5010", api_key="KEY", project="my-app")
+await errors.report_error(exc, request_context={"request_url":"/api","request_method":"POST","user_id":"u1"})
+errors.report_error_sync(exc)  # sync variant
+
+metrics = MetricsClient(base_url="http://localhost:5012", api_key="KEY", flush_interval=10.0)
+metrics.start()
+metrics.counter("requests", labels={"method":"GET"})
+metrics.histogram("duration", 0.42, labels={"endpoint":"/api"})
+metrics.gauge("connections", 15)
+metrics.shutdown()
+```
+
+FastAPI one-liner:
+```python
+from monlight.integrations.fastapi import setup_monlight
+clients = setup_monlight(app, error_tracker_url="...", metrics_collector_url="...", api_key="KEY", project="my-app")
+# Auto: exception handler + middleware recording http_requests_total and http_request_duration_seconds
+```
+
+## JavaScript SDK (@monlight/browser)
+
+npm install @monlight/browser
+
+```javascript
+import { init } from "@monlight/browser";
+const m = init({ dsn: "PUBLIC_KEY", endpoint: "https://relay.example.com", release: "1.0.0" });
+m.captureError(new Error("fail"), { page: "/checkout" });
+m.setUser("u-42");
+m.addContext("tenant", "acme");
+m.destroy();
+```
+
+Script tag: set window.MonlightConfig={dsn,endpoint} before loading monlight.min.js. Client available as window.Monlight.
+
+Config: dsn (required), endpoint (required), release, environment="prod", sampleRate=1.0, debug=false, enabled=true, captureConsole=false, beforeSend=(event)=>event|null.
+
+Auto-captures: unhandled errors, unhandled rejections, console.error/warn (opt-in), Web Vitals (LCP/INP/CLS/FCP/TTFB), fetch/XHR metrics+errors.
+
+## Rate Limits
+
+error-tracker: 100/min, 256KB body. log-viewer: 60/min, 64KB. metrics-collector: 200/min, 512KB. browser-relay: 300/min, 64KB.
+
+## Repo Structure
+
+```
+shared/              — Zig modules: sqlite.zig, config.zig, auth.zig, rate_limit.zig
+error-tracker/       — Zig service (src/, build.zig, Dockerfile)
+log-viewer/          — Zig service
+metrics-collector/   — Zig service
+browser-relay/       — Zig service
+clients/js/          — TypeScript SDK (@monlight/browser)
+clients/python/      — Python SDK (monlight)
+deploy/              — docker-compose, backup.sh, upgrade.sh, smoke-test.sh, nginx.conf.example, secrets.env.example
+.github/workflows/   — CI: zig-services.yml, release-docker.yml, python-client.yml, js-sdk.yml
+```
+
+Build: `zig build` per service. Test: `zig build test`. Docker: multi-stage Alpine 3.21. Release: `make release-<component> V=x.y.z`.
