@@ -59,7 +59,7 @@ class TestFullSetup:
                 result["metrics_client"].shutdown()
 
     def test_error_client_configured_correctly(self):
-        """ErrorClient receives the correct URL, API key, project, and env."""
+        """ErrorClient receives the correct URL, API key, and project."""
         app = FastAPI()
         result = setup_monlight(
             app,
@@ -67,14 +67,12 @@ class TestFullSetup:
             metrics_collector_url="http://metrics:5012",
             api_key="my-key",
             project="flowrent",
-            environment="staging",
         )
         try:
             ec = result["error_client"]
             assert ec.base_url == "http://errors:5010"
             assert ec.api_key == "my-key"
             assert ec.project == "flowrent"
-            assert ec.environment == "staging"
         finally:
             if result["metrics_client"]:
                 result["metrics_client"].shutdown()
@@ -249,16 +247,6 @@ class TestDefaults:
         )
         assert result["error_client"].project == "default"
 
-    def test_default_environment(self):
-        """Default environment is 'prod'."""
-        app = FastAPI()
-        result = setup_monlight(
-            app,
-            error_tracker_url="http://errors:5010",
-            api_key="k",
-        )
-        assert result["error_client"].environment == "prod"
-
     def test_default_flush_interval(self):
         """Default flush interval is 10.0 seconds."""
         app = FastAPI()
@@ -273,18 +261,16 @@ class TestDefaults:
             if result["metrics_client"]:
                 result["metrics_client"].shutdown()
 
-    def test_custom_project_and_environment(self):
-        """Custom project and environment are passed to ErrorClient."""
+    def test_custom_project(self):
+        """Custom project is passed to ErrorClient."""
         app = FastAPI()
         result = setup_monlight(
             app,
             error_tracker_url="http://errors:5010",
             api_key="k",
             project="my-app",
-            environment="dev",
         )
         assert result["error_client"].project == "my-app"
-        assert result["error_client"].environment == "dev"
 
 
 # ── End-to-end: single call enables all monitoring ─────────────────────
@@ -314,7 +300,6 @@ class TestEndToEnd:
             metrics_collector_url="http://metrics:5012",
             api_key="shared-key",
             project="flowrent",
-            environment="prod",
         )
 
         try:

@@ -42,6 +42,11 @@ pub const migrations = [_][]const u8{
     \\CREATE INDEX idx_resolved ON errors(resolved);
     \\CREATE INDEX idx_occurrence_error_id ON error_occurrences(error_id);
     ,
+    // Migration 4: remove environment column
+    \\ALTER TABLE errors DROP COLUMN environment;
+    \\DROP INDEX IF EXISTS idx_project_env;
+    \\CREATE INDEX idx_project ON errors(project);
+    ,
 };
 
 /// Initialize the error tracker database: open connection and run migrations.
@@ -130,7 +135,7 @@ test "init creates errors table with correct columns" {
 
     // Verify defaults were applied
     const q = try db.prepare(
-        "SELECT id, fingerprint, project, environment, exception_type, message, traceback, " ++
+        "SELECT id, fingerprint, project, exception_type, message, traceback, " ++
             "count, first_seen, last_seen, resolved, resolved_at FROM errors WHERE id = 1;",
     );
     defer q.deinit();
@@ -141,20 +146,18 @@ test "init creates errors table with correct columns" {
         try std.testing.expectEqualStrings("abc123", fp); // fingerprint
         const proj = row.text(2) orelse "";
         try std.testing.expectEqualStrings("testproj", proj); // project
-        const env = row.text(3) orelse "";
-        try std.testing.expectEqualStrings("prod", env); // environment default
-        const exc = row.text(4) orelse "";
+        const exc = row.text(3) orelse "";
         try std.testing.expectEqualStrings("ValueError", exc); // exception_type
-        const msg = row.text(5) orelse "";
+        const msg = row.text(4) orelse "";
         try std.testing.expectEqualStrings("test msg", msg); // message
-        const tb = row.text(6) orelse "";
+        const tb = row.text(5) orelse "";
         try std.testing.expectEqualStrings("Traceback...", tb); // traceback
-        try std.testing.expectEqual(@as(i64, 1), row.int(7)); // count default 1
+        try std.testing.expectEqual(@as(i64, 1), row.int(6)); // count default 1
         // first_seen and last_seen should be non-null (auto-set)
-        try std.testing.expect(!row.isNull(8)); // first_seen
-        try std.testing.expect(!row.isNull(9)); // last_seen
-        try std.testing.expectEqual(@as(i64, 0), row.int(10)); // resolved default false
-        try std.testing.expect(row.isNull(11)); // resolved_at nullable
+        try std.testing.expect(!row.isNull(7)); // first_seen
+        try std.testing.expect(!row.isNull(8)); // last_seen
+        try std.testing.expectEqual(@as(i64, 0), row.int(9)); // resolved default false
+        try std.testing.expect(row.isNull(10)); // resolved_at nullable
     } else {
         return error.TestUnexpectedResult;
     }
@@ -281,7 +284,7 @@ test "all indexes are created on startup" {
 
     // Verify all 5 indexes exist
     try std.testing.expect(try indexExists(&db, "idx_fingerprint_resolved"));
-    try std.testing.expect(try indexExists(&db, "idx_project_env"));
+    try std.testing.expect(try indexExists(&db, "idx_project"));
     try std.testing.expect(try indexExists(&db, "idx_last_seen"));
     try std.testing.expect(try indexExists(&db, "idx_resolved"));
     try std.testing.expect(try indexExists(&db, "idx_occurrence_error_id"));
@@ -300,16 +303,16 @@ test "query planner uses idx_fingerprint_resolved for fingerprint+resolved queri
     try std.testing.expect(std.mem.indexOf(u8, detail, "idx_fingerprint_resolved") != null);
 }
 
-test "query planner uses idx_project_env for project+environment queries" {
+test "query planner uses idx_project for project queries" {
     var db = try init(":memory:");
     defer db.close();
 
     const detail = try getQueryPlanDetail(
         &db,
-        "SELECT id FROM errors WHERE project = 'flowrent' AND environment = 'prod';",
+        "SELECT id FROM errors WHERE project = 'flowrent';",
     ) orelse return error.TestUnexpectedResult;
 
-    try std.testing.expect(std.mem.indexOf(u8, detail, "idx_project_env") != null);
+    try std.testing.expect(std.mem.indexOf(u8, detail, "idx_project") != null);
 }
 
 test "query planner uses idx_last_seen for ordering by last_seen" {

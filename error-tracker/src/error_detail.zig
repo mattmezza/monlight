@@ -25,7 +25,7 @@ pub fn extractId(target: []const u8) ?i64 {
 pub fn queryAndFormat(allocator: std.mem.Allocator, db: *sqlite.Database, error_id: i64) !?[]const u8 {
     // Step 1: Query the error group record
     const stmt = try db.prepare(
-        "SELECT id, fingerprint, project, environment, exception_type, message, traceback, " ++
+        "SELECT id, fingerprint, project, exception_type, message, traceback, " ++
             "count, first_seen, last_seen, resolved, resolved_at " ++
             "FROM errors WHERE id = ?;",
     );
@@ -39,15 +39,14 @@ pub fn queryAndFormat(allocator: std.mem.Allocator, db: *sqlite.Database, error_
     const id = row.int(0);
     const fingerprint = row.text(1) orelse "";
     const project = row.text(2) orelse "";
-    const environment = row.text(3) orelse "";
-    const exception_type = row.text(4) orelse "";
-    const message = row.text(5) orelse "";
-    const traceback = row.text(6) orelse "";
-    const count = row.int(7);
-    const first_seen = row.text(8) orelse "";
-    const last_seen = row.text(9) orelse "";
-    const resolved_int = row.int(10);
-    const resolved_at = row.text(11); // nullable
+    const exception_type = row.text(3) orelse "";
+    const message = row.text(4) orelse "";
+    const traceback = row.text(5) orelse "";
+    const count = row.int(6);
+    const first_seen = row.text(7) orelse "";
+    const last_seen = row.text(8) orelse "";
+    const resolved_int = row.int(9);
+    const resolved_at = row.text(10); // nullable
 
     // Step 2: Build JSON response
     var json_buf = std.ArrayList(u8).init(allocator);
@@ -59,8 +58,6 @@ pub fn queryAndFormat(allocator: std.mem.Allocator, db: *sqlite.Database, error_
     try writeJsonEscaped(writer, fingerprint);
     try writer.writeAll("\", \"project\": \"");
     try writeJsonEscaped(writer, project);
-    try writer.writeAll("\", \"environment\": \"");
-    try writeJsonEscaped(writer, environment);
     try writer.writeAll("\", \"exception_type\": \"");
     try writeJsonEscaped(writer, exception_type);
     try writer.writeAll("\", \"message\": \"");
@@ -211,21 +208,20 @@ fn setupTestDb() !sqlite.Database {
 }
 
 /// Helper to insert a test error into the database with explicit timestamps.
-fn insertTestError(db: *sqlite.Database, project: []const u8, environment: []const u8, exception_type: []const u8, message: []const u8, traceback_text: []const u8, resolved: bool) !i64 {
+fn insertTestError(db: *sqlite.Database, project: []const u8, exception_type: []const u8, message: []const u8, traceback_text: []const u8, resolved: bool) !i64 {
     const stmt = try db.prepare(
-        "INSERT INTO errors (fingerprint, project, environment, exception_type, message, traceback, count, resolved) " ++
-            "VALUES (?, ?, ?, ?, ?, ?, 1, ?);",
+        "INSERT INTO errors (fingerprint, project, exception_type, message, traceback, count, resolved) " ++
+            "VALUES (?, ?, ?, ?, ?, 1, ?);",
     );
     defer stmt.deinit();
     var fp_buf: [64]u8 = undefined;
-    const fp = std.fmt.bufPrint(&fp_buf, "fp_{s}_{s}_{s}", .{ project, environment, exception_type }) catch "fp_default";
+    const fp = std.fmt.bufPrint(&fp_buf, "fp_{s}_{s}", .{ project, exception_type }) catch "fp_default";
     try stmt.bindText(1, fp);
     try stmt.bindText(2, project);
-    try stmt.bindText(3, environment);
-    try stmt.bindText(4, exception_type);
-    try stmt.bindText(5, message);
-    try stmt.bindText(6, traceback_text);
-    try stmt.bindInt(7, if (resolved) 1 else 0);
+    try stmt.bindText(3, exception_type);
+    try stmt.bindText(4, message);
+    try stmt.bindText(5, traceback_text);
+    try stmt.bindInt(6, if (resolved) 1 else 0);
     _ = try stmt.exec();
     return db.lastInsertRowId();
 }
@@ -302,7 +298,6 @@ test "queryAndFormat returns full error details" {
     const error_id = try insertTestError(
         &db,
         "flowrent",
-        "prod",
         "ValueError",
         "invalid input",
         "Traceback (most recent call last):\n  File \"/app/main.py\", line 42\nValueError: invalid input",
@@ -316,7 +311,6 @@ test "queryAndFormat returns full error details" {
     try std.testing.expect(std.mem.indexOf(u8, json, "\"id\":") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"fingerprint\":") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"project\":") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"environment\":") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"exception_type\":") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"message\":") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"traceback\":") != null);

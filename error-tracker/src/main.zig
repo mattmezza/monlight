@@ -351,7 +351,7 @@ fn triggerEmailAlert(cfg: *const app_config.Config, report: *const error_ingesti
     };
 
     const email_body = std.fmt.bufPrint(&body_buf,
-        \\New error in {s} ({s})
+        \\New error in {s}
         \\
         \\Exception: {s}
         \\Message: {s}
@@ -365,7 +365,6 @@ fn triggerEmailAlert(cfg: *const app_config.Config, report: *const error_ingesti
         \\View in Error Tracker: {s}
     , .{
         report.project,
-        report.environment,
         report.exception_type,
         report.message,
         request_info,

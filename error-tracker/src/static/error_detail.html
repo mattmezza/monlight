@@ -74,15 +74,6 @@
       return Math.floor(diff / 86400) + 'd ago';
     }
 
-    function envColor(env) {
-      switch (env) {
-        case 'production': return 'bg-red-900/40 text-red-300';
-        case 'staging': return 'bg-yellow-900/40 text-yellow-300';
-        case 'development': return 'bg-green-900/40 text-green-300';
-        default: return 'bg-gray-700 text-gray-300';
-      }
-    }
-
     async function resolveError() {
       const btn = document.getElementById('resolve-btn');
       btn.disabled = true;
@@ -134,7 +125,6 @@
               <p class="text-gray-300 mt-1">${esc(err.message)}</p>
               <div class="flex flex-wrap items-center gap-3 mt-3 text-sm">
                 <span class="inline-block bg-blue-900/40 text-blue-300 text-xs px-2 py-0.5 rounded">${esc(err.project)}</span>
-                <span class="inline-block ${envColor(err.environment)} text-xs px-2 py-0.5 rounded">${esc(err.environment)}</span>
                 <span id="status-badge" class="inline-block text-xs px-2 py-0.5 rounded ${isResolved ? 'bg-green-900/40 text-green-300' : 'bg-red-900/40 text-red-300'}">
                   ${isResolved ? 'Resolved' : 'Unresolved'}
                 </span>

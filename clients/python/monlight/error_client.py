@@ -25,7 +25,6 @@ class ErrorClient:
         base_url: Base URL of the Error Tracker service (e.g., "http://error-tracker:8000").
         api_key: API key for authentication.
         project: Project identifier (e.g., "flowrent").
-        environment: Environment name (e.g., "prod", "dev", "staging").
         timeout: HTTP request timeout in seconds. Defaults to 5.
         excluded_headers: Additional header names to strip from reports.
     """
@@ -35,14 +34,12 @@ class ErrorClient:
         base_url: str,
         api_key: str,
         project: str = "default",
-        environment: str = "prod",
         timeout: float = 5.0,
         excluded_headers: set[str] | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.project = project
-        self.environment = environment
         self.timeout = timeout
         self._excluded_headers = _SENSITIVE_HEADERS | {
             h.lower() for h in (excluded_headers or set())
@@ -62,7 +59,6 @@ class ErrorClient:
         """Build the JSON payload for the error report."""
         payload: dict[str, Any] = {
             "project": self.project,
-            "environment": self.environment,
             "exception_type": type(exception).__qualname__,
             "message": str(exception),
             "traceback": "".join(tb_module.format_exception(exception)),

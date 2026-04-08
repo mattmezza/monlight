@@ -12,7 +12,6 @@ function makeConfig(overrides: Partial<ResolvedConfig> = {}): ResolvedConfig {
     dsn: "test-dsn",
     endpoint: "https://relay.example.com",
     release: "1.0.0",
-    environment: "test",
     sampleRate: 1.0,
     debug: false,
     beforeSend: undefined,
@@ -114,13 +113,6 @@ describe("ErrorCapture", () => {
       expect(new Date(payload.timestamp!).toISOString()).toBe(
         payload.timestamp
       );
-    });
-
-    it("includes environment in context", () => {
-      capture.install();
-      capture.captureError(new Error("test"));
-      const payload = sendErrorSpy.mock.calls[0][0] as BrowserError;
-      expect(payload.context?.environment).toBe("test");
     });
 
     it("includes additional context passed to captureError", () => {

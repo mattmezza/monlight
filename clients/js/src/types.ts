@@ -10,8 +10,6 @@ export interface MonlightConfig {
   endpoint: string;
   /** App version for source map matching */
   release?: string;
-  /** Environment name (default: "prod") */
-  environment?: string;
   /** Sampling rate for performance data (0.0-1.0, default: 1.0) */
   sampleRate?: number;
   /** Enable console debug logging (default: false) */
@@ -89,7 +87,6 @@ export interface ResolvedConfig {
   dsn: string;
   endpoint: string;
   release: string | undefined;
-  environment: string;
   sampleRate: number;
   debug: boolean;
   beforeSend: ((event: BrowserError) => BrowserError | null) | undefined;

@@ -9,7 +9,6 @@ const max_occurrences: i64 = 5;
 /// Error report parsed from the JSON request body.
 pub const ErrorReport = struct {
     project: []const u8,
-    environment: []const u8,
     exception_type: []const u8,
     message: []const u8,
     traceback: []const u8,
@@ -99,7 +98,6 @@ fn parseAndValidateInner(
     }
 
     // Optional fields
-    const environment = getStringField(obj, "environment") orelse "prod";
     const request_url = getStringField(obj, "request_url");
     const request_method = getStringField(obj, "request_method");
     const user_id = getStringField(obj, "user_id");
@@ -110,7 +108,6 @@ fn parseAndValidateInner(
 
     return ErrorReport{
         .project = project,
-        .environment = environment,
         .exception_type = exception_type,
         .message = message,
         .traceback = traceback,
@@ -281,16 +278,15 @@ fn reopenError(db: *sqlite.Database, error_id: i64) !void {
 /// Create a new error record.
 fn createError(db: *sqlite.Database, report: *const ErrorReport, fingerprint: []const u8) !i64 {
     const stmt = try db.prepare(
-        "INSERT INTO errors (fingerprint, project, environment, exception_type, message, traceback) " ++
-            "VALUES (?, ?, ?, ?, ?, ?);",
+        "INSERT INTO errors (fingerprint, project, exception_type, message, traceback) " ++
+            "VALUES (?, ?, ?, ?, ?);",
     );
     defer stmt.deinit();
     try stmt.bindText(1, fingerprint);
     try stmt.bindText(2, report.project);
-    try stmt.bindText(3, report.environment);
-    try stmt.bindText(4, report.exception_type);
-    try stmt.bindText(5, report.message);
-    try stmt.bindText(6, report.traceback);
+    try stmt.bindText(3, report.exception_type);
+    try stmt.bindText(4, report.message);
+    try stmt.bindText(5, report.traceback);
     _ = try stmt.exec();
     return db.lastInsertRowId();
 }
@@ -404,7 +400,7 @@ test "parseAndValidate accepts valid request" {
     const allocator = arena.allocator();
 
     const body =
-        \\{"project": "flowrent", "exception_type": "ValueError", "message": "invalid input", "traceback": "Traceback...", "environment": "prod"}
+        \\{"project": "flowrent", "exception_type": "ValueError", "message": "invalid input", "traceback": "Traceback..."}
     ;
     var err: ValidationError = .{ .detail = "" };
     const report = parseAndValidate(allocator, body, &err);
@@ -413,7 +409,6 @@ test "parseAndValidate accepts valid request" {
     try std.testing.expectEqualStrings("ValueError", report.?.exception_type);
     try std.testing.expectEqualStrings("invalid input", report.?.message);
     try std.testing.expectEqualStrings("Traceback...", report.?.traceback);
-    try std.testing.expectEqualStrings("prod", report.?.environment);
 }
 
 test "parseAndValidate rejects invalid JSON" {
@@ -503,20 +498,6 @@ test "parseAndValidate enforces field length limits" {
     }
 }
 
-test "parseAndValidate defaults environment to prod" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-
-    const body =
-        \\{"project": "test", "exception_type": "Err", "message": "msg", "traceback": "tb"}
-    ;
-    var err: ValidationError = .{ .detail = "" };
-    const report = parseAndValidate(allocator, body, &err);
-    try std.testing.expect(report != null);
-    try std.testing.expectEqualStrings("prod", report.?.environment);
-}
-
 test "parseAndValidate handles optional fields" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -541,7 +522,6 @@ test "ingest creates new error" {
 
     const report = ErrorReport{
         .project = "flowrent",
-        .environment = "prod",
         .exception_type = "ValueError",
         .message = "invalid input",
         .traceback = "Traceback (most recent call last):\n  File \"/app/main.py\", line 42\nValueError: invalid input",
@@ -590,7 +570,6 @@ test "ingest increments existing unresolved error" {
 
     const report = ErrorReport{
         .project = "flowrent",
-        .environment = "prod",
         .exception_type = "ValueError",
         .message = "invalid input",
         .traceback = "Traceback (most recent call last):\n  File \"/app/main.py\", line 42\nValueError: invalid input",
@@ -634,7 +613,6 @@ test "ingest reopens resolved error" {
 
     const report = ErrorReport{
         .project = "flowrent",
-        .environment = "prod",
         .exception_type = "ValueError",
         .message = "invalid input",
         .traceback = "Traceback (most recent call last):\n  File \"/app/main.py\", line 42\nValueError: invalid input",
@@ -687,7 +665,6 @@ test "ingest trims occurrences to max 5" {
 
     const report = ErrorReport{
         .project = "flowrent",
-        .environment = "prod",
         .exception_type = "ValueError",
         .message = "invalid input",
         .traceback = "Traceback (most recent call last):\n  File \"/app/main.py\", line 42\nValueError: invalid input",
@@ -721,7 +698,6 @@ test "ingest stores occurrence context" {
 
     const report = ErrorReport{
         .project = "flowrent",
-        .environment = "prod",
         .exception_type = "ValueError",
         .message = "invalid input",
         .traceback = "Traceback...",
@@ -798,7 +774,6 @@ test "ingest accepts BROWSER request_method and stores occurrence" {
 
     const report = ErrorReport{
         .project = "myapp",
-        .environment = "production",
         .exception_type = "TypeError",
         .message = "Cannot read property 'x' of undefined",
         .traceback = "TypeError: Cannot read property 'x' of undefined\n    at Object.handleClick (http://example.com/app.js:42:15)",
@@ -837,7 +812,6 @@ test "ingest browser errors group by JS fingerprint" {
     // Two errors at the same JS location should be grouped
     const report1 = ErrorReport{
         .project = "myapp",
-        .environment = "production",
         .exception_type = "TypeError",
         .message = "Cannot read property 'x' of undefined",
         .traceback = "TypeError: Cannot read property 'x' of undefined\n    at Object.handleClick (http://example.com/app.js:42:15)",
@@ -850,7 +824,6 @@ test "ingest browser errors group by JS fingerprint" {
 
     const report2 = ErrorReport{
         .project = "myapp",
-        .environment = "production",
         .exception_type = "TypeError",
         .message = "Cannot read property 'y' of undefined",
         .traceback = "TypeError: Cannot read property 'y' of undefined\n    at Object.handleClick (http://example.com/app.js:42:99)",
@@ -872,7 +845,7 @@ test "ingest browser errors group by JS fingerprint" {
 
 test "parseAndValidate accepts BROWSER request_method with extra" {
     const body =
-        \\{"project":"myapp","environment":"production","exception_type":"TypeError",
+        \\{"project":"myapp","exception_type":"TypeError",
         \\"message":"null is not an object","traceback":"TypeError: null is not an object\n    at render (app.js:10:5)",
         \\"request_method":"BROWSER","extra":{"user_agent":"Mozilla/5.0","session_id":"s123"}}
     ;

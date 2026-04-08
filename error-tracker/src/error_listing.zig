@@ -5,7 +5,6 @@ const log = std.log;
 /// Query parameters for the error listing endpoint.
 pub const ListParams = struct {
     project: ?[]const u8 = null,
-    environment: ?[]const u8 = null,
     source: ?[]const u8 = null, // "browser", "server", or null (all)
     session_id: ?[]const u8 = null, // filter by session_id in occurrence extra JSON
     resolved: bool = false,
@@ -31,8 +30,6 @@ pub fn parseQueryParams(target: []const u8) ListParams {
 
         if (std.mem.eql(u8, key, "project")) {
             if (value.len > 0) params.project = value;
-        } else if (std.mem.eql(u8, key, "environment")) {
-            if (value.len > 0) params.environment = value;
         } else if (std.mem.eql(u8, key, "source")) {
             if (std.mem.eql(u8, value, "browser") or std.mem.eql(u8, value, "server")) {
                 params.source = value;
@@ -61,7 +58,6 @@ const ErrorEntry = struct {
     id: i64,
     fingerprint: []const u8,
     project: []const u8,
-    environment: []const u8,
     exception_type: []const u8,
     message: []const u8,
     count: i64,
@@ -86,12 +82,6 @@ fn buildWhereClause(params: *const ListParams) WhereResult {
 
     if (params.project != null) {
         const frag = " AND project = ?";
-        @memcpy(result.buf[result.len .. result.len + frag.len], frag);
-        result.len += frag.len;
-        result.bind_count += 1;
-    }
-    if (params.environment != null) {
-        const frag = " AND environment = ?";
         @memcpy(result.buf[result.len .. result.len + frag.len], frag);
         result.len += frag.len;
         result.bind_count += 1;
@@ -123,17 +113,13 @@ fn whereSlice(result: *const WhereResult) []const u8 {
 }
 
 /// Bind the filter parameters to a statement. Resolved is bound at position 1,
-/// then project, environment, and session_id follow in order.
+/// then project and session_id follow in order.
 fn bindFilterParams(stmt: sqlite.Statement, params: *const ListParams) !void {
     const resolved_val: i64 = if (params.resolved) 1 else 0;
     try stmt.bindInt(1, resolved_val);
     var pos: usize = 2;
     if (params.project) |proj| {
         try stmt.bindText(pos, proj);
-        pos += 1;
-    }
-    if (params.environment) |env| {
-        try stmt.bindText(pos, env);
         pos += 1;
     }
     if (params.session_id) |sid| {
@@ -177,7 +163,7 @@ pub fn queryAndFormat(allocator: std.mem.Allocator, db: *sqlite.Database, params
     const where = buildWhereClause(params);
     // Build null-terminated SQL in a stack buffer
     var sql_buf: [800]u8 = undefined;
-    const prefix = "SELECT id, fingerprint, project, environment, exception_type, message, count, first_seen, last_seen, resolved FROM errors ";
+    const prefix = "SELECT id, fingerprint, project, exception_type, message, count, first_seen, last_seen, resolved FROM errors ";
     const ws = whereSlice(&where);
     const suffix = " ORDER BY last_seen DESC LIMIT ? OFFSET ?;";
     const total_len = prefix.len + ws.len + suffix.len;
@@ -213,13 +199,12 @@ pub fn queryAndFormat(allocator: std.mem.Allocator, db: *sqlite.Database, params
         const id = row.int(0);
         const fingerprint = row.text(1) orelse "";
         const project = row.text(2) orelse "";
-        const environment = row.text(3) orelse "";
-        const exception_type = row.text(4) orelse "";
-        const message = row.text(5) orelse "";
-        const count = row.int(6);
-        const first_seen = row.text(7) orelse "";
-        const last_seen = row.text(8) orelse "";
-        const resolved_int = row.int(9);
+        const exception_type = row.text(3) orelse "";
+        const message = row.text(4) orelse "";
+        const count = row.int(5);
+        const first_seen = row.text(6) orelse "";
+        const last_seen = row.text(7) orelse "";
+        const resolved_int = row.int(8);
 
         try writer.writeAll("{\"id\": ");
         try writer.print("{d}", .{id});
@@ -227,8 +212,6 @@ pub fn queryAndFormat(allocator: std.mem.Allocator, db: *sqlite.Database, params
         try writeJsonEscaped(writer, fingerprint);
         try writer.writeAll("\", \"project\": \"");
         try writeJsonEscaped(writer, project);
-        try writer.writeAll("\", \"environment\": \"");
-        try writeJsonEscaped(writer, environment);
         try writer.writeAll("\", \"exception_type\": \"");
         try writeJsonEscaped(writer, exception_type);
         try writer.writeAll("\", \"message\": \"");
@@ -290,21 +273,20 @@ fn setupTestDb() !sqlite.Database {
 }
 
 /// Helper to insert a test error into the database.
-fn insertTestError(db: *sqlite.Database, project: []const u8, environment: []const u8, exception_type: []const u8, message: []const u8, resolved: bool) !i64 {
+fn insertTestError(db: *sqlite.Database, project: []const u8, exception_type: []const u8, message: []const u8, resolved: bool) !i64 {
     const stmt = try db.prepare(
-        "INSERT INTO errors (fingerprint, project, environment, exception_type, message, traceback, count, resolved) " ++
-            "VALUES (?, ?, ?, ?, ?, 'traceback...', 1, ?);",
+        "INSERT INTO errors (fingerprint, project, exception_type, message, traceback, count, resolved) " ++
+            "VALUES (?, ?, ?, ?, 'traceback...', 1, ?);",
     );
     defer stmt.deinit();
     // Use a unique fingerprint based on the fields
     var fp_buf: [64]u8 = undefined;
-    const fp = std.fmt.bufPrint(&fp_buf, "fp_{s}_{s}_{s}", .{ project, environment, exception_type }) catch "fp_default";
+    const fp = std.fmt.bufPrint(&fp_buf, "fp_{s}_{s}", .{ project, exception_type }) catch "fp_default";
     try stmt.bindText(1, fp);
     try stmt.bindText(2, project);
-    try stmt.bindText(3, environment);
-    try stmt.bindText(4, exception_type);
-    try stmt.bindText(5, message);
-    try stmt.bindInt(6, if (resolved) 1 else 0);
+    try stmt.bindText(3, exception_type);
+    try stmt.bindText(4, message);
+    try stmt.bindInt(5, if (resolved) 1 else 0);
     _ = try stmt.exec();
     return db.lastInsertRowId();
 }
@@ -312,16 +294,14 @@ fn insertTestError(db: *sqlite.Database, project: []const u8, environment: []con
 test "parseQueryParams with no query string" {
     const params = parseQueryParams("/api/errors");
     try std.testing.expect(params.project == null);
-    try std.testing.expect(params.environment == null);
     try std.testing.expect(!params.resolved);
     try std.testing.expectEqual(@as(u32, 50), params.limit);
     try std.testing.expectEqual(@as(u32, 0), params.offset);
 }
 
 test "parseQueryParams with all parameters" {
-    const params = parseQueryParams("/api/errors?project=flowrent&environment=prod&resolved=true&limit=10&offset=20");
+    const params = parseQueryParams("/api/errors?project=flowrent&resolved=true&limit=10&offset=20");
     try std.testing.expectEqualStrings("flowrent", params.project.?);
-    try std.testing.expectEqualStrings("prod", params.environment.?);
     try std.testing.expect(params.resolved);
     try std.testing.expectEqual(@as(u32, 10), params.limit);
     try std.testing.expectEqual(@as(u32, 20), params.offset);
@@ -367,8 +347,8 @@ test "queryAndFormat returns unresolved errors by default" {
     var db = try setupTestDb();
     defer db.close();
 
-    _ = try insertTestError(&db, "flowrent", "prod", "ValueError", "bad input", false);
-    _ = try insertTestError(&db, "flowrent", "prod", "TypeError", "type error", true); // resolved
+    _ = try insertTestError(&db, "flowrent", "ValueError", "bad input", false);
+    _ = try insertTestError(&db, "flowrent", "TypeError", "type error", true); // resolved
 
     const params = ListParams{};
     const json = try queryAndFormat(std.testing.allocator, &db, &params);
@@ -384,28 +364,11 @@ test "queryAndFormat filters by project" {
     var db = try setupTestDb();
     defer db.close();
 
-    _ = try insertTestError(&db, "flowrent", "prod", "ValueError", "err1", false);
-    _ = try insertTestError(&db, "other-app", "prod", "TypeError", "err2", false);
+    _ = try insertTestError(&db, "flowrent", "ValueError", "err1", false);
+    _ = try insertTestError(&db, "other-app", "TypeError", "err2", false);
 
     var params = ListParams{};
     params.project = "flowrent";
-    const json = try queryAndFormat(std.testing.allocator, &db, &params);
-    defer std.testing.allocator.free(json);
-
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"total\": 1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "ValueError") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "TypeError") == null);
-}
-
-test "queryAndFormat filters by environment" {
-    var db = try setupTestDb();
-    defer db.close();
-
-    _ = try insertTestError(&db, "flowrent", "prod", "ValueError", "err1", false);
-    _ = try insertTestError(&db, "flowrent", "dev", "TypeError", "err2", false);
-
-    var params = ListParams{};
-    params.environment = "prod";
     const json = try queryAndFormat(std.testing.allocator, &db, &params);
     defer std.testing.allocator.free(json);
 
@@ -425,8 +388,8 @@ test "queryAndFormat pagination works correctly" {
         var fp_buf: [64]u8 = undefined;
         const fp = std.fmt.bufPrint(&fp_buf, "fp_unique_{d}", .{i}) catch "fp";
         const stmt = try db.prepare(
-            "INSERT INTO errors (fingerprint, project, environment, exception_type, message, traceback, count, resolved) " ++
-                "VALUES (?, 'flowrent', 'prod', ?, 'msg', 'tb', 1, 0);",
+            "INSERT INTO errors (fingerprint, project, exception_type, message, traceback, count, resolved) " ++
+                "VALUES (?, 'flowrent', ?, 'msg', 'tb', 1, 0);",
         );
         defer stmt.deinit();
         try stmt.bindText(1, fp);
@@ -472,7 +435,7 @@ test "queryAndFormat response shape matches spec" {
     var db = try setupTestDb();
     defer db.close();
 
-    _ = try insertTestError(&db, "flowrent", "prod", "ValueError", "invalid input", false);
+    _ = try insertTestError(&db, "flowrent", "ValueError", "invalid input", false);
 
     const params = ListParams{};
     const json = try queryAndFormat(std.testing.allocator, &db, &params);
@@ -482,7 +445,6 @@ test "queryAndFormat response shape matches spec" {
     try std.testing.expect(std.mem.indexOf(u8, json, "\"id\":") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"fingerprint\":") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"project\":") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"environment\":") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"exception_type\":") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"message\":") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"count\":") != null);
@@ -500,8 +462,8 @@ test "queryAndFormat shows resolved errors when resolved=true" {
     var db = try setupTestDb();
     defer db.close();
 
-    _ = try insertTestError(&db, "flowrent", "prod", "ValueError", "err1", false);
-    _ = try insertTestError(&db, "flowrent", "prod", "TypeError", "err2", true);
+    _ = try insertTestError(&db, "flowrent", "ValueError", "err1", false);
+    _ = try insertTestError(&db, "flowrent", "TypeError", "err2", true);
 
     var params = ListParams{};
     params.resolved = true;
@@ -511,26 +473,6 @@ test "queryAndFormat shows resolved errors when resolved=true" {
     try std.testing.expect(std.mem.indexOf(u8, json, "\"total\": 1") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "TypeError") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "ValueError") == null);
-}
-
-test "queryAndFormat filters by project and environment combined" {
-    var db = try setupTestDb();
-    defer db.close();
-
-    _ = try insertTestError(&db, "flowrent", "prod", "ValueError", "err1", false);
-    _ = try insertTestError(&db, "flowrent", "dev", "TypeError", "err2", false);
-    _ = try insertTestError(&db, "other-app", "prod", "KeyError", "err3", false);
-
-    var params = ListParams{};
-    params.project = "flowrent";
-    params.environment = "prod";
-    const json = try queryAndFormat(std.testing.allocator, &db, &params);
-    defer std.testing.allocator.free(json);
-
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"total\": 1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "ValueError") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "TypeError") == null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "KeyError") == null);
 }
 
 /// Helper to insert an error_occurrence for a given error_id with a specific request_method.
@@ -580,8 +522,8 @@ test "queryAndFormat filters by source=browser" {
     defer db.close();
 
     // Insert two errors: one with BROWSER occurrence, one with GET occurrence
-    const browser_id = try insertTestError(&db, "myapp", "prod", "TypeError", "browser error", false);
-    const server_id = try insertTestError(&db, "myapp", "prod", "ValueError", "server error", false);
+    const browser_id = try insertTestError(&db, "myapp", "TypeError", "browser error", false);
+    const server_id = try insertTestError(&db, "myapp", "ValueError", "server error", false);
     try insertTestOccurrence(&db, browser_id, "BROWSER");
     try insertTestOccurrence(&db, server_id, "GET");
 
@@ -601,8 +543,8 @@ test "queryAndFormat filters by source=server" {
     defer db.close();
 
     // Insert two errors: one with BROWSER occurrence, one with GET occurrence
-    const browser_id = try insertTestError(&db, "myapp", "prod", "TypeError", "browser error", false);
-    const server_id = try insertTestError(&db, "myapp", "prod", "ValueError", "server error", false);
+    const browser_id = try insertTestError(&db, "myapp", "TypeError", "browser error", false);
+    const server_id = try insertTestError(&db, "myapp", "ValueError", "server error", false);
     try insertTestOccurrence(&db, browser_id, "BROWSER");
     try insertTestOccurrence(&db, server_id, "GET");
 
@@ -621,8 +563,8 @@ test "queryAndFormat with no source filter returns all errors" {
     var db = try setupTestDb();
     defer db.close();
 
-    const browser_id = try insertTestError(&db, "myapp", "prod", "TypeError", "browser error", false);
-    const server_id = try insertTestError(&db, "myapp", "prod", "ValueError", "server error", false);
+    const browser_id = try insertTestError(&db, "myapp", "TypeError", "browser error", false);
+    const server_id = try insertTestError(&db, "myapp", "ValueError", "server error", false);
     try insertTestOccurrence(&db, browser_id, "BROWSER");
     try insertTestOccurrence(&db, server_id, "GET");
 
@@ -641,13 +583,13 @@ test "queryAndFormat source filter combined with project filter" {
     defer db.close();
 
     // myapp: one browser, one server error
-    const b1 = try insertTestError(&db, "myapp", "prod", "TypeError", "browser error", false);
-    const s1 = try insertTestError(&db, "myapp", "prod", "ValueError", "server error", false);
+    const b1 = try insertTestError(&db, "myapp", "TypeError", "browser error", false);
+    const s1 = try insertTestError(&db, "myapp", "ValueError", "server error", false);
     try insertTestOccurrence(&db, b1, "BROWSER");
     try insertTestOccurrence(&db, s1, "GET");
 
     // otherapp: one browser error
-    const b2 = try insertTestError(&db, "otherapp", "prod", "KeyError", "other browser error", false);
+    const b2 = try insertTestError(&db, "otherapp", "KeyError", "other browser error", false);
     try insertTestOccurrence(&db, b2, "BROWSER");
 
     // Filter: source=browser AND project=myapp — should only return myapp's browser error
@@ -678,8 +620,8 @@ test "queryAndFormat filters by session_id" {
     defer db.close();
 
     // Insert two errors: one with session_id in extra, one without
-    const err1 = try insertTestError(&db, "myapp", "prod", "TypeError", "browser error", false);
-    const err2 = try insertTestError(&db, "myapp", "prod", "ValueError", "server error", false);
+    const err1 = try insertTestError(&db, "myapp", "TypeError", "browser error", false);
+    const err2 = try insertTestError(&db, "myapp", "ValueError", "server error", false);
     try insertTestOccurrenceWithExtra(&db, err1, "BROWSER", "{\"session_id\": \"sess-abc-123\"}");
     try insertTestOccurrenceWithExtra(&db, err2, "GET", null);
 
@@ -698,9 +640,9 @@ test "queryAndFormat session_id filter returns multiple errors from same session
     var db = try setupTestDb();
     defer db.close();
 
-    const err1 = try insertTestError(&db, "myapp", "prod", "TypeError", "error 1", false);
-    const err2 = try insertTestError(&db, "myapp", "prod", "ReferenceError", "error 2", false);
-    const err3 = try insertTestError(&db, "myapp", "prod", "ValueError", "other session", false);
+    const err1 = try insertTestError(&db, "myapp", "TypeError", "error 1", false);
+    const err2 = try insertTestError(&db, "myapp", "ReferenceError", "error 2", false);
+    const err3 = try insertTestError(&db, "myapp", "ValueError", "other session", false);
     try insertTestOccurrenceWithExtra(&db, err1, "BROWSER", "{\"session_id\": \"sess-shared\"}");
     try insertTestOccurrenceWithExtra(&db, err2, "BROWSER", "{\"session_id\": \"sess-shared\"}");
     try insertTestOccurrenceWithExtra(&db, err3, "BROWSER", "{\"session_id\": \"sess-different\"}");
@@ -721,7 +663,7 @@ test "queryAndFormat session_id with no matching errors returns empty" {
     var db = try setupTestDb();
     defer db.close();
 
-    const err1 = try insertTestError(&db, "myapp", "prod", "TypeError", "error 1", false);
+    const err1 = try insertTestError(&db, "myapp", "TypeError", "error 1", false);
     try insertTestOccurrenceWithExtra(&db, err1, "BROWSER", "{\"session_id\": \"sess-abc\"}");
 
     var params = ListParams{};

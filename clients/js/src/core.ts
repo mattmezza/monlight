@@ -24,7 +24,6 @@ function resolveConfig(config: MonlightConfig): ResolvedConfig {
     dsn: config.dsn,
     endpoint: config.endpoint.replace(/\/+$/, ""), // strip trailing slashes
     release: config.release,
-    environment: config.environment ?? "prod",
     sampleRate: config.sampleRate ?? 1.0,
     debug: config.debug ?? false,
     beforeSend: config.beforeSend,

@@ -65,17 +65,6 @@ describe("init(config)", () => {
 
   // --- Default config values ---
 
-  it("applies default environment 'prod' when not specified", () => {
-    client = init(baseConfig());
-    // We can't directly inspect resolved config, but it should not throw
-    expect(client).toBeDefined();
-  });
-
-  it("accepts custom environment", () => {
-    client = init(baseConfig({ environment: "staging" }));
-    expect(client).toBeDefined();
-  });
-
   it("applies default sampleRate 1.0 when not specified", () => {
     client = init(baseConfig());
     expect(client).toBeDefined();

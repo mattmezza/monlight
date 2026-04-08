@@ -100,8 +100,8 @@ fn setupTestDb() !sqlite.Database {
 /// Helper to insert a test error into the database.
 fn insertTestError(db: *sqlite.Database, resolved: bool) !i64 {
     const stmt = try db.prepare(
-        "INSERT INTO errors (fingerprint, project, environment, exception_type, message, traceback, count, resolved) " ++
-            "VALUES ('fp_test', 'flowrent', 'prod', 'ValueError', 'test msg', 'test tb', 1, ?);",
+        "INSERT INTO errors (fingerprint, project, exception_type, message, traceback, count, resolved) " ++
+            "VALUES ('fp_test', 'flowrent', 'ValueError', 'test msg', 'test tb', 1, ?);",
     );
     defer stmt.deinit();
     try stmt.bindInt(1, if (resolved) 1 else 0);

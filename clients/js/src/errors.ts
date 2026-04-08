@@ -208,7 +208,6 @@ export class ErrorCapture {
       context: {
         ...this.extraContext,
         ...context,
-        environment: this.config.environment,
         ...(this.userId ? { user_id: this.userId } : {}),
       },
       release: this.config.release,
