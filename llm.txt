@@ -31,7 +31,7 @@ GET /api/errors/{id} — detail with occurrences.
 POST /api/errors/{id}/resolve — resolve (reopens on recurrence).
 GET /api/projects — list projects.
 
-Config: API_KEY (required), DATABASE_PATH, LOG_LEVEL, RETENTION_DAYS=90, POSTMARK_API_TOKEN, POSTMARK_FROM_EMAIL, ALERT_EMAILS.
+Config: API_KEY (required), DATABASE_PATH, LOG_LEVEL, RETENTION_DAYS=90, SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD, SMTP_FROM, ALERT_EMAILS.
 
 ## Log Viewer API (:5011)
 

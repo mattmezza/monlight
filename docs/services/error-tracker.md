@@ -32,8 +32,11 @@ Stack traces from both Python and JavaScript (Chrome V8, Firefox, Safari) are pa
 | `DATABASE_PATH` | No | `./data/errors.db` | Path to SQLite database |
 | `LOG_LEVEL` | No | `info` | `error`, `warn`, `info`, `debug` |
 | `RETENTION_DAYS` | No | `90` | Days to keep resolved errors before deletion |
-| `POSTMARK_API_TOKEN` | No | -- | Postmark API token for email alerts |
-| `POSTMARK_FROM_EMAIL` | No | -- | Sender email for alerts |
+| `SMTP_HOST` | No | -- | SMTP server host for email alerts |
+| `SMTP_PORT` | No | `25` | SMTP server port |
+| `SMTP_USERNAME` | No | -- | SMTP username for authentication |
+| `SMTP_PASSWORD` | No | -- | SMTP password for authentication |
+| `SMTP_FROM` | No | `errors@example.com` | Sender email for alerts |
 | `ALERT_EMAILS` | No | -- | Comma-separated recipient emails |
 
 ## API

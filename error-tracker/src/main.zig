@@ -322,8 +322,8 @@ fn handleErrorResolve(request: *std.http.Server.Request, db: *sqlite.Database, e
 /// Trigger an email alert for a new error.
 /// This is fire-and-forget: failures are logged but do not affect the response.
 fn triggerEmailAlert(cfg: *const app_config.Config, report: *const error_ingestion.ErrorReport, result: *const error_ingestion.IngestResult) void {
-    // If Postmark is not configured, skip silently
-    const api_token = cfg.postmark_api_token orelse return;
+    // If SMTP is not configured, skip silently
+    const smtp_host = cfg.smtp_host orelse return;
     const alert_emails = cfg.alert_emails orelse return;
 
     // Format email subject: [{project}] {exception_type}: {message_truncated_50_chars}
@@ -341,9 +341,6 @@ fn triggerEmailAlert(cfg: *const app_config.Config, report: *const error_ingesti
         var req_buf: [256]u8 = undefined;
         break :blk std.fmt.bufPrint(&req_buf, "{s} {s}", .{ report.request_method.?, report.request_url.? }) catch "N/A";
     } else "N/A";
-
-    const fp_str: []const u8 = if (result.fingerprint) |fp| &fp else "unknown";
-    _ = fp_str;
 
     const dashboard_link = blk: {
         var link_buf: [256]u8 = undefined;
@@ -377,111 +374,122 @@ fn triggerEmailAlert(cfg: *const app_config.Config, report: *const error_ingesti
     while (email_iter.next()) |raw_email| {
         const email = std.mem.trim(u8, raw_email, " \t\r\n");
         if (email.len == 0) continue;
-        sendPostmarkEmail(api_token, cfg.postmark_from_email, email, subject, email_body);
+        sendSmtpEmail(smtp_host, cfg.smtp_port, cfg.smtp_username, cfg.smtp_password, cfg.smtp_from, email, subject, email_body);
     }
 }
 
-/// Send an email via the Postmark API.
-/// This is a blocking HTTP call — in a production system, this should be done
-/// on a separate thread. For now, the alert is sent synchronously but
-/// the caller handles failures gracefully.
-fn sendPostmarkEmail(
-    api_token: []const u8,
+/// Send an email via SMTP.
+/// This is a blocking TCP call — failures are logged but do not affect the response.
+fn sendSmtpEmail(
+    host: []const u8,
+    port: u16,
+    username: ?[]const u8,
+    password: ?[]const u8,
     from_email: []const u8,
     to_email: []const u8,
     subject: []const u8,
     body: []const u8,
 ) void {
-    // Build JSON payload
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-
-    var payload_buf = std.ArrayList(u8).init(allocator);
-    const writer = payload_buf.writer();
-
-    // Manually build JSON to avoid escaping issues
-    writer.writeAll("{\"From\": \"") catch {
-        log.warn("Failed to build Postmark payload", .{});
+    const stream = net.tcpConnectToHost(std.heap.page_allocator, host, port) catch |err| {
+        log.warn("Failed to connect to SMTP server {s}:{d}: {}", .{ host, port, err });
         return;
     };
-    writeJsonEscaped(writer, from_email) catch return;
-    writer.writeAll("\", \"To\": \"") catch return;
-    writeJsonEscaped(writer, to_email) catch return;
-    writer.writeAll("\", \"Subject\": \"") catch return;
-    writeJsonEscaped(writer, subject) catch return;
-    writer.writeAll("\", \"TextBody\": \"") catch return;
-    writeJsonEscaped(writer, body) catch return;
-    writer.writeAll("\"}") catch return;
+    defer stream.close();
 
-    const payload = payload_buf.items;
-
-    // Make HTTP request to Postmark API
-    var client = std.http.Client{ .allocator = allocator };
-    defer client.deinit();
-
-    const uri = std.Uri.parse("https://api.postmarkapp.com/email") catch {
-        log.warn("Failed to parse Postmark URL", .{});
+    // Read server greeting
+    if (!smtpReadOk(stream)) {
+        log.warn("SMTP server did not send greeting", .{});
         return;
-    };
-
-    var header_buf: [4096]u8 = undefined;
-    var req = client.open(.POST, uri, .{
-        .server_header_buffer = &header_buf,
-        .extra_headers = &.{
-            .{ .name = "Accept", .value = "application/json" },
-            .{ .name = "Content-Type", .value = "application/json" },
-            .{ .name = "X-Postmark-Server-Token", .value = api_token },
-        },
-    }) catch |err| {
-        log.warn("Failed to connect to Postmark API: {}", .{err});
-        return;
-    };
-    defer req.deinit();
-
-    req.transfer_encoding = .{ .content_length = payload.len };
-    req.send() catch |err| {
-        log.warn("Failed to send Postmark request: {}", .{err});
-        return;
-    };
-    req.writeAll(payload) catch |err| {
-        log.warn("Failed to write Postmark payload: {}", .{err});
-        return;
-    };
-    req.finish() catch |err| {
-        log.warn("Failed to finish Postmark request: {}", .{err});
-        return;
-    };
-    req.wait() catch |err| {
-        log.warn("Failed to get Postmark response: {}", .{err});
-        return;
-    };
-
-    if (req.response.status == .ok) {
-        log.info("Email alert sent to {s}", .{to_email});
-    } else {
-        log.warn("Postmark API returned status {d} for email to {s}", .{ @intFromEnum(req.response.status), to_email });
     }
-}
 
-/// Write a string with JSON escaping (escapes backslash, double-quote, newline, tab, etc.)
-fn writeJsonEscaped(writer: anytype, s: []const u8) !void {
-    for (s) |ch| {
-        switch (ch) {
-            '"' => try writer.writeAll("\\\""),
-            '\\' => try writer.writeAll("\\\\"),
-            '\n' => try writer.writeAll("\\n"),
-            '\r' => try writer.writeAll("\\r"),
-            '\t' => try writer.writeAll("\\t"),
-            else => {
-                if (ch < 0x20) {
-                    try writer.print("\\u{x:0>4}", .{ch});
-                } else {
-                    try writer.writeByte(ch);
-                }
-            },
+    // EHLO
+    smtpSend(stream, "EHLO localhost\r\n") catch {
+        log.warn("Failed to send EHLO", .{});
+        return;
+    };
+    if (!smtpReadOk(stream)) {
+        log.warn("SMTP EHLO rejected", .{});
+        return;
+    }
+
+    // AUTH LOGIN if credentials provided
+    if (username != null and password != null) {
+        smtpSend(stream, "AUTH LOGIN\r\n") catch return;
+        if (!smtpReadReply(stream, "334")) return;
+
+        var user_b64_buf: [512]u8 = undefined;
+        const user_b64_len = std.base64.standard.Encoder.calcSize(username.?.len);
+        _ = std.base64.standard.Encoder.encode(user_b64_buf[0..user_b64_len], username.?);
+        _ = stream.write(user_b64_buf[0..user_b64_len]) catch return;
+        smtpSend(stream, "\r\n") catch return;
+        if (!smtpReadReply(stream, "334")) return;
+
+        var pass_b64_buf: [512]u8 = undefined;
+        const pass_b64_len = std.base64.standard.Encoder.calcSize(password.?.len);
+        _ = std.base64.standard.Encoder.encode(pass_b64_buf[0..pass_b64_len], password.?);
+        _ = stream.write(pass_b64_buf[0..pass_b64_len]) catch return;
+        smtpSend(stream, "\r\n") catch return;
+        if (!smtpReadReply(stream, "235")) {
+            log.warn("SMTP authentication failed", .{});
+            return;
         }
     }
+
+    // MAIL FROM
+    var from_buf: [512]u8 = undefined;
+    const mail_from = std.fmt.bufPrint(&from_buf, "MAIL FROM:<{s}>\r\n", .{from_email}) catch return;
+    smtpSend(stream, mail_from) catch return;
+    if (!smtpReadOk(stream)) {
+        log.warn("SMTP MAIL FROM rejected", .{});
+        return;
+    }
+
+    // RCPT TO
+    var to_buf: [512]u8 = undefined;
+    const rcpt_to = std.fmt.bufPrint(&to_buf, "RCPT TO:<{s}>\r\n", .{to_email}) catch return;
+    smtpSend(stream, rcpt_to) catch return;
+    if (!smtpReadOk(stream)) {
+        log.warn("SMTP RCPT TO rejected for {s}", .{to_email});
+        return;
+    }
+
+    // DATA
+    smtpSend(stream, "DATA\r\n") catch return;
+    if (!smtpReadReply(stream, "354")) {
+        log.warn("SMTP DATA rejected", .{});
+        return;
+    }
+
+    // Send email headers and body
+    var hdr_buf: [1024]u8 = undefined;
+    const headers = std.fmt.bufPrint(&hdr_buf, "From: {s}\r\nTo: {s}\r\nSubject: {s}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n", .{ from_email, to_email, subject }) catch return;
+    smtpSend(stream, headers) catch return;
+    smtpSend(stream, body) catch return;
+    smtpSend(stream, "\r\n.\r\n") catch return;
+    if (!smtpReadOk(stream)) {
+        log.warn("SMTP message rejected", .{});
+        return;
+    }
+
+    // QUIT
+    smtpSend(stream, "QUIT\r\n") catch {};
+
+    log.info("Email alert sent to {s} via SMTP", .{to_email});
+}
+
+fn smtpSend(stream: net.Stream, data: []const u8) !void {
+    _ = try stream.write(data);
+}
+
+fn smtpReadOk(stream: net.Stream) bool {
+    return smtpReadReply(stream, "2");
+}
+
+fn smtpReadReply(stream: net.Stream, expected_prefix: []const u8) bool {
+    var buf: [1024]u8 = undefined;
+    const n = stream.read(&buf) catch return false;
+    if (n < expected_prefix.len) return false;
+    return std.mem.startsWith(u8, buf[0..n], expected_prefix);
 }
 
 fn handleNotFound(request: *std.http.Server.Request) !void {

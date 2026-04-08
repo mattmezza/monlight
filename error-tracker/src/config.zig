@@ -10,11 +10,20 @@ pub const Config = struct {
     /// API key for authenticating requests. Required.
     api_key: []const u8,
 
-    /// Postmark API token for sending alert emails. Optional.
-    postmark_api_token: ?[]const u8,
+    /// SMTP host for sending alert emails. Optional — alerts disabled if not set.
+    smtp_host: ?[]const u8,
+
+    /// SMTP port (default: 25).
+    smtp_port: u16,
+
+    /// SMTP username for authentication. Optional.
+    smtp_username: ?[]const u8,
+
+    /// SMTP password for authentication. Optional.
+    smtp_password: ?[]const u8,
 
     /// Sender email address for alerts.
-    postmark_from_email: []const u8,
+    smtp_from: []const u8,
 
     /// Comma-separated list of alert recipient emails. Optional.
     alert_emails: ?[]const u8,
@@ -47,8 +56,14 @@ pub fn load() config_mod.ConfigError!Config {
 
     // Optional variables with defaults
     const database_path = config_mod.getString("DATABASE_PATH", "./data/errors.db");
-    const postmark_api_token = config_mod.getOptional("POSTMARK_API_TOKEN");
-    const postmark_from_email = config_mod.getString("POSTMARK_FROM_EMAIL", "errors@example.com");
+    const smtp_host = config_mod.getOptional("SMTP_HOST");
+    const smtp_port: u16 = blk: {
+        const port_str = config_mod.getString("SMTP_PORT", "25");
+        break :blk std.fmt.parseInt(u16, port_str, 10) catch 25;
+    };
+    const smtp_username = config_mod.getOptional("SMTP_USERNAME");
+    const smtp_password = config_mod.getOptional("SMTP_PASSWORD");
+    const smtp_from = config_mod.getString("SMTP_FROM", "errors@example.com");
     const alert_emails = config_mod.getOptional("ALERT_EMAILS");
     const retention_days = config_mod.getInt("RETENTION_DAYS", 90);
     const base_url = config_mod.getString("BASE_URL", "http://localhost:5010");
@@ -65,8 +80,11 @@ pub fn load() config_mod.ConfigError!Config {
     return Config{
         .database_path = database_path,
         .api_key = api_key,
-        .postmark_api_token = postmark_api_token,
-        .postmark_from_email = postmark_from_email,
+        .smtp_host = smtp_host,
+        .smtp_port = smtp_port,
+        .smtp_username = smtp_username,
+        .smtp_password = smtp_password,
+        .smtp_from = smtp_from,
         .alert_emails = alert_emails,
         .retention_days = retention_days,
         .base_url = base_url,

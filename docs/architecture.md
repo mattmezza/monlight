@@ -56,7 +56,7 @@ nav_order: 3
 
 ### Error Tracker (:5010)
 
-Receives exception reports from backends (directly) and browsers (via relay). Groups errors by fingerprint -- an MD5 hash of `{project}:{exception_type}:{file}:{line}`. Duplicate errors increment a counter instead of creating new records. Keeps the last 5 occurrences per error group. Resolved errors reopen automatically on recurrence. Optional email alerts via Postmark.
+Receives exception reports from backends (directly) and browsers (via relay). Groups errors by fingerprint -- an MD5 hash of `{project}:{exception_type}:{file}:{line}`. Duplicate errors increment a counter instead of creating new records. Keeps the last 5 occurrences per error group. Resolved errors reopen automatically on recurrence. Optional email alerts via SMTP.
 
 ### Log Viewer (:5011)
 
