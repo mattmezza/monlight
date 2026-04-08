@@ -18,7 +18,6 @@ const BrowserErrorFields = struct {
     session_id: ?[]const u8,
     release: ?[]const u8,
     timestamp: ?[]const u8,
-    environment: ?[]const u8,
 };
 
 /// Parse the browser error JSON body and validate required fields.
@@ -61,7 +60,6 @@ fn parseAndValidate(body: []const u8, detail_out: *[]const u8) ?BrowserErrorFiel
         .session_id = getStringField(obj, "session_id"),
         .release = getStringField(obj, "release"),
         .timestamp = getStringField(obj, "timestamp"),
-        .environment = getStringField(obj, "environment"),
     };
 }
 
@@ -75,7 +73,7 @@ fn getStringField(obj: std.json.ObjectMap, key: []const u8) ?[]const u8 {
 
 /// Build the error-tracker JSON payload from browser error fields.
 /// The error-tracker expects: project, exception_type, message, traceback,
-/// and optionally: environment, request_url, request_method, extra.
+/// and optionally: request_url, request_method, extra.
 fn buildPayload(
     buf: []u8,
     fields: BrowserErrorFields,
@@ -96,11 +94,6 @@ fn buildPayload(
 
     try writer.writeAll(", \"traceback\": ");
     try writeJsonString(writer, fields.stack orelse "");
-
-    // Environment: from fields.environment, or from context.environment, or default "prod"
-    const environment = fields.environment orelse "prod";
-    try writer.writeAll(", \"environment\": ");
-    try writeJsonString(writer, environment);
 
     try writer.writeAll(", \"request_method\": \"BROWSER\"");
 
@@ -593,7 +586,6 @@ test "buildPayload produces valid JSON" {
         .session_id = "sess-123",
         .release = "1.0.0",
         .timestamp = null,
-        .environment = "staging",
     };
 
     var buf: [max_payload_size]u8 = undefined;
@@ -609,7 +601,6 @@ test "buildPayload produces valid JSON" {
     try std.testing.expectEqualStrings("x is not a function", obj.get("message").?.string);
     try std.testing.expectEqualStrings("BROWSER", obj.get("request_method").?.string);
     try std.testing.expectEqualStrings("https://example.com/page", obj.get("request_url").?.string);
-    try std.testing.expectEqualStrings("staging", obj.get("environment").?.string);
 
     // Check extra fields
     const extra = obj.get("extra").?.object;
@@ -618,7 +609,7 @@ test "buildPayload produces valid JSON" {
     try std.testing.expectEqualStrings("1.0.0", extra.get("release").?.string);
 }
 
-test "buildPayload defaults environment to prod" {
+test "buildPayload omits request_url when url is null" {
     const fields = BrowserErrorFields{
         .type = "Error",
         .message = "test",
@@ -628,7 +619,6 @@ test "buildPayload defaults environment to prod" {
         .session_id = null,
         .release = null,
         .timestamp = null,
-        .environment = null,
     };
 
     var buf: [max_payload_size]u8 = undefined;
@@ -638,7 +628,6 @@ test "buildPayload defaults environment to prod" {
     defer parsed.deinit();
 
     const obj = parsed.value.object;
-    try std.testing.expectEqualStrings("prod", obj.get("environment").?.string);
     // No request_url when url is null
     try std.testing.expect(obj.get("request_url") == null);
 }
@@ -653,7 +642,6 @@ test "buildPayload includes context JSON" {
         .session_id = null,
         .release = null,
         .timestamp = null,
-        .environment = null,
     };
 
     var buf: [max_payload_size]u8 = undefined;
@@ -678,7 +666,6 @@ test "buildPayload escapes special characters" {
         .session_id = null,
         .release = null,
         .timestamp = null,
-        .environment = null,
     };
 
     var buf: [max_payload_size]u8 = undefined;

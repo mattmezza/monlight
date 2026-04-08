@@ -11,7 +11,6 @@ function makeConfig(overrides: Partial<ResolvedConfig> = {}): ResolvedConfig {
     dsn: "test-dsn-key",
     endpoint: "https://relay.example.com",
     release: "1.0.0",
-    environment: "test",
     sampleRate: 1.0,
     debug: false,
     beforeSend: undefined,

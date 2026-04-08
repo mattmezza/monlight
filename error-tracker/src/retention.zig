@@ -80,8 +80,8 @@ const database = @import("database.zig");
 /// Helper: insert an error with specified resolved status and resolved_at timestamp.
 fn insertTestError(db: *sqlite.Database, fingerprint: []const u8, resolved: bool, resolved_at: ?[]const u8) !i64 {
     const stmt = try db.prepare(
-        "INSERT INTO errors (fingerprint, project, environment, exception_type, message, traceback, count, first_seen, last_seen, resolved, resolved_at) " ++
-            "VALUES (?, 'testproj', 'prod', 'TestError', 'test message', 'traceback...', 1, " ++
+        "INSERT INTO errors (fingerprint, project, exception_type, message, traceback, count, first_seen, last_seen, resolved, resolved_at) " ++
+            "VALUES (?, 'testproj', 'TestError', 'test message', 'traceback...', 1, " ++
             "strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), ?, ?);",
     );
     defer stmt.deinit();

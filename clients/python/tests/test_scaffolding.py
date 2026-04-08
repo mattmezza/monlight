@@ -20,7 +20,6 @@ def test_error_client_import():
     assert client.base_url == "http://localhost:5010"
     assert client.api_key == "test-key"
     assert client.project == "test-project"
-    assert client.environment == "prod"
 
 
 def test_metrics_client_import():

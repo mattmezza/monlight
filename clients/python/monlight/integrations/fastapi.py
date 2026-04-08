@@ -131,7 +131,6 @@ def setup_monlight(
     metrics_collector_url: str | None = None,
     api_key: str,
     project: str = "default",
-    environment: str = "prod",
     flush_interval: float = 10.0,
 ) -> dict[str, Any]:
     """Wire up Monlight monitoring on a FastAPI/Starlette application.
@@ -147,7 +146,6 @@ def setup_monlight(
             If None, metrics collection is disabled.
         api_key: Shared API key for both services.
         project: Project identifier for error reports.
-        environment: Environment name for error reports.
         flush_interval: Seconds between automatic metric flushes.
 
     Returns:
@@ -161,7 +159,6 @@ def setup_monlight(
             base_url=error_tracker_url,
             api_key=api_key,
             project=project,
-            environment=environment,
         )
         app.state.monlight_error_client = error_client
         app.add_exception_handler(Exception, MonlightExceptionHandler)

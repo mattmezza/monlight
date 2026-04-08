@@ -31,7 +31,6 @@ def client() -> ErrorClient:
         base_url="http://localhost:5010",
         api_key="test-api-key",
         project="myproject",
-        environment="prod",
     )
 
 
@@ -64,12 +63,11 @@ class TestBuildPayload:
     """Tests for _build_payload (payload formatting)."""
 
     def test_basic_payload_fields(self, client: ErrorClient):
-        """Payload contains project, environment, exception_type, message, traceback."""
+        """Payload contains project, exception_type, message, traceback."""
         exc = _make_exception()
         payload = client._build_payload(exc)
 
         assert payload["project"] == "myproject"
-        assert payload["environment"] == "prod"
         assert payload["exception_type"] == "ValueError"
         assert payload["message"] == "something went wrong"
         assert "traceback" in payload
@@ -319,7 +317,6 @@ class TestReportError:
         payload = json.loads(body)
 
         assert payload["project"] == "myproject"
-        assert payload["environment"] == "prod"
         assert payload["exception_type"] == "ValueError"
         assert payload["message"] == "something went wrong"
         assert "traceback" in payload
