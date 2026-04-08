@@ -43,8 +43,8 @@ pub const migrations = [_][]const u8{
     \\CREATE INDEX idx_occurrence_error_id ON error_occurrences(error_id);
     ,
     // Migration 4: remove environment column
-    \\ALTER TABLE errors DROP COLUMN environment;
     \\DROP INDEX IF EXISTS idx_project_env;
+    \\ALTER TABLE errors DROP COLUMN environment;
     \\CREATE INDEX idx_project ON errors(project);
     ,
 };

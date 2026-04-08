@@ -585,6 +585,7 @@ test "buildPayload produces valid JSON" {
         .user_agent = "Mozilla/5.0",
         .session_id = "sess-123",
         .release = "1.0.0",
+        .timestamp = null,
     };
 
     var buf: [max_payload_size]u8 = undefined;
@@ -617,6 +618,7 @@ test "buildPayload omits request_url when url is null" {
         .user_agent = null,
         .session_id = null,
         .release = null,
+        .timestamp = null,
     };
 
     var buf: [max_payload_size]u8 = undefined;
@@ -640,7 +642,6 @@ test "buildPayload includes context JSON" {
         .session_id = null,
         .release = null,
         .timestamp = null,
-        .environment = null,
     };
 
     var buf: [max_payload_size]u8 = undefined;
@@ -665,7 +666,6 @@ test "buildPayload escapes special characters" {
         .session_id = null,
         .release = null,
         .timestamp = null,
-        .environment = null,
     };
 
     var buf: [max_payload_size]u8 = undefined;
