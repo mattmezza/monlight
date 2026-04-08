@@ -47,7 +47,6 @@ With the script tag approach, the SDK auto-initializes and exposes `window.Monli
 | `dsn` | string | **(required)** | DSN public key from the browser relay |
 | `endpoint` | string | **(required)** | Browser relay URL |
 | `release` | string | -- | App version (used for source map matching) |
-| `environment` | string | `"prod"` | Environment name |
 | `sampleRate` | number | `1.0` | Sampling rate for Web Vitals (0.0-1.0) |
 | `debug` | boolean | `false` | Log SDK activity to console |
 | `enabled` | boolean | `true` | Master kill switch |

@@ -52,7 +52,6 @@ Submit an error report.
 ```json
 {
   "project": "my-app",
-  "environment": "prod",
   "exception_type": "ValueError",
   "message": "invalid input",
   "traceback": "Traceback (most recent call last):\n  ...",
@@ -77,7 +76,6 @@ List errors with optional filtering.
 | Param | Description |
 |-------|-------------|
 | `project` | Filter by project name |
-| `environment` | Filter by environment |
 | `resolved` | `true` or `false` |
 | `search` | Search in exception type and message |
 | `source` | Filter by source (`browser`, etc.) |
@@ -93,7 +91,6 @@ List errors with optional filtering.
       "id": 1,
       "fingerprint": "a1b2c3...",
       "project": "my-app",
-      "environment": "prod",
       "exception_type": "ValueError",
       "message": "invalid input",
       "count": 3,
@@ -167,7 +164,6 @@ List all projects that have reported errors.
 | `id` | INTEGER | Primary key |
 | `fingerprint` | VARCHAR(32) | MD5 hash, unique |
 | `project` | VARCHAR(100) | Project name |
-| `environment` | VARCHAR(50) | Environment name |
 | `exception_type` | VARCHAR(200) | Exception class name |
 | `message` | TEXT | Error message |
 | `traceback` | TEXT | Full stack trace |
