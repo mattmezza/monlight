@@ -1,6 +1,6 @@
 {
   "name": "@monlight/browser",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Lightweight browser monitoring SDK for error tracking, Web Vitals, and network metrics",
   "main": "dist/monlight.min.js",
   "module": "dist/monlight.esm.js",
