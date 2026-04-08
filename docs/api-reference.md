@@ -24,7 +24,6 @@ All endpoints use JSON. Authentication is via `X-API-Key` header unless otherwis
 ```json
 {
   "project": "my-app",
-  "environment": "prod",
   "exception_type": "ValueError",
   "message": "invalid input",
   "traceback": "Traceback (most recent call last):\n  ...",
@@ -38,7 +37,7 @@ All endpoints use JSON. Authentication is via `X-API-Key` header unless otherwis
 
 Returns `201` (new) or `200` (existing fingerprint).
 
-**GET /api/errors** query params: `project`, `environment`, `resolved` (bool), `search`, `source`, `limit` (default 50, max 200), `offset`.
+**GET /api/errors** query params: `project`, `resolved` (bool), `search`, `source`, `limit` (default 50, max 200), `offset`.
 
 ---
 
@@ -132,7 +131,6 @@ Returns `202`.
   "user_agent": "Mozilla/5.0 ...",
   "session_id": "uuid",
   "release": "1.2.3",
-  "environment": "prod",
   "context": {}
 }
 ```

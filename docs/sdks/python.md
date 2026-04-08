@@ -32,7 +32,6 @@ client = ErrorClient(
     base_url="http://localhost:5010",
     api_key="<your-api-key>",
     project="my-app",
-    environment="prod",
 )
 ```
 
@@ -43,7 +42,6 @@ client = ErrorClient(
 | `base_url` | str | **(required)** | Error tracker URL |
 | `api_key` | str | **(required)** | API key |
 | `project` | str | `"default"` | Project name |
-| `environment` | str | `"prod"` | Environment name |
 | `timeout` | float | `5.0` | HTTP timeout in seconds |
 | `excluded_headers` | set[str] | -- | Additional header names to strip (PII) |
 
@@ -140,7 +138,6 @@ clients = setup_monlight(
     metrics_collector_url="http://localhost:5012",
     api_key="<your-api-key>",
     project="my-app",
-    environment="prod",
 )
 
 @app.on_event("shutdown")
@@ -158,7 +155,6 @@ def shutdown():
 | `metrics_collector_url` | str | `None` | Metrics collector URL (omit to disable) |
 | `api_key` | str | **(required)** | Shared API key |
 | `project` | str | `"default"` | Project name for error reports |
-| `environment` | str | `"prod"` | Environment name |
 | `flush_interval` | float | `10.0` | Metrics flush interval |
 
 **Returns:** `{"error_client": ErrorClient | None, "metrics_client": MetricsClient | None}`

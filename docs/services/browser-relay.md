@@ -148,7 +148,6 @@ Submit a browser error report.
   "user_agent": "Mozilla/5.0 ...",
   "session_id": "uuid-v4",
   "release": "1.2.3",
-  "environment": "prod",
   "context": {"user_id": "u-42"}
 }
 ```
