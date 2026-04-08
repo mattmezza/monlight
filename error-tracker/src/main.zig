@@ -420,14 +420,14 @@ fn sendSmtpEmail(
 
         var user_b64_buf: [512]u8 = undefined;
         const user_b64_len = std.base64.standard.Encoder.calcSize(username.?.len);
-        std.base64.standard.Encoder.encode(user_b64_buf[0..user_b64_len], username.?);
+        _ = std.base64.standard.Encoder.encode(user_b64_buf[0..user_b64_len], username.?);
         _ = stream.write(user_b64_buf[0..user_b64_len]) catch return;
         smtpSend(stream, "\r\n") catch return;
         if (!smtpReadReply(stream, "334")) return;
 
         var pass_b64_buf: [512]u8 = undefined;
         const pass_b64_len = std.base64.standard.Encoder.calcSize(password.?.len);
-        std.base64.standard.Encoder.encode(pass_b64_buf[0..pass_b64_len], password.?);
+        _ = std.base64.standard.Encoder.encode(pass_b64_buf[0..pass_b64_len], password.?);
         _ = stream.write(pass_b64_buf[0..pass_b64_len]) catch return;
         smtpSend(stream, "\r\n") catch return;
         if (!smtpReadReply(stream, "235")) {
