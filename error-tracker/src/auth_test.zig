@@ -185,8 +185,11 @@ fn makeTestConfig() app_config.Config {
     var cfg: app_config.Config = undefined;
     cfg.database_path = ":memory:";
     cfg.api_key = test_api_key;
-    cfg.postmark_api_token = null;
-    cfg.postmark_from_email = "test@example.com";
+    cfg.smtp_host = null;
+    cfg.smtp_port = 25;
+    cfg.smtp_username = null;
+    cfg.smtp_password = null;
+    cfg.smtp_from = "test@example.com";
     cfg.alert_emails = null;
     cfg.retention_days = 90;
     cfg.base_url = "http://localhost:8000";

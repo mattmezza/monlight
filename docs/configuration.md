@@ -16,8 +16,11 @@ All services are configured via environment variables. No configuration files.
 | `DATABASE_PATH` | No | `./data/errors.db` | SQLite database path |
 | `LOG_LEVEL` | No | `info` | `error`, `warn`, `info`, `debug` |
 | `RETENTION_DAYS` | No | `90` | Days before resolved errors are deleted |
-| `POSTMARK_API_TOKEN` | No | -- | Postmark token for email alerts |
-| `POSTMARK_FROM_EMAIL` | No | -- | Sender email for alerts |
+| `SMTP_HOST` | No | -- | SMTP server host for email alerts |
+| `SMTP_PORT` | No | `25` | SMTP server port |
+| `SMTP_USERNAME` | No | -- | SMTP username for authentication |
+| `SMTP_PASSWORD` | No | -- | SMTP password for authentication |
+| `SMTP_FROM` | No | `errors@example.com` | Sender email for alerts |
 | `ALERT_EMAILS` | No | -- | Comma-separated alert recipients |
 
 ## Log Viewer
@@ -75,8 +78,11 @@ BROWSER_RELAY_ADMIN_API_KEY=<random-32-char-string>
 # CONTAINERS=my_app,my_worker
 # LOG_LEVEL=info
 
-# Email alerts (optional)
-# POSTMARK_API_TOKEN=
-# POSTMARK_FROM_EMAIL=errors@example.com
+# SMTP email alerts (optional)
+# SMTP_HOST=smtp.example.com
+# SMTP_PORT=587
+# SMTP_USERNAME=
+# SMTP_PASSWORD=
+# SMTP_FROM=errors@example.com
 # ALERT_EMAILS=admin@example.com
 ```

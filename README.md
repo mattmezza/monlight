@@ -80,7 +80,7 @@ curl http://localhost:5013/health
 **Error Tracker** -- Capture, deduplicate, and alert on application errors.
 - Error fingerprinting and deduplication (reopen on recurrence)
 - Stores last 5 occurrences per error with full request context
-- Postmark email alerts on new errors
+- SMTP email alerts on new errors
 - Automatic retention cleanup for resolved errors
 - Web UI with filtering by project, environment, and resolution status
 
@@ -243,8 +243,11 @@ All endpoints require an `X-API-Key` header unless noted otherwise.
 |----------------------|----------|----------------------|--------------------------------------|
 | `API_KEY`            | Yes      |                      | API key for authentication           |
 | `DATABASE_PATH`      | No       | `./data/errors.db`   | SQLite database path                 |
-| `POSTMARK_API_TOKEN` | No       |                      | Postmark API token for email alerts  |
-| `POSTMARK_FROM_EMAIL`| No       |                      | Sender address for alert emails      |
+| `SMTP_HOST`          | No       |                      | SMTP server host for email alerts    |
+| `SMTP_PORT`          | No       | `25`                 | SMTP server port                     |
+| `SMTP_USERNAME`      | No       |                      | SMTP username for authentication     |
+| `SMTP_PASSWORD`      | No       |                      | SMTP password for authentication     |
+| `SMTP_FROM`          | No       | `errors@example.com` | Sender address for alert emails      |
 | `ALERT_EMAILS`       | No       |                      | Comma-separated recipient addresses  |
 | `RETENTION_DAYS`     | No       | `90`                 | Days to keep resolved errors         |
 | `BASE_URL`           | No       | `http://localhost:5010` | Base URL for links in alert emails|
