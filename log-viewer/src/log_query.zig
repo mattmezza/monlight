@@ -30,7 +30,7 @@ pub fn parseQueryParams(target: []const u8) LogQueryParams {
             if (value.len > 0) params.container = value;
         } else if (std.mem.eql(u8, key, "level")) {
             if (value.len > 0) params.level = value;
-        } else if (std.mem.eql(u8, key, "search")) {
+        } else if (std.mem.eql(u8, key, "search") or std.mem.eql(u8, key, "q")) {
             if (value.len > 0) params.search = value;
         } else if (std.mem.eql(u8, key, "since")) {
             if (value.len > 0) params.since = value;
@@ -432,6 +432,11 @@ test "parseQueryParams parses all parameters" {
     try std.testing.expectEqualStrings("2025-01-21T00:00:00Z", params.until.?);
     try std.testing.expectEqual(@as(u32, 50), params.limit);
     try std.testing.expectEqual(@as(u32, 10), params.offset);
+}
+
+test "parseQueryParams accepts q as alias for search" {
+    const params = parseQueryParams("/api/logs?q=retention");
+    try std.testing.expectEqualStrings("retention", params.search.?);
 }
 
 test "parseQueryParams uses defaults for missing params" {
