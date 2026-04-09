@@ -1,7 +1,9 @@
 # Build stage: compile Zig source to binary
 FROM alpine:3.21 AS builder
 
-RUN apk add --no-cache zig sqlite-dev musl-dev
+RUN apk add --no-cache sqlite-dev musl-dev curl tar xz \
+    && curl -sSL https://ziglang.org/download/0.15.2/zig-linux-x86_64-0.15.2.tar.xz | tar -xJ -C /usr/local \
+    && ln -s /usr/local/zig-linux-x86_64-0.15.2/zig /usr/local/bin/zig
 
 WORKDIR /build
 COPY error-tracker/build.zig error-tracker/build.zig.zon ./error-tracker/
