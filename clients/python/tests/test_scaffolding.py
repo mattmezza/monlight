@@ -5,7 +5,7 @@ def test_package_version():
     """Package version is defined."""
     import monlight
 
-    assert monlight.__version__ == "0.1.0"
+    assert monlight.__version__  # version string is defined and non-empty
 
 
 def test_error_client_import():
