@@ -11,7 +11,7 @@ COPY browser-relay/src/ ./browser-relay/src/
 COPY shared/ ./shared/
 
 WORKDIR /build/browser-relay
-RUN zig build -Doptimize=ReleaseSafe -Dtarget=x86_64-linux-musl -Dcpu=baseline
+RUN zig build -Doptimize=ReleaseSafe -Dcpu=baseline
 
 # Runtime stage: minimal image with just the binary
 FROM alpine:3.21
