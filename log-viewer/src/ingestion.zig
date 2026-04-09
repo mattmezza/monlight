@@ -404,7 +404,8 @@ pub fn findContainerLogFile(
         defer allocator.free(name_pattern2);
 
         if (std.mem.indexOf(u8, config_content, name_pattern) != null or
-            std.mem.indexOf(u8, config_content, name_pattern2) != null)
+            std.mem.indexOf(u8, config_content, name_pattern2) != null or
+            wildcardMatchContainer(container_name, config_content))
         {
             // Found the container! Build the log file path.
             const log_path = try std.fmt.allocPrint(allocator, "{s}/{s}/{s}-json.log", .{ log_sources, entry.name, entry.name });
@@ -413,6 +414,45 @@ pub fn findContainerLogFile(
     }
 
     return null;
+}
+
+/// Check if a wildcard container pattern matches a name found in Docker config JSON.
+/// Only used when the pattern contains `*`. Extracts the container name from
+/// `"Name":"/<name>"` in the config content and does a glob match.
+fn wildcardMatchContainer(pattern: []const u8, config_content: []const u8) bool {
+    if (std.mem.indexOf(u8, pattern, "*") == null) return false;
+
+    // Extract name from "Name":"/<name>" or "Name": "/<name>"
+    const name = extractDockerName(config_content) orelse return false;
+    return globMatch(pattern, name);
+}
+
+/// Extract container name from Docker config.v2.json content.
+/// Looks for "Name":"/<name>" and returns <name> (without the leading slash).
+fn extractDockerName(content: []const u8) ?[]const u8 {
+    const markers = [_][]const u8{ "\"Name\":\"/", "\"Name\": \"/" };
+    for (markers) |marker| {
+        if (std.mem.indexOf(u8, content, marker)) |start| {
+            const name_start = start + marker.len;
+            if (std.mem.indexOfScalar(u8, content[name_start..], '"')) |end| {
+                return content[name_start .. name_start + end];
+            }
+        }
+    }
+    return null;
+}
+
+/// Simple glob match supporting `*` as a wildcard for zero or more characters.
+fn globMatch(pattern: []const u8, str: []const u8) bool {
+    const star = std.mem.indexOf(u8, pattern, "*") orelse {
+        return std.mem.eql(u8, pattern, str);
+    };
+    const prefix = pattern[0..star];
+    const suffix = pattern[star + 1..];
+
+    if (!std.mem.startsWith(u8, str, prefix)) return false;
+    if (!std.mem.endsWith(u8, str, suffix)) return false;
+    return str.len >= prefix.len + suffix.len;
 }
 
 /// Get the inode number of a file.
@@ -1039,4 +1079,47 @@ test "parseContainerNames handles empty and whitespace" {
     defer names.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), names.items.len);
+}
+
+test "globMatch exact" {
+    try std.testing.expect(globMatch("flowrent_web", "flowrent_web"));
+    try std.testing.expect(!globMatch("flowrent_web", "flowrent_worker"));
+}
+
+test "globMatch prefix wildcard" {
+    try std.testing.expect(globMatch("flowrent_*", "flowrent_web"));
+    try std.testing.expect(globMatch("flowrent_*", "flowrent_worker"));
+    try std.testing.expect(globMatch("flowrent_*", "flowrent_"));
+    try std.testing.expect(!globMatch("flowrent_*", "other_web"));
+}
+
+test "globMatch suffix wildcard" {
+    try std.testing.expect(globMatch("*_web", "flowrent_web"));
+    try std.testing.expect(globMatch("*_web", "myapp_web"));
+    try std.testing.expect(!globMatch("*_web", "flowrent_worker"));
+}
+
+test "globMatch middle wildcard" {
+    try std.testing.expect(globMatch("flow*app", "flowrent_app"));
+    try std.testing.expect(globMatch("flow*app", "flowapp"));
+    try std.testing.expect(!globMatch("flow*app", "flowrent_web"));
+}
+
+test "extractDockerName parses config JSON" {
+    try std.testing.expectEqualStrings("flowrent_web", extractDockerName(
+        \\{"ID":"abc","Name":"/flowrent_web","State":{}}
+    ).?);
+    try std.testing.expectEqualStrings("my-app", extractDockerName(
+        \\{"Name": "/my-app"}
+    ).?);
+    try std.testing.expect(extractDockerName("no name here") == null);
+}
+
+test "wildcardMatchContainer matches pattern against docker config" {
+    const config =
+        \\{"ID":"abc123","Name":"/flowrent_web","State":{"Running":true}}
+    ;
+    try std.testing.expect(wildcardMatchContainer("flowrent_*", config));
+    try std.testing.expect(!wildcardMatchContainer("other_*", config));
+    try std.testing.expect(!wildcardMatchContainer("flowrent_web", config)); // no wildcard, uses exact path
 }
