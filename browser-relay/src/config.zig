@@ -22,6 +22,10 @@ pub const Config = struct {
     /// Metrics Collector API key for forwarding metrics. Required.
     metrics_collector_api_key: []const u8,
 
+    /// Comma-separated DSN key seeds in "project:key" format. Optional.
+    /// Example: DSN_KEYS=flowrent:my-known-dsn-key,other-project:other-key
+    dsn_keys: ?[]const u8,
+
     /// Comma-separated list of allowed CORS origins. Optional.
     cors_origins: ?[]const u8,
 
@@ -60,6 +64,7 @@ pub fn load() config_mod.ConfigError!Config {
 
     // Optional variables with defaults
     const database_path = config_mod.getString("DATABASE_PATH", "./data/browser-relay.db");
+    const dsn_keys = config_mod.getOptional("DSN_KEYS");
     const cors_origins = config_mod.getOptional("CORS_ORIGINS");
     const max_body_size: usize = @intCast(config_mod.getInt("MAX_BODY_SIZE", 64 * 1024));
     const rate_limit_val: usize = @intCast(config_mod.getInt("RATE_LIMIT", 300));
@@ -81,6 +86,7 @@ pub fn load() config_mod.ConfigError!Config {
         .error_tracker_api_key = error_tracker_api_key,
         .metrics_collector_url = metrics_collector_url,
         .metrics_collector_api_key = metrics_collector_api_key,
+        .dsn_keys = dsn_keys,
         .cors_origins = cors_origins,
         .max_body_size = max_body_size,
         .rate_limit = rate_limit_val,
