@@ -226,9 +226,61 @@ fn handleErrorIngestion(request: *std.http.Server.Request, db: *sqlite.Database,
 
     sendJsonResponse(request, status, resp_json) catch {};
 
-    // Trigger email alert for new errors (asynchronously, non-blocking)
+    // Trigger email alert for new errors in a background thread (non-blocking)
     if (result.is_new) {
-        triggerEmailAlert(cfg, &report, &result);
+        const AlertContext = struct {
+            cfg: *const app_config.Config,
+            subject: [512]u8,
+            subject_len: usize,
+            body: [8192]u8,
+            body_len: usize,
+        };
+        var ctx = AlertContext{
+            .cfg = cfg,
+            .subject = undefined,
+            .subject_len = 0,
+            .body = undefined,
+            .body_len = 0,
+        };
+        // Format subject and body into context buffers
+        const msg_truncated = if (report.message.len > 50) report.message[0..50] else report.message;
+        const subject = std.fmt.bufPrint(&ctx.subject, "[{s}] {s}: {s}", .{
+            report.project, report.exception_type, msg_truncated,
+        }) catch "New error alert";
+        ctx.subject_len = subject.len;
+
+        const request_info = if (report.request_method != null and report.request_url != null) blk: {
+            var req_buf: [256]u8 = undefined;
+            break :blk std.fmt.bufPrint(&req_buf, "{s} {s}", .{ report.request_method.?, report.request_url.? }) catch "N/A";
+        } else "N/A";
+        const dashboard_link = blk: {
+            var link_buf: [256]u8 = undefined;
+            break :blk std.fmt.bufPrint(&link_buf, "{s}/api/errors/{d}", .{ cfg.base_url, result.id }) catch cfg.base_url;
+        };
+        const email_body = std.fmt.bufPrint(&ctx.body,
+            \\New error in {s}
+            \\
+            \\Exception: {s}
+            \\Message: {s}
+            \\
+            \\Request: {s}
+            \\
+            \\Traceback:
+            \\{s}
+            \\
+            \\---
+            \\View in Error Tracker: {s}
+        , .{
+            report.project, report.exception_type, report.message,
+            request_info, report.traceback, dashboard_link,
+        }) catch "Error alert - see error tracker for details";
+        ctx.body_len = email_body.len;
+
+        const thread = std.Thread.spawn(.{}, sendAlertEmails, .{ctx}) catch |err| {
+            log.warn("Failed to spawn email alert thread: {}", .{err});
+            return;
+        };
+        thread.detach();
     }
 }
 
@@ -319,57 +371,14 @@ fn handleErrorResolve(request: *std.http.Server.Request, db: *sqlite.Database, e
     sendJsonResponse(request, status, resp_json) catch {};
 }
 
-/// Trigger an email alert for a new error.
-/// This is fire-and-forget: failures are logged but do not affect the response.
-fn triggerEmailAlert(cfg: *const app_config.Config, report: *const error_ingestion.ErrorReport, result: *const error_ingestion.IngestResult) void {
-    // If SMTP is not configured, skip silently
+/// Background thread entry: send alert emails to all configured recipients.
+fn sendAlertEmails(ctx: anytype) void {
+    const cfg = ctx.cfg;
     const smtp_host = cfg.smtp_host orelse return;
     const alert_emails = cfg.alert_emails orelse return;
+    const subject = ctx.subject[0..ctx.subject_len];
+    const email_body = ctx.body[0..ctx.body_len];
 
-    // Format email subject: [{project}] {exception_type}: {message_truncated_50_chars}
-    var subject_buf: [512]u8 = undefined;
-    const msg_truncated = if (report.message.len > 50) report.message[0..50] else report.message;
-    const subject = std.fmt.bufPrint(&subject_buf, "[{s}] {s}: {s}", .{
-        report.project,
-        report.exception_type,
-        msg_truncated,
-    }) catch "New error alert";
-
-    // Format email body
-    var body_buf: [8192]u8 = undefined;
-    const request_info = if (report.request_method != null and report.request_url != null) blk: {
-        var req_buf: [256]u8 = undefined;
-        break :blk std.fmt.bufPrint(&req_buf, "{s} {s}", .{ report.request_method.?, report.request_url.? }) catch "N/A";
-    } else "N/A";
-
-    const dashboard_link = blk: {
-        var link_buf: [256]u8 = undefined;
-        break :blk std.fmt.bufPrint(&link_buf, "{s}/api/errors/{d}", .{ cfg.base_url, result.id }) catch cfg.base_url;
-    };
-
-    const email_body = std.fmt.bufPrint(&body_buf,
-        \\New error in {s}
-        \\
-        \\Exception: {s}
-        \\Message: {s}
-        \\
-        \\Request: {s}
-        \\
-        \\Traceback:
-        \\{s}
-        \\
-        \\---
-        \\View in Error Tracker: {s}
-    , .{
-        report.project,
-        report.exception_type,
-        report.message,
-        request_info,
-        report.traceback,
-        dashboard_link,
-    }) catch "Error alert - see error tracker for details";
-
-    // Send to each recipient
     var email_iter = std.mem.splitScalar(u8, alert_emails, ',');
     while (email_iter.next()) |raw_email| {
         const email = std.mem.trim(u8, raw_email, " \t\r\n");
@@ -378,8 +387,8 @@ fn triggerEmailAlert(cfg: *const app_config.Config, report: *const error_ingesti
     }
 }
 
-/// Send an email via SMTP.
-/// This is a blocking TCP call — failures are logged but do not affect the response.
+/// Send an email via SMTP with STARTTLS support.
+/// Runs in a background thread — failures are logged but do not affect service availability.
 fn sendSmtpEmail(
     host: []const u8,
     port: u16,
@@ -390,104 +399,232 @@ fn sendSmtpEmail(
     subject: []const u8,
     body: []const u8,
 ) void {
-    const stream = net.tcpConnectToHost(std.heap.page_allocator, host, port) catch |err| {
+    const allocator = std.heap.page_allocator;
+    const stream = net.tcpConnectToHost(allocator, host, port) catch |err| {
         log.warn("Failed to connect to SMTP server {s}:{d}: {}", .{ host, port, err });
         return;
     };
     defer stream.close();
 
-    // Read server greeting
-    if (!smtpReadOk(stream)) {
+    // Set read timeout (10 seconds) to prevent indefinite hangs
+    const timeout = std.posix.timeval{ .sec = 10, .usec = 0 };
+    std.posix.setsockopt(stream.handle, std.posix.SOL.SOCKET, std.posix.SO.RCVTIMEO, std.mem.asBytes(&timeout)) catch {};
+    std.posix.setsockopt(stream.handle, std.posix.SOL.SOCKET, std.posix.SO.SNDTIMEO, std.mem.asBytes(&timeout)) catch {};
+
+    // Use buffered reader/writer for the stream (needed by TLS client)
+    var read_buf: [16384]u8 = undefined;
+    var write_buf: [16384]u8 = undefined;
+    var reader = stream.reader(&read_buf);
+    var writer = stream.writer(&write_buf);
+
+    // Read server greeting (plaintext)
+    if (!smtpReadOk(&reader)) {
         log.warn("SMTP server did not send greeting", .{});
         return;
     }
 
-    // EHLO
-    smtpSend(stream, "EHLO localhost\r\n") catch {
+    // EHLO (plaintext)
+    smtpSend(&writer, "EHLO localhost\r\n") catch {
         log.warn("Failed to send EHLO", .{});
         return;
     };
-    if (!smtpReadOk(stream)) {
+    const ehlo_response = smtpReadResponse(&reader);
+    if (!std.mem.startsWith(u8, &ehlo_response.buf, "2")) {
         log.warn("SMTP EHLO rejected", .{});
         return;
     }
 
-    // AUTH LOGIN if credentials provided
+    // Check if STARTTLS is advertised and attempt upgrade
+    const ehlo_text = ehlo_response.buf[0..ehlo_response.len];
+    const starttls_supported = std.mem.indexOf(u8, ehlo_text, "STARTTLS") != null;
+
+    if (starttls_supported) {
+        smtpSend(&writer, "STARTTLS\r\n") catch {
+            log.warn("Failed to send STARTTLS", .{});
+            return;
+        };
+        if (!smtpReadOk(&reader)) {
+            log.warn("SMTP STARTTLS rejected", .{});
+            return;
+        }
+
+        // Upgrade to TLS
+        var ca_bundle: std.crypto.Certificate.Bundle = .{};
+        ca_bundle.rescan(allocator) catch |err| {
+            log.warn("Failed to load CA certificates: {}", .{err});
+            return;
+        };
+        defer ca_bundle.deinit(allocator);
+
+        var tls_client = std.crypto.tls.Client.init(&reader, &writer, .{
+            .host = .{ .explicit = host },
+            .ca = .{ .bundle = ca_bundle },
+        }) catch |err| {
+            log.warn("TLS handshake failed with {s}:{d}: {}", .{ host, port, err });
+            return;
+        };
+
+        // Re-EHLO over TLS
+        smtpSendTls(&tls_client, "EHLO localhost\r\n") catch {
+            log.warn("Failed to send EHLO over TLS", .{});
+            return;
+        };
+        if (!smtpReadOkTls(&tls_client)) {
+            log.warn("SMTP EHLO rejected after STARTTLS", .{});
+            return;
+        }
+
+        // AUTH + send message over TLS
+        smtpAuthAndSend(&tls_client, username, password, from_email, to_email, subject, body);
+    } else {
+        // Plain SMTP (no TLS) — AUTH + send message
+        smtpAuthAndSendPlain(&reader, &writer, username, password, from_email, to_email, subject, body);
+    }
+}
+
+const SmtpReader = std.Io.Reader;
+const SmtpWriter = std.Io.Writer;
+
+/// Perform AUTH LOGIN + mail send over a TLS connection.
+fn smtpAuthAndSend(tls: *std.crypto.tls.Client, username: ?[]const u8, password: ?[]const u8, from_email: []const u8, to_email: []const u8, subject: []const u8, body: []const u8) void {
+    // AUTH LOGIN
     if (username != null and password != null) {
-        smtpSend(stream, "AUTH LOGIN\r\n") catch return;
-        if (!smtpReadReply(stream, "334")) return;
+        smtpSendTls(tls, "AUTH LOGIN\r\n") catch return;
+        if (!smtpReadReplyTls(tls, "334")) return;
 
         var user_b64_buf: [512]u8 = undefined;
         const user_b64_len = std.base64.standard.Encoder.calcSize(username.?.len);
         _ = std.base64.standard.Encoder.encode(user_b64_buf[0..user_b64_len], username.?);
-        _ = stream.write(user_b64_buf[0..user_b64_len]) catch return;
-        smtpSend(stream, "\r\n") catch return;
-        if (!smtpReadReply(stream, "334")) return;
+        _ = tls.writer().write(user_b64_buf[0..user_b64_len]) catch return;
+        smtpSendTls(tls, "\r\n") catch return;
+        if (!smtpReadReplyTls(tls, "334")) return;
 
         var pass_b64_buf: [512]u8 = undefined;
         const pass_b64_len = std.base64.standard.Encoder.calcSize(password.?.len);
         _ = std.base64.standard.Encoder.encode(pass_b64_buf[0..pass_b64_len], password.?);
-        _ = stream.write(pass_b64_buf[0..pass_b64_len]) catch return;
-        smtpSend(stream, "\r\n") catch return;
-        if (!smtpReadReply(stream, "235")) {
+        _ = tls.writer().write(pass_b64_buf[0..pass_b64_len]) catch return;
+        smtpSendTls(tls, "\r\n") catch return;
+        if (!smtpReadReplyTls(tls, "235")) {
             log.warn("SMTP authentication failed", .{});
             return;
         }
     }
 
-    // MAIL FROM
+    // MAIL FROM / RCPT TO / DATA / message
     var from_buf: [512]u8 = undefined;
     const mail_from = std.fmt.bufPrint(&from_buf, "MAIL FROM:<{s}>\r\n", .{from_email}) catch return;
-    smtpSend(stream, mail_from) catch return;
-    if (!smtpReadOk(stream)) {
-        log.warn("SMTP MAIL FROM rejected", .{});
-        return;
-    }
+    smtpSendTls(tls, mail_from) catch return;
+    if (!smtpReadOkTls(tls)) { log.warn("SMTP MAIL FROM rejected", .{}); return; }
 
-    // RCPT TO
     var to_buf: [512]u8 = undefined;
     const rcpt_to = std.fmt.bufPrint(&to_buf, "RCPT TO:<{s}>\r\n", .{to_email}) catch return;
-    smtpSend(stream, rcpt_to) catch return;
-    if (!smtpReadOk(stream)) {
-        log.warn("SMTP RCPT TO rejected for {s}", .{to_email});
-        return;
-    }
+    smtpSendTls(tls, rcpt_to) catch return;
+    if (!smtpReadOkTls(tls)) { log.warn("SMTP RCPT TO rejected for {s}", .{to_email}); return; }
 
-    // DATA
-    smtpSend(stream, "DATA\r\n") catch return;
-    if (!smtpReadReply(stream, "354")) {
-        log.warn("SMTP DATA rejected", .{});
-        return;
-    }
+    smtpSendTls(tls, "DATA\r\n") catch return;
+    if (!smtpReadReplyTls(tls, "354")) { log.warn("SMTP DATA rejected", .{}); return; }
 
-    // Send email headers and body
     var hdr_buf: [1024]u8 = undefined;
     const headers = std.fmt.bufPrint(&hdr_buf, "From: {s}\r\nTo: {s}\r\nSubject: {s}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n", .{ from_email, to_email, subject }) catch return;
-    smtpSend(stream, headers) catch return;
-    smtpSend(stream, body) catch return;
-    smtpSend(stream, "\r\n.\r\n") catch return;
-    if (!smtpReadOk(stream)) {
-        log.warn("SMTP message rejected", .{});
-        return;
+    smtpSendTls(tls, headers) catch return;
+    smtpSendTls(tls, body) catch return;
+    smtpSendTls(tls, "\r\n.\r\n") catch return;
+    if (!smtpReadOkTls(tls)) { log.warn("SMTP message rejected", .{}); return; }
+
+    smtpSendTls(tls, "QUIT\r\n") catch {};
+    log.info("Email alert sent to {s} via SMTP (STARTTLS)", .{to_email});
+}
+
+/// Perform AUTH LOGIN + mail send over a plain (non-TLS) connection.
+fn smtpAuthAndSendPlain(reader: *SmtpReader, writer: *SmtpWriter, username: ?[]const u8, password: ?[]const u8, from_email: []const u8, to_email: []const u8, subject: []const u8, body: []const u8) void {
+    // AUTH LOGIN
+    if (username != null and password != null) {
+        smtpSend(writer, "AUTH LOGIN\r\n") catch return;
+        if (!smtpReadReply(reader, "334")) return;
+
+        var user_b64_buf: [512]u8 = undefined;
+        const user_b64_len = std.base64.standard.Encoder.calcSize(username.?.len);
+        _ = std.base64.standard.Encoder.encode(user_b64_buf[0..user_b64_len], username.?);
+        _ = writer.write(user_b64_buf[0..user_b64_len]) catch return;
+        smtpSend(writer, "\r\n") catch return;
+        if (!smtpReadReply(reader, "334")) return;
+
+        var pass_b64_buf: [512]u8 = undefined;
+        const pass_b64_len = std.base64.standard.Encoder.calcSize(password.?.len);
+        _ = std.base64.standard.Encoder.encode(pass_b64_buf[0..pass_b64_len], password.?);
+        _ = writer.write(pass_b64_buf[0..pass_b64_len]) catch return;
+        smtpSend(writer, "\r\n") catch return;
+        if (!smtpReadReply(reader, "235")) {
+            log.warn("SMTP authentication failed", .{});
+            return;
+        }
     }
 
-    // QUIT
-    smtpSend(stream, "QUIT\r\n") catch {};
+    // MAIL FROM / RCPT TO / DATA / message
+    var from_buf: [512]u8 = undefined;
+    const mail_from = std.fmt.bufPrint(&from_buf, "MAIL FROM:<{s}>\r\n", .{from_email}) catch return;
+    smtpSend(writer, mail_from) catch return;
+    if (!smtpReadOk(reader)) { log.warn("SMTP MAIL FROM rejected", .{}); return; }
 
-    log.info("Email alert sent to {s} via SMTP", .{to_email});
+    var to_buf: [512]u8 = undefined;
+    const rcpt_to = std.fmt.bufPrint(&to_buf, "RCPT TO:<{s}>\r\n", .{to_email}) catch return;
+    smtpSend(writer, rcpt_to) catch return;
+    if (!smtpReadOk(reader)) { log.warn("SMTP RCPT TO rejected for {s}", .{to_email}); return; }
+
+    smtpSend(writer, "DATA\r\n") catch return;
+    if (!smtpReadReply(reader, "354")) { log.warn("SMTP DATA rejected", .{}); return; }
+
+    var hdr_buf: [1024]u8 = undefined;
+    const headers = std.fmt.bufPrint(&hdr_buf, "From: {s}\r\nTo: {s}\r\nSubject: {s}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n", .{ from_email, to_email, subject }) catch return;
+    smtpSend(writer, headers) catch return;
+    smtpSend(writer, body) catch return;
+    smtpSend(writer, "\r\n.\r\n") catch return;
+    if (!smtpReadOk(reader)) { log.warn("SMTP message rejected", .{}); return; }
+
+    smtpSend(writer, "QUIT\r\n") catch {};
+    log.info("Email alert sent to {s} via SMTP (plain)", .{to_email});
 }
 
-fn smtpSend(stream: net.Stream, data: []const u8) !void {
-    _ = try stream.write(data);
+// --- SMTP I/O helpers for plain streams ---
+
+fn smtpSend(writer: *SmtpWriter, data: []const u8) !void {
+    _ = try writer.write(data);
+    try writer.flush();
 }
 
-fn smtpReadOk(stream: net.Stream) bool {
-    return smtpReadReply(stream, "2");
+fn smtpReadOk(reader: *SmtpReader) bool {
+    return smtpReadReply(reader, "2");
 }
 
-fn smtpReadReply(stream: net.Stream, expected_prefix: []const u8) bool {
+const SmtpResponse = struct { buf: [1024]u8, len: usize };
+
+fn smtpReadResponse(reader: *SmtpReader) SmtpResponse {
+    var resp = SmtpResponse{ .buf = undefined, .len = 0 };
+    resp.len = reader.read(&resp.buf) catch 0;
+    return resp;
+}
+
+fn smtpReadReply(reader: *SmtpReader, expected_prefix: []const u8) bool {
     var buf: [1024]u8 = undefined;
-    const n = stream.read(&buf) catch return false;
+    const n = reader.read(&buf) catch return false;
+    if (n < expected_prefix.len) return false;
+    return std.mem.startsWith(u8, buf[0..n], expected_prefix);
+}
+
+// --- SMTP I/O helpers for TLS streams ---
+
+fn smtpSendTls(tls: *std.crypto.tls.Client, data: []const u8) !void {
+    _ = try tls.writer().write(data);
+    tls.writer().flush() catch {};
+}
+
+fn smtpReadOkTls(tls: *std.crypto.tls.Client) bool {
+    return smtpReadReplyTls(tls, "2");
+}
+
+fn smtpReadReplyTls(tls: *std.crypto.tls.Client, expected_prefix: []const u8) bool {
+    var buf: [1024]u8 = undefined;
+    const n = tls.reader().read(&buf) catch return false;
     if (n < expected_prefix.len) return false;
     return std.mem.startsWith(u8, buf[0..n], expected_prefix);
 }
