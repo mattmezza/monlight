@@ -50,6 +50,14 @@ pub fn main() !void {
     };
     defer db.close();
 
+    // Seed DSN keys from environment variable if configured
+    if (cfg.dsn_keys) |dsn_keys_str| {
+        database.seedDsnKeys(&db, dsn_keys_str) catch |err| {
+            log.err("Failed to seed DSN keys: {}", .{err});
+            std.process.exit(1);
+        };
+    }
+
     log.info("Starting browser-relay on port {d}...", .{server_port});
 
     const address = net.Address.initIp4(.{ 0, 0, 0, 0 }, server_port);

@@ -46,6 +46,43 @@ pub fn init(db_path: [*:0]const u8) !sqlite.Database {
     return db;
 }
 
+/// Seed DSN keys from a comma-separated "project:key" string.
+/// Existing keys are skipped (INSERT OR IGNORE).
+pub fn seedDsnKeys(db: *sqlite.Database, dsn_keys_str: []const u8) !void {
+    var pairs = std.mem.splitScalar(u8, dsn_keys_str, ',');
+    while (pairs.next()) |pair| {
+        const trimmed = std.mem.trim(u8, pair, " ");
+        if (trimmed.len == 0) continue;
+
+        const colon = std.mem.indexOfScalar(u8, trimmed, ':') orelse {
+            log.warn("skipping invalid DSN_KEYS entry (missing ':'): {s}", .{trimmed});
+            continue;
+        };
+        const project = std.mem.trim(u8, trimmed[0..colon], " ");
+        const key = std.mem.trim(u8, trimmed[colon + 1 ..], " ");
+
+        if (project.len == 0 or key.len == 0) {
+            log.warn("skipping DSN_KEYS entry with empty project or key: {s}", .{trimmed});
+            continue;
+        }
+
+        const stmt = db.prepare(
+            "INSERT OR IGNORE INTO dsn_keys (public_key, project) VALUES (?, ?);",
+        ) catch |err| {
+            log.warn("failed to prepare DSN seed statement: {}", .{err});
+            continue;
+        };
+        defer stmt.deinit();
+        stmt.bindText(1, key) catch continue;
+        stmt.bindText(2, project) catch continue;
+        _ = stmt.exec() catch |err| {
+            log.warn("failed to seed DSN key for project '{s}': {}", .{ project, err });
+            continue;
+        };
+        log.info("seeded DSN key for project '{s}'", .{project});
+    }
+}
+
 // ============================================================
 // Tests
 // ============================================================
@@ -323,4 +360,66 @@ test "init is idempotent - can be called multiple times" {
     }
 
     db.close();
+}
+
+test "seedDsnKeys inserts keys from comma-separated string" {
+    var db = try init(":memory:");
+    defer db.close();
+
+    try seedDsnKeys(&db, "flowrent:my-key-123,other-app:other-key-456");
+
+    const stmt = try db.prepare("SELECT COUNT(*) FROM dsn_keys;");
+    defer stmt.deinit();
+    var iter = stmt.query();
+    if (iter.next()) |row| {
+        try std.testing.expectEqual(@as(i64, 2), row.int(0));
+    }
+}
+
+test "seedDsnKeys skips duplicates" {
+    var db = try init(":memory:");
+    defer db.close();
+
+    try seedDsnKeys(&db, "flowrent:my-key-123");
+    try seedDsnKeys(&db, "flowrent:my-key-123"); // duplicate
+
+    const stmt = try db.prepare("SELECT COUNT(*) FROM dsn_keys;");
+    defer stmt.deinit();
+    var iter = stmt.query();
+    if (iter.next()) |row| {
+        try std.testing.expectEqual(@as(i64, 1), row.int(0));
+    }
+}
+
+test "seedDsnKeys skips invalid entries" {
+    var db = try init(":memory:");
+    defer db.close();
+
+    try seedDsnKeys(&db, "valid-project:valid-key,invalid-no-colon,,:");
+
+    const stmt = try db.prepare("SELECT COUNT(*) FROM dsn_keys;");
+    defer stmt.deinit();
+    var iter = stmt.query();
+    if (iter.next()) |row| {
+        try std.testing.expectEqual(@as(i64, 1), row.int(0));
+    }
+}
+
+test "seedDsnKeys stores correct project and key" {
+    var db = try init(":memory:");
+    defer db.close();
+
+    try seedDsnKeys(&db, "flowrent:my-dsn-key");
+
+    const stmt = try db.prepare("SELECT public_key, project FROM dsn_keys WHERE public_key = 'my-dsn-key';");
+    defer stmt.deinit();
+    var iter = stmt.query();
+    if (iter.next()) |row| {
+        const key = row.text(0) orelse "";
+        const project = row.text(1) orelse "";
+        try std.testing.expectEqualStrings("my-dsn-key", key);
+        try std.testing.expectEqualStrings("flowrent", project);
+    } else {
+        return error.TestUnexpectedResult;
+    }
 }
