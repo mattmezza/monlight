@@ -11,7 +11,7 @@ COPY log-viewer/src/ ./log-viewer/src/
 COPY shared/ ./shared/
 
 WORKDIR /build/log-viewer
-RUN zig build -Doptimize=ReleaseSafe
+RUN zig build -Doptimize=ReleaseSafe -Dtarget=x86_64-linux-musl -Dcpu=baseline
 
 # Runtime stage: minimal image with just the binary
 FROM alpine:3.21
