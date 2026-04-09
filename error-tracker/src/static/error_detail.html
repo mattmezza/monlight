@@ -34,6 +34,17 @@
       <div id="occurrences-list" class="space-y-3"></div>
     </div>
 
+    <!-- API Key Modal -->
+    <div id="api-key-modal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+      <div class="bg-gray-800 border border-gray-700 rounded-lg p-6 w-full max-w-sm mx-4">
+        <h2 class="text-lg font-bold text-white mb-2">API Key Required</h2>
+        <p class="text-gray-400 text-sm mb-4">Enter your API key to access the Error Tracker.</p>
+        <input id="api-key-input" type="password" placeholder="your-api-key"
+          class="w-full bg-gray-900 border border-gray-600 text-gray-200 text-sm rounded px-3 py-2 mb-4 focus:outline-none focus:border-blue-500">
+        <button id="api-key-submit" class="w-full bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded px-4 py-2 transition-colors">Connect</button>
+      </div>
+    </div>
+
     <!-- Error state -->
     <div id="error-state" class="hidden">
       <div class="text-center py-12 text-red-400">Error not found</div>
@@ -41,7 +52,7 @@
   </div>
 
   <script>
-    const API_KEY = localStorage.getItem('api_key') || '';
+    let API_KEY = localStorage.getItem('api_key') || '';
     const errorId = window.location.pathname.split('/').pop();
 
     function hdrs() {
@@ -59,14 +70,14 @@
 
     function formatDate(iso) {
       if (!iso) return '';
-      const d = new Date(iso + 'Z');
+      const d = new Date(iso.endsWith('Z') ? iso : iso + 'Z');
       return d.toLocaleString();
     }
 
     function timeAgo(iso) {
       if (!iso) return '';
       const now = Date.now();
-      const then = new Date(iso + 'Z').getTime();
+      const then = new Date(iso.endsWith('Z') ? iso : iso + 'Z').getTime();
       const diff = Math.floor((now - then) / 1000);
       if (diff < 60) return diff + 's ago';
       if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
@@ -84,6 +95,7 @@
           method: 'POST',
           headers: hdrs()
         });
+        if (res.status === 401) { showApiKeyModal(); btn.disabled = false; btn.textContent = 'Mark as Resolved'; return; }
         if (res.ok) {
           btn.textContent = 'Resolved';
           btn.className = 'px-4 py-1.5 rounded text-sm bg-gray-700 text-gray-400 cursor-not-allowed';
@@ -107,6 +119,7 @@
     async function loadError() {
       try {
         const res = await fetch(`/api/errors/${errorId}`, { headers: hdrs() });
+        if (res.status === 401) { showApiKeyModal(); return; }
         if (!res.ok) {
           document.getElementById('error-header').classList.add('hidden');
           document.getElementById('error-state').classList.remove('hidden');
@@ -219,7 +232,30 @@
       }
     }
 
-    loadError();
+    function showApiKeyModal() {
+      document.getElementById('api-key-modal').classList.remove('hidden');
+      document.getElementById('api-key-input').focus();
+    }
+
+    function handleApiKeySubmit() {
+      const key = document.getElementById('api-key-input').value.trim();
+      if (!key) return;
+      API_KEY = key;
+      localStorage.setItem('api_key', key);
+      document.getElementById('api-key-modal').classList.add('hidden');
+      loadError();
+    }
+
+    document.getElementById('api-key-submit').addEventListener('click', handleApiKeySubmit);
+    document.getElementById('api-key-input').addEventListener('keydown', e => {
+      if (e.key === 'Enter') handleApiKeySubmit();
+    });
+
+    if (!API_KEY) {
+      showApiKeyModal();
+    } else {
+      loadError();
+    }
   </script>
 </body>
 </html>
