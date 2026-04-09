@@ -407,7 +407,7 @@ fn sendSmtpEmail(
     defer stream.close();
 
     // Set read timeout (10 seconds) to prevent indefinite hangs
-    const timeout = std.posix.timeval{ .sec = 10, .usec = 0 };
+    const timeout = std.posix.timeval{ .tv_sec = 10, .tv_usec = 0 };
     std.posix.setsockopt(stream.handle, std.posix.SOL.SOCKET, std.posix.SO.RCVTIMEO, std.mem.asBytes(&timeout)) catch {};
     std.posix.setsockopt(stream.handle, std.posix.SOL.SOCKET, std.posix.SO.SNDTIMEO, std.mem.asBytes(&timeout)) catch {};
 
