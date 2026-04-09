@@ -43,6 +43,9 @@
                 <p class="text-sm text-gray-400 mt-1">Monlight Metrics Collector</p>
             </div>
             <div class="flex items-center gap-3">
+                <select id="projectSelect" onchange="loadDashboard()">
+                    <option value="">All projects</option>
+                </select>
                 <select id="periodSelect" onchange="loadDashboard()">
                     <option value="1m">Last 1 minute</option>
                     <option value="5m">Last 5 minutes</option>
@@ -163,12 +166,42 @@
 
         const headers = { 'X-API-Key': API_KEY };
 
+        function getProjectParam() {
+            const p = document.getElementById('projectSelect').value;
+            return p ? `&project=${encodeURIComponent(p)}` : '';
+        }
+
+        async function loadProjects() {
+            try {
+                const resp = await fetch('/api/projects', { headers });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    const sel = document.getElementById('projectSelect');
+                    const current = sel.value;
+                    sel.innerHTML = '<option value="">All projects</option>';
+                    (data.projects || []).forEach(p => {
+                        const opt = document.createElement('option');
+                        opt.value = p;
+                        opt.textContent = p;
+                        sel.appendChild(opt);
+                    });
+                    if (current) sel.value = current;
+                }
+            } catch (e) {
+                console.error('Projects load failed:', e);
+            }
+        }
+
         async function loadDashboard() {
             const period = document.getElementById('periodSelect').value;
+            const projectParam = getProjectParam();
+
+            // Load projects list
+            loadProjects();
 
             // Load dashboard data
             try {
-                const resp = await fetch(`/api/dashboard?period=${period}`, { headers });
+                const resp = await fetch(`/api/dashboard?period=${period}${projectParam}`, { headers });
                 if (resp.ok) {
                     const data = await resp.json();
                     document.getElementById('totalDatapoints').textContent = data.summary?.total_datapoints?.toLocaleString() || '0';
@@ -195,7 +228,7 @@
 
             // Load metric names for dropdowns
             try {
-                const resp = await fetch('/api/metrics/names', { headers });
+                const resp = await fetch(`/api/metrics/names?${projectParam.substring(1)}`, { headers });
                 if (resp.ok) {
                     const data = await resp.json();
                     populateMetricDropdowns(data.metrics || []);
@@ -272,8 +305,9 @@
             }
 
             const period = document.getElementById('periodSelect').value;
+            const projectParam = getProjectParam();
             try {
-                const resp = await fetch(`/api/metrics?name=${encodeURIComponent(name)}&period=${period}`, { headers });
+                const resp = await fetch(`/api/metrics?name=${encodeURIComponent(name)}&period=${period}${projectParam}`, { headers });
                 if (!resp.ok) return;
                 const data = await resp.json();
 
@@ -322,8 +356,9 @@
             }
 
             const period = document.getElementById('periodSelect').value;
+            const projectParam = getProjectParam();
             try {
-                const resp = await fetch(`/api/metrics?name=${encodeURIComponent(name)}&period=${period}`, { headers });
+                const resp = await fetch(`/api/metrics?name=${encodeURIComponent(name)}&period=${period}${projectParam}`, { headers });
                 if (!resp.ok) return;
                 const data = await resp.json();
 

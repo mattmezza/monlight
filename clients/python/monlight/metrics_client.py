@@ -31,11 +31,13 @@ class MetricsClient:
         api_key: str,
         flush_interval: float = 10.0,
         timeout: float = 5.0,
+        project: str | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.flush_interval = flush_interval
         self.timeout = timeout
+        self.project = project
 
         self._buffer: list[dict[str, Any]] = []
         self._lock = threading.Lock()
@@ -114,6 +116,8 @@ class MetricsClient:
         }
         if labels:
             metric["labels"] = labels
+        if self.project:
+            metric["project"] = self.project
 
         with self._lock:
             self._buffer.append(metric)

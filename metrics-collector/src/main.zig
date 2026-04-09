@@ -150,6 +150,9 @@ pub fn handleConnection(conn: net.Server.Connection, api_key: []const u8, limite
         } else if (isApiDashboardPath(target)) {
             handleApiDashboard(&request, db);
             return;
+        } else if (isApiProjectsPath(target)) {
+            handleApiProjects(&request, db);
+            return;
         }
     } else if (request.head.method == .POST) {
         if (isApiMetricsPath(target)) {
@@ -239,11 +242,12 @@ fn handleApiMetrics(request: *std.http.Server.Request, db: *sqlite.Database) voi
 }
 
 fn handleApiMetricsNames(request: *std.http.Server.Request, db: *sqlite.Database) void {
+    const project = parseDashboardProject(request.head.target);
     var response = std.ArrayList(u8).init(std.heap.page_allocator);
     defer response.deinit();
     var writer = response.writer();
 
-    _ = metrics_query.queryMetricNames(db, &writer) catch |err| {
+    _ = metrics_query.queryMetricNames(db, &writer, project) catch |err| {
         log.err("Failed to query metric names: {}", .{err});
         sendJsonResponse(request, .internal_server_error, "{\"detail\": \"Failed to query metric names\"}") catch {};
         return;
@@ -257,12 +261,13 @@ fn handleApiDashboard(request: *std.http.Server.Request, db: *sqlite.Database) v
     const target = request.head.target;
     const period = parseDashboardPeriod(target);
     const offset = periodToOffset(period);
+    const project = parseDashboardProject(target);
 
     var response = std.ArrayList(u8).init(std.heap.page_allocator);
     defer response.deinit();
     var writer = response.writer();
 
-    buildDashboardJson(db, &writer, offset, period) catch |err| {
+    buildDashboardJson(db, &writer, offset, period, project) catch |err| {
         log.err("Failed to build dashboard data: {}", .{err});
         sendJsonResponse(request, .internal_server_error, "{\"detail\": \"Failed to build dashboard\"}") catch {};
         return;
@@ -291,6 +296,21 @@ fn parseDashboardPeriod(target: []const u8) []const u8 {
     return "24h";
 }
 
+fn parseDashboardProject(target: []const u8) ?[]const u8 {
+    const query_start = std.mem.indexOf(u8, target, "?") orelse return null;
+    const query_string = target[query_start + 1 ..];
+    var pairs_iter = std.mem.splitScalar(u8, query_string, '&');
+    while (pairs_iter.next()) |pair| {
+        const eq_pos = std.mem.indexOf(u8, pair, "=") orelse continue;
+        const key = pair[0..eq_pos];
+        const value = pair[eq_pos + 1 ..];
+        if (std.mem.eql(u8, key, "project")) {
+            if (value.len > 0 and value.len <= 100) return value;
+        }
+    }
+    return null;
+}
+
 fn periodToOffset(period: []const u8) []const u8 {
     if (std.mem.eql(u8, period, "1m")) return "-1 minutes";
     if (std.mem.eql(u8, period, "5m")) return "-5 minutes";
@@ -306,17 +326,30 @@ fn buildDashboardJson(
     writer: *std.ArrayList(u8).Writer,
     offset: []const u8,
     period: []const u8,
+    project: ?[]const u8,
 ) !void {
     try writer.writeAll("{\"period\": \"");
     try writer.writeAll(period);
     try writer.writeAll("\"");
 
+    // Build project filter fragment (empty string if no project filter)
+    var proj_frag_buf: [128]u8 = undefined;
+    var proj_frag: []const u8 = "";
+    if (project) |p| {
+        const prefix = " AND project = '";
+        const suffix = "'";
+        @memcpy(proj_frag_buf[0..prefix.len], prefix);
+        @memcpy(proj_frag_buf[prefix.len .. prefix.len + p.len], p);
+        @memcpy(proj_frag_buf[prefix.len + p.len .. prefix.len + p.len + suffix.len], suffix);
+        proj_frag = proj_frag_buf[0 .. prefix.len + p.len + suffix.len];
+    }
+
     // Summary: total metrics received in period, distinct metric names
     {
-        // Build SQL with offset embedded (safe — offset is from our own constant)
-        var sql_buf: [256]u8 = undefined;
+        var sql_buf: [384]u8 = undefined;
         const prefix = "SELECT COUNT(*), COUNT(DISTINCT name) FROM metrics_raw WHERE timestamp >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '";
-        const suffix = "');";
+        const suffix = "')";
+        const tail = ";";
         var pos: usize = 0;
         @memcpy(sql_buf[pos .. pos + prefix.len], prefix);
         pos += prefix.len;
@@ -324,6 +357,10 @@ fn buildDashboardJson(
         pos += offset.len;
         @memcpy(sql_buf[pos .. pos + suffix.len], suffix);
         pos += suffix.len;
+        @memcpy(sql_buf[pos .. pos + proj_frag.len], proj_frag);
+        pos += proj_frag.len;
+        @memcpy(sql_buf[pos .. pos + tail.len], tail);
+        pos += tail.len;
         sql_buf[pos] = 0;
 
         const stmt = try db.prepare(@ptrCast(sql_buf[0..pos :0]));
@@ -345,9 +382,10 @@ fn buildDashboardJson(
 
     // Top metrics by count
     {
-        var sql_buf: [256]u8 = undefined;
+        var sql_buf: [384]u8 = undefined;
         const prefix = "SELECT name, type, COUNT(*), SUM(value) FROM metrics_raw WHERE timestamp >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '";
-        const suffix = "') GROUP BY name, type ORDER BY COUNT(*) DESC LIMIT 10;";
+        const suffix = "')";
+        const tail = " GROUP BY name, type ORDER BY COUNT(*) DESC LIMIT 10;";
         var pos: usize = 0;
         @memcpy(sql_buf[pos .. pos + prefix.len], prefix);
         pos += prefix.len;
@@ -355,6 +393,10 @@ fn buildDashboardJson(
         pos += offset.len;
         @memcpy(sql_buf[pos .. pos + suffix.len], suffix);
         pos += suffix.len;
+        @memcpy(sql_buf[pos .. pos + proj_frag.len], proj_frag);
+        pos += proj_frag.len;
+        @memcpy(sql_buf[pos .. pos + tail.len], tail);
+        pos += tail.len;
         sql_buf[pos] = 0;
 
         const stmt = try db.prepare(@ptrCast(sql_buf[0..pos :0]));
@@ -390,9 +432,10 @@ fn buildDashboardJson(
     // Web Vitals section — only included if browser Web Vitals data exists
     {
         // Check if any web_vitals_* metrics exist with source=browser in the period
-        var check_buf: [384]u8 = undefined;
+        var check_buf: [512]u8 = undefined;
         const check_prefix = "SELECT COUNT(*) FROM metrics_raw WHERE name IN ('web_vitals_lcp','web_vitals_inp','web_vitals_cls') AND json_extract(labels, '$.source') = 'browser' AND timestamp >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '";
-        const check_suffix = "') LIMIT 1;";
+        const check_suffix = "')";
+        const check_tail = " LIMIT 1;";
         var check_pos: usize = 0;
         @memcpy(check_buf[check_pos .. check_pos + check_prefix.len], check_prefix);
         check_pos += check_prefix.len;
@@ -400,6 +443,10 @@ fn buildDashboardJson(
         check_pos += offset.len;
         @memcpy(check_buf[check_pos .. check_pos + check_suffix.len], check_suffix);
         check_pos += check_suffix.len;
+        @memcpy(check_buf[check_pos .. check_pos + proj_frag.len], proj_frag);
+        check_pos += proj_frag.len;
+        @memcpy(check_buf[check_pos .. check_pos + check_tail.len], check_tail);
+        check_pos += check_tail.len;
         check_buf[check_pos] = 0;
 
         const check_stmt = try db.prepare(@ptrCast(check_buf[0..check_pos :0]));
@@ -422,10 +469,11 @@ fn buildDashboardJson(
                 for (vitals, 0..) |vital_name, vi| {
                     if (vi > 0) try writer.writeAll(", ");
 
-                    var summary_buf: [512]u8 = undefined;
+                    var summary_buf: [640]u8 = undefined;
                     const summary_prefix = "SELECT AVG(value), COUNT(*) FROM metrics_raw WHERE name = '";
                     const summary_mid = "' AND json_extract(labels, '$.source') = 'browser' AND timestamp >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '";
-                    const summary_suffix = "');";
+                    const summary_suffix = "')";
+                    const summary_tail = ";";
                     var spos: usize = 0;
                     @memcpy(summary_buf[spos .. spos + summary_prefix.len], summary_prefix);
                     spos += summary_prefix.len;
@@ -437,6 +485,10 @@ fn buildDashboardJson(
                     spos += offset.len;
                     @memcpy(summary_buf[spos .. spos + summary_suffix.len], summary_suffix);
                     spos += summary_suffix.len;
+                    @memcpy(summary_buf[spos .. spos + proj_frag.len], proj_frag);
+                    spos += proj_frag.len;
+                    @memcpy(summary_buf[spos .. spos + summary_tail.len], summary_tail);
+                    spos += summary_tail.len;
                     summary_buf[spos] = 0;
 
                     const summary_stmt = try db.prepare(@ptrCast(summary_buf[0..spos :0]));
@@ -491,7 +543,7 @@ fn buildDashboardJson(
                 else
                     "%Y-%m-%dT%H:00:00Z";
 
-                var ts_buf: [768]u8 = undefined;
+                var ts_buf: [896]u8 = undefined;
                 const ts_p1 = "SELECT strftime('";
                 const ts_p2 = "', timestamp) as bucket, ";
                 // For each vital, get the value at the 75th percentile position
@@ -506,7 +558,8 @@ fn buildDashboardJson(
                     "FROM metrics_raw WHERE name IN ('web_vitals_lcp','web_vitals_inp','web_vitals_cls') " ++
                     "AND json_extract(labels, '$.source') = 'browser' " ++
                     "AND timestamp >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '";
-                const ts_p4 = "') GROUP BY bucket ORDER BY bucket ASC;";
+                const ts_p4 = "')";
+                const ts_p5 = " GROUP BY bucket ORDER BY bucket ASC;";
 
                 var tpos: usize = 0;
                 @memcpy(ts_buf[tpos .. tpos + ts_p1.len], ts_p1);
@@ -521,6 +574,10 @@ fn buildDashboardJson(
                 tpos += offset.len;
                 @memcpy(ts_buf[tpos .. tpos + ts_p4.len], ts_p4);
                 tpos += ts_p4.len;
+                @memcpy(ts_buf[tpos .. tpos + proj_frag.len], proj_frag);
+                tpos += proj_frag.len;
+                @memcpy(ts_buf[tpos .. tpos + ts_p5.len], ts_p5);
+                tpos += ts_p5.len;
                 ts_buf[tpos] = 0;
 
                 const ts_stmt = try db.prepare(@ptrCast(ts_buf[0..tpos :0]));
@@ -553,7 +610,7 @@ fn buildDashboardJson(
             // By page: per-page breakdown
             try writer.writeAll(", \"by_page\": [");
             {
-                var page_buf: [768]u8 = undefined;
+                var page_buf: [896]u8 = undefined;
                 const page_p1 = "SELECT json_extract(labels, '$.page') as page, " ++
                     "AVG(CASE WHEN name='web_vitals_lcp' THEN value END) as lcp, " ++
                     "AVG(CASE WHEN name='web_vitals_inp' THEN value END) as inp, " ++
@@ -562,7 +619,8 @@ fn buildDashboardJson(
                     "FROM metrics_raw WHERE name IN ('web_vitals_lcp','web_vitals_inp','web_vitals_cls') " ++
                     "AND json_extract(labels, '$.source') = 'browser' " ++
                     "AND timestamp >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '";
-                const page_p2 = "') GROUP BY page ORDER BY page_views DESC LIMIT 20;";
+                const page_p2 = "')";
+                const page_p3 = " GROUP BY page ORDER BY page_views DESC LIMIT 20;";
 
                 var ppos: usize = 0;
                 @memcpy(page_buf[ppos .. ppos + page_p1.len], page_p1);
@@ -571,6 +629,10 @@ fn buildDashboardJson(
                 ppos += offset.len;
                 @memcpy(page_buf[ppos .. ppos + page_p2.len], page_p2);
                 ppos += page_p2.len;
+                @memcpy(page_buf[ppos .. ppos + proj_frag.len], proj_frag);
+                ppos += proj_frag.len;
+                @memcpy(page_buf[ppos .. ppos + page_p3.len], page_p3);
+                ppos += page_p3.len;
                 page_buf[ppos] = 0;
 
                 const page_stmt = try db.prepare(@ptrCast(page_buf[0..ppos :0]));
@@ -685,6 +747,42 @@ fn isApiDashboardPath(target: []const u8) bool {
         return rest.len == 0 or rest[0] == '?';
     }
     return false;
+}
+
+fn isApiProjectsPath(target: []const u8) bool {
+    if (std.mem.startsWith(u8, target, "/api/projects")) {
+        const rest = target["/api/projects".len..];
+        return rest.len == 0 or rest[0] == '?';
+    }
+    return false;
+}
+
+fn handleApiProjects(request: *std.http.Server.Request, db: *sqlite.Database) void {
+    const stmt = db.prepare(
+        "SELECT DISTINCT project FROM metrics_raw WHERE project IS NOT NULL ORDER BY project ASC;",
+    ) catch |err| {
+        log.err("Failed to query projects: {}", .{err});
+        sendJsonResponse(request, .internal_server_error, "{\"detail\": \"Failed to query projects\"}") catch {};
+        return;
+    };
+    defer stmt.deinit();
+
+    var response = std.ArrayList(u8).init(std.heap.page_allocator);
+    defer response.deinit();
+    var writer = response.writer();
+
+    writer.writeAll("{\"projects\": [") catch return;
+    var iter = stmt.query();
+    var count: usize = 0;
+    while (iter.next()) |row| {
+        if (count > 0) writer.writeAll(",") catch return;
+        writer.writeAll("\"") catch return;
+        metrics_query.writeJsonEscaped(&writer, row.text(0) orelse "") catch return;
+        writer.writeAll("\"") catch return;
+        count += 1;
+    }
+    writer.writeAll("]}") catch return;
+    sendJsonResponse(request, .ok, response.items) catch {};
 }
 
 fn handleNotFound(request: *std.http.Server.Request) !void {

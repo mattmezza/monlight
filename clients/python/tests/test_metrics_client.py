@@ -236,6 +236,37 @@ class TestFlush:
         }
         assert "timestamp" in metric
 
+    def test_flush_includes_project_when_set(self, httpx_mock):
+        """flush() includes project field in payload when configured."""
+        httpx_mock.add_response(
+            status_code=202, json={"status": "accepted", "count": 1}
+        )
+
+        c = MetricsClient(
+            base_url="http://localhost:5012",
+            api_key="test-key",
+            project="flowrent",
+        )
+        c.counter("test_metric")
+        c.flush()
+
+        requests = httpx_mock.get_requests()
+        body = json.loads(requests[0].read())
+        assert body[0]["project"] == "flowrent"
+
+    def test_flush_omits_project_when_not_set(self, client: MetricsClient, httpx_mock):
+        """flush() does not include project field when not configured."""
+        httpx_mock.add_response(
+            status_code=202, json={"status": "accepted", "count": 1}
+        )
+
+        client.counter("test_metric")
+        client.flush()
+
+        requests = httpx_mock.get_requests()
+        body = json.loads(requests[0].read())
+        assert "project" not in body[0]
+
     def test_flush_accepts_200_response(self, client: MetricsClient, httpx_mock):
         """200 response is accepted without error."""
         httpx_mock.add_response(
