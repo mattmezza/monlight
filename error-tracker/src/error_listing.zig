@@ -162,8 +162,10 @@ pub fn queryAndFormat(allocator: std.mem.Allocator, db: *sqlite.Database, params
 
     const where = buildWhereClause(params);
     // Build null-terminated SQL in a stack buffer
-    var sql_buf: [800]u8 = undefined;
-    const prefix = "SELECT id, fingerprint, project, exception_type, message, count, first_seen, last_seen, resolved FROM errors ";
+    var sql_buf: [1024]u8 = undefined;
+    const prefix = "SELECT id, fingerprint, project, exception_type, message, count, first_seen, last_seen, resolved, " ++
+        "CASE WHEN EXISTS (SELECT 1 FROM error_occurrences WHERE error_id = errors.id AND request_method = 'BROWSER') THEN 'browser' ELSE 'server' END AS source " ++
+        "FROM errors ";
     const ws = whereSlice(&where);
     const suffix = " ORDER BY last_seen DESC LIMIT ? OFFSET ?;";
     const total_len = prefix.len + ws.len + suffix.len;
@@ -205,6 +207,7 @@ pub fn queryAndFormat(allocator: std.mem.Allocator, db: *sqlite.Database, params
         const first_seen = row.text(6) orelse "";
         const last_seen = row.text(7) orelse "";
         const resolved_int = row.int(8);
+        const source = row.text(9) orelse "server";
 
         try writer.writeAll("{\"id\": ");
         try writer.print("{d}", .{id});
@@ -228,6 +231,9 @@ pub fn queryAndFormat(allocator: std.mem.Allocator, db: *sqlite.Database, params
         } else {
             try writer.writeAll("false");
         }
+        try writer.writeAll(", \"source\": \"");
+        try writeJsonEscaped(writer, source);
+        try writer.writeAll("\"");
         try writer.writeByte('}');
     }
 
@@ -451,6 +457,7 @@ test "queryAndFormat response shape matches spec" {
     try std.testing.expect(std.mem.indexOf(u8, json, "\"first_seen\":") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"last_seen\":") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"resolved\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"source\":") != null);
 
     // Verify top-level pagination fields
     try std.testing.expect(std.mem.indexOf(u8, json, "\"total\":") != null);
