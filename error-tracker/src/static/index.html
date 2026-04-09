@@ -54,10 +54,11 @@
             <th class="px-4 py-3 text-right">Count</th>
             <th class="px-4 py-3 text-left">First Seen</th>
             <th class="px-4 py-3 text-left">Last Seen</th>
+            <th class="px-4 py-3 text-left">Source</th>
           </tr>
         </thead>
         <tbody id="error-table-body" class="divide-y divide-gray-800">
-          <tr><td colspan="6" class="px-4 py-8 text-center text-gray-500">Loading...</td></tr>
+          <tr><td colspan="7" class="px-4 py-8 text-center text-gray-500">Loading...</td></tr>
         </tbody>
       </table>
     </div>
@@ -177,7 +178,7 @@
         const data = await res.json();
 
         if (!data.errors || data.errors.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-gray-500">No errors found</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-500">No errors found</td></tr>';
           updatePagination(0, 0);
           return;
         }
@@ -194,12 +195,15 @@
             <td class="px-4 py-3 text-right font-medium ${err.count > 100 ? 'text-red-400' : err.count > 10 ? 'text-yellow-400' : 'text-gray-300'}">${err.count}</td>
             <td class="px-4 py-3 text-gray-400 whitespace-nowrap" title="${esc(formatDate(err.first_seen))}">${timeAgo(err.first_seen)}</td>
             <td class="px-4 py-3 text-gray-400 whitespace-nowrap" title="${esc(formatDate(err.last_seen))}">${timeAgo(err.last_seen)}</td>
+            <td class="px-4 py-3">
+              <span class="inline-block text-xs px-2 py-0.5 rounded ${err.source === 'browser' ? 'bg-purple-900/40 text-purple-300' : 'bg-gray-700/40 text-gray-300'}">${esc(err.source || 'server')}</span>
+            </td>
           </tr>
         `).join('');
 
         updatePagination(data.total, data.offset);
       } catch (e) {
-        tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-red-400">Failed to load errors</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-red-400">Failed to load errors</td></tr>';
         console.error('Failed to load errors:', e);
       }
     }
