@@ -43,7 +43,9 @@ pub fn parseQueryParams(target: []const u8) QueryParams {
 }
 
 fn isValidPeriod(p: []const u8) bool {
-    return std.mem.eql(u8, p, "1h") or
+    return std.mem.eql(u8, p, "1m") or
+        std.mem.eql(u8, p, "5m") or
+        std.mem.eql(u8, p, "1h") or
         std.mem.eql(u8, p, "24h") or
         std.mem.eql(u8, p, "7d") or
         std.mem.eql(u8, p, "30d");
@@ -60,8 +62,10 @@ fn isValidResolution(r: []const u8) bool {
 fn resolveResolution(period: []const u8, resolution: []const u8) []const u8 {
     if (!std.mem.eql(u8, resolution, "auto")) return resolution;
 
-    // Auto: minute for 1h and 24h, hour for 7d and 30d
-    if (std.mem.eql(u8, period, "1h") or std.mem.eql(u8, period, "24h")) {
+    // Auto: minute for short periods, hour for long periods
+    if (std.mem.eql(u8, period, "1m") or std.mem.eql(u8, period, "5m") or
+        std.mem.eql(u8, period, "1h") or std.mem.eql(u8, period, "24h"))
+    {
         return "minute";
     }
     return "hour";
@@ -69,6 +73,8 @@ fn resolveResolution(period: []const u8, resolution: []const u8) []const u8 {
 
 /// Get the SQLite time offset string for a given period.
 fn periodToOffset(period: []const u8) []const u8 {
+    if (std.mem.eql(u8, period, "1m")) return "-1 minutes";
+    if (std.mem.eql(u8, period, "5m")) return "-5 minutes";
     if (std.mem.eql(u8, period, "1h")) return "-1 hours";
     if (std.mem.eql(u8, period, "24h")) return "-24 hours";
     if (std.mem.eql(u8, period, "7d")) return "-7 days";

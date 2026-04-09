@@ -44,11 +44,21 @@
             </div>
             <div class="flex items-center gap-3">
                 <select id="periodSelect" onchange="loadDashboard()">
+                    <option value="1m">Last 1 minute</option>
+                    <option value="5m">Last 5 minutes</option>
                     <option value="1h">Last 1 hour</option>
                     <option value="24h" selected>Last 24 hours</option>
                     <option value="7d">Last 7 days</option>
                     <option value="30d">Last 30 days</option>
                 </select>
+                <select id="refreshSelect" onchange="setAutoRefresh()">
+                    <option value="0">Auto-refresh: off</option>
+                    <option value="5">Every 5s</option>
+                    <option value="30">Every 30s</option>
+                    <option value="60">Every 1m</option>
+                    <option value="300">Every 5m</option>
+                </select>
+                <span id="refreshIndicator" style="display:none;" class="text-green-400 text-xs">&#9679; live</span>
                 <button onclick="loadDashboard()" title="Refresh">Refresh</button>
             </div>
         </div>
@@ -470,6 +480,35 @@
             const div = document.createElement('div');
             div.textContent = str;
             return div.innerHTML;
+        }
+
+        // Auto-refresh
+        let autoRefreshTimer = null;
+
+        function setAutoRefresh() {
+            const seconds = parseInt(document.getElementById('refreshSelect').value);
+            const indicator = document.getElementById('refreshIndicator');
+
+            if (autoRefreshTimer) {
+                clearInterval(autoRefreshTimer);
+                autoRefreshTimer = null;
+            }
+
+            if (seconds > 0) {
+                autoRefreshTimer = setInterval(loadDashboard, seconds * 1000);
+                indicator.style.display = 'inline';
+                localStorage.setItem('metrics_auto_refresh', seconds);
+            } else {
+                indicator.style.display = 'none';
+                localStorage.removeItem('metrics_auto_refresh');
+            }
+        }
+
+        // Restore auto-refresh setting
+        const savedRefresh = localStorage.getItem('metrics_auto_refresh');
+        if (savedRefresh) {
+            document.getElementById('refreshSelect').value = savedRefresh;
+            setAutoRefresh();
         }
 
         // Initial load
