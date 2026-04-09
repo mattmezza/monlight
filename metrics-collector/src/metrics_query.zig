@@ -8,6 +8,7 @@ pub const QueryParams = struct {
     period: []const u8, // "1h", "24h", "7d", "30d"
     resolution: []const u8, // "minute", "hour", "auto"
     labels: ?[]const u8, // raw labels filter string e.g. "method:GET,status:200"
+    project: ?[]const u8, // optional project filter
 };
 
 /// Parse query parameters from the request target URL.
@@ -17,6 +18,7 @@ pub fn parseQueryParams(target: []const u8) QueryParams {
         .period = "24h",
         .resolution = "auto",
         .labels = null,
+        .project = null,
     };
 
     const query_start = std.mem.indexOf(u8, target, "?") orelse return params;
@@ -36,6 +38,8 @@ pub fn parseQueryParams(target: []const u8) QueryParams {
             if (isValidResolution(value)) params.resolution = value;
         } else if (std.mem.eql(u8, key, "labels")) {
             if (value.len > 0) params.labels = value;
+        } else if (std.mem.eql(u8, key, "project")) {
+            if (value.len > 0) params.project = value;
         }
     }
 
@@ -215,14 +219,32 @@ fn writeNullableFloat(writer: *std.ArrayList(u8).Writer, prefix: []const u8, row
     }
 }
 
-/// Query distinct metric names and types.
+/// Query distinct metric names and types, optionally filtered by project.
 pub fn queryMetricNames(
     db: *sqlite.Database,
     writer: *std.ArrayList(u8).Writer,
+    project: ?[]const u8,
 ) !usize {
-    const stmt = try db.prepare(
-        "SELECT DISTINCT name, type FROM metrics_raw ORDER BY name ASC;",
-    );
+    var sql_buf: [256]u8 = undefined;
+    var pos: usize = 0;
+    const base = "SELECT DISTINCT name, type FROM metrics_raw";
+    @memcpy(sql_buf[pos .. pos + base.len], base);
+    pos += base.len;
+    if (project) |p| {
+        const frag = " WHERE project = '";
+        @memcpy(sql_buf[pos .. pos + frag.len], frag);
+        pos += frag.len;
+        @memcpy(sql_buf[pos .. pos + p.len], p);
+        pos += p.len;
+        sql_buf[pos] = '\'';
+        pos += 1;
+    }
+    const tail = " ORDER BY name ASC;";
+    @memcpy(sql_buf[pos .. pos + tail.len], tail);
+    pos += tail.len;
+    sql_buf[pos] = 0;
+
+    const stmt = try db.prepare(@ptrCast(sql_buf[0..pos :0]));
     defer stmt.deinit();
 
     try writer.writeAll("{\"metrics\": [");
@@ -396,6 +418,7 @@ test "queryMetrics returns error for missing name" {
         .period = "24h",
         .resolution = "auto",
         .labels = null,
+        .project = null,
     };
 
     var response = std.ArrayList(u8).init(std.testing.allocator);

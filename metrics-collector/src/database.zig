@@ -41,6 +41,14 @@ pub const migrations = [_][]const u8{
     \\CREATE INDEX idx_agg_name_resolution ON metrics_aggregated(name, resolution);
     \\CREATE INDEX idx_agg_name_resolution_bucket ON metrics_aggregated(name, resolution, bucket);
     ,
+    // Migration 4: Add project column for multi-tenant support
+    \\ALTER TABLE metrics_raw ADD COLUMN project VARCHAR(100);
+    ,
+    \\ALTER TABLE metrics_aggregated ADD COLUMN project VARCHAR(100);
+    ,
+    \\CREATE INDEX idx_raw_project ON metrics_raw(project);
+    \\CREATE INDEX idx_agg_project ON metrics_aggregated(project);
+    ,
 };
 
 /// Initialize the metrics collector database: open connection and run migrations.

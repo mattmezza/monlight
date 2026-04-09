@@ -9,6 +9,7 @@ pub const MetricPoint = struct {
     value: f64,
     labels: ?[]const u8, // JSON string of labels object, or null
     timestamp: ?[]const u8, // ISO 8601 timestamp, or null (defaults to now)
+    project: ?[]const u8, // project identifier, or null
 };
 
 /// Validation error detail.
@@ -94,12 +95,16 @@ pub fn parseAndValidate(
         // Optional: timestamp (string, ISO 8601)
         const timestamp = getStringField(obj, "timestamp");
 
+        // Optional: project (string)
+        const project = getStringField(obj, "project");
+
         metrics[i] = MetricPoint{
             .name = name,
             .metric_type = metric_type,
             .value = metric_value,
             .labels = labels,
             .timestamp = timestamp,
+            .project = project,
         };
     }
 
@@ -110,8 +115,8 @@ pub fn parseAndValidate(
 /// Uses a single prepared statement with reset/rebind for efficiency.
 pub fn batchInsert(db: *sqlite.Database, metrics: []const MetricPoint) !usize {
     const stmt = try db.prepare(
-        "INSERT INTO metrics_raw (timestamp, name, labels, value, type) " ++
-            "VALUES (COALESCE(?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now')), ?, ?, ?, ?);",
+        "INSERT INTO metrics_raw (timestamp, name, labels, value, type, project) " ++
+            "VALUES (COALESCE(?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now')), ?, ?, ?, ?, ?);",
     );
     defer stmt.deinit();
 
@@ -131,6 +136,11 @@ pub fn batchInsert(db: *sqlite.Database, metrics: []const MetricPoint) !usize {
         }
         try stmt.bindFloat(4, m.value);
         try stmt.bindText(5, m.metric_type);
+        if (m.project) |proj| {
+            try stmt.bindText(6, proj);
+        } else {
+            try stmt.bindNull(6);
+        }
 
         _ = stmt.exec() catch |err| {
             log.err("Failed to insert metric '{s}': {}", .{ m.name, err });
@@ -312,6 +322,7 @@ test "batchInsert inserts metrics into database" {
             .value = 1.0,
             .labels = "{\"method\":\"GET\"}",
             .timestamp = "2025-01-20T10:00:00Z",
+            .project = null,
         },
         .{
             .name = "http_request_duration",
@@ -319,6 +330,7 @@ test "batchInsert inserts metrics into database" {
             .value = 0.045,
             .labels = null,
             .timestamp = null,
+            .project = null,
         },
         .{
             .name = "cpu_usage",
@@ -326,6 +338,7 @@ test "batchInsert inserts metrics into database" {
             .value = 65.2,
             .labels = null,
             .timestamp = "2025-01-20T10:01:00Z",
+            .project = null,
         },
     };
 
@@ -354,6 +367,7 @@ test "batchInsert preserves metric data" {
             .value = 42.0,
             .labels = "{\"method\":\"POST\",\"endpoint\":\"/api/bookings\"}",
             .timestamp = "2025-01-20T10:00:00Z",
+            .project = null,
         },
     };
 
@@ -391,6 +405,7 @@ test "batchInsert defaults timestamp to now when null" {
             .value = 1.0,
             .labels = null,
             .timestamp = null,
+            .project = null,
         },
     };
 

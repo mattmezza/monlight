@@ -145,7 +145,7 @@ def setup_monlight(
         metrics_collector_url: Base URL for the Metrics Collector service.
             If None, metrics collection is disabled.
         api_key: Shared API key for both services.
-        project: Project identifier for error reports.
+        project: Project identifier for error reports and metrics.
         flush_interval: Seconds between automatic metric flushes.
 
     Returns:
@@ -170,6 +170,7 @@ def setup_monlight(
             base_url=metrics_collector_url,
             api_key=api_key,
             flush_interval=flush_interval,
+            project=project,
         )
         app.add_middleware(MonlightMiddleware, metrics_client=metrics_client)
         metrics_client.start()
