@@ -60,15 +60,45 @@ pub fn parseCorsOrigins(origins_str: ?[]const u8) CorsConfig {
 }
 
 /// Check if the request origin is in the allowed origins list.
-/// Returns the matching origin string, or null if not allowed.
+/// Returns the origin to use in the Access-Control-Allow-Origin header, or null.
+/// For exact matches, returns the stored origin. For wildcard matches (e.g.
+/// `https://*.example.com`), returns the request origin (CORS spec requires
+/// echoing the actual origin, not the pattern).
 fn findAllowedOrigin(cors_config: *const CorsConfig, request_origin: []const u8) ?[]const u8 {
     for (0..cors_config.count) |i| {
         const allowed = cors_config.origins[i][0..cors_config.origin_lens[i]];
         if (std.mem.eql(u8, request_origin, allowed)) {
             return allowed;
         }
+        if (wildcardMatch(allowed, request_origin)) {
+            return request_origin;
+        }
     }
     return null;
+}
+
+/// Check if a wildcard origin pattern matches a request origin.
+/// Supports patterns like `https://*.example.com` where `*` matches
+/// one or more characters in the hostname (no slashes, no colons).
+fn wildcardMatch(pattern: []const u8, origin: []const u8) bool {
+    const star = std.mem.indexOf(u8, pattern, "*") orelse return false;
+    const prefix = pattern[0..star]; // e.g. "https://"
+    const suffix = pattern[star + 1..]; // e.g. ".example.com"
+
+    if (!std.mem.startsWith(u8, origin, prefix)) return false;
+    if (!std.mem.endsWith(u8, origin, suffix)) return false;
+
+    // The matched wildcard portion (between prefix and suffix)
+    if (origin.len < prefix.len + suffix.len) return false;
+    const matched = origin[prefix.len .. origin.len - suffix.len];
+
+    // Wildcard must match at least one character, and must not contain
+    // scheme separators (no slashes, colons, or @ signs)
+    if (matched.len == 0) return false;
+    for (matched) |c| {
+        if (c == '/' or c == ':' or c == '@') return false;
+    }
+    return true;
 }
 
 /// Extract the Origin header value from a request.
@@ -228,6 +258,43 @@ test "findAllowedOrigin is case-sensitive for origins" {
 test "findAllowedOrigin with empty config returns null" {
     const config = parseCorsOrigins(null);
     try std.testing.expect(findAllowedOrigin(&config, "https://example.com") == null);
+}
+
+test "findAllowedOrigin matches wildcard subdomain" {
+    const config = parseCorsOrigins("https://*.flowrent.app");
+    const result = findAllowedOrigin(&config, "https://app.flowrent.app");
+    try std.testing.expect(result != null);
+    try std.testing.expectEqualStrings("https://app.flowrent.app", result.?);
+}
+
+test "findAllowedOrigin wildcard matches different subdomains" {
+    const config = parseCorsOrigins("https://*.example.com");
+    try std.testing.expect(findAllowedOrigin(&config, "https://foo.example.com") != null);
+    try std.testing.expect(findAllowedOrigin(&config, "https://bar.example.com") != null);
+    try std.testing.expect(findAllowedOrigin(&config, "https://a.b.example.com") != null);
+}
+
+test "findAllowedOrigin wildcard rejects bare domain" {
+    const config = parseCorsOrigins("https://*.example.com");
+    // "*.example.com" should not match "example.com" (no subdomain)
+    try std.testing.expect(findAllowedOrigin(&config, "https://example.com") == null);
+}
+
+test "findAllowedOrigin wildcard rejects different scheme" {
+    const config = parseCorsOrigins("https://*.example.com");
+    try std.testing.expect(findAllowedOrigin(&config, "http://foo.example.com") == null);
+}
+
+test "findAllowedOrigin wildcard rejects path injection" {
+    const config = parseCorsOrigins("https://*.example.com");
+    try std.testing.expect(findAllowedOrigin(&config, "https://evil.com/.example.com") == null);
+}
+
+test "findAllowedOrigin mixed exact and wildcard" {
+    const config = parseCorsOrigins("https://exact.com,https://*.wildcard.com");
+    try std.testing.expect(findAllowedOrigin(&config, "https://exact.com") != null);
+    try std.testing.expect(findAllowedOrigin(&config, "https://foo.wildcard.com") != null);
+    try std.testing.expect(findAllowedOrigin(&config, "https://evil.com") == null);
 }
 
 test "asciiEqlIgnoreCase for header names" {
