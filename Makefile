@@ -55,7 +55,7 @@ release-$(1): check-version check-clean
 	@# Commit, tag, push
 	git add $(1)/build.zig.zon
 	git commit -m "release: $(1) v$(V)"
-	git tag $(1)-v$(V)
+	git tag -a $(1)-v$(V) -m "release: $(1) v$(V)"
 	git push origin main $(1)-v$(V)
 	@echo "==> $(1) v$(V) tagged and pushed — CI will build and publish to GHCR"
 endef
@@ -76,7 +76,7 @@ release-python: check-version check-clean
 	@# Commit, tag, push
 	git add clients/python/pyproject.toml clients/python/monlight/__init__.py
 	git commit -m "release: monlight (python) v$(V)"
-	git tag python-v$(V)
+	git tag -a python-v$(V) -m "release: monlight (python) v$(V)"
 	git push origin main python-v$(V)
 	@echo "==> monlight v$(V) tagged and pushed — CI will publish to PyPI"
 
@@ -89,7 +89,7 @@ release-js: check-version check-clean
 	@# Commit, tag, push
 	git add clients/js/package.json clients/js/package-lock.json
 	git commit -m "release: @monlight/browser v$(V)"
-	git tag js-v$(V)
+	git tag -a js-v$(V) -m "release: @monlight/browser v$(V)"
 	git push origin main js-v$(V)
 	@echo "==> @monlight/browser v$(V) tagged and pushed — CI will publish to npm"
 
@@ -108,10 +108,10 @@ release-services: check-version check-clean
 		metrics-collector/build.zig.zon \
 		browser-relay/build.zig.zon
 	git commit -m "release: all services v$(V)"
-	git tag error-tracker-v$(V)
-	git tag log-viewer-v$(V)
-	git tag metrics-collector-v$(V)
-	git tag browser-relay-v$(V)
+	git tag -a error-tracker-v$(V) -m "release: error-tracker v$(V)"
+	git tag -a log-viewer-v$(V) -m "release: log-viewer v$(V)"
+	git tag -a metrics-collector-v$(V) -m "release: metrics-collector v$(V)"
+	git tag -a browser-relay-v$(V) -m "release: browser-relay v$(V)"
 	git push origin main \
 		error-tracker-v$(V) \
 		log-viewer-v$(V) \
@@ -141,12 +141,12 @@ release-all: check-version check-clean
 		clients/js/package.json \
 		clients/js/package-lock.json
 	git commit -m "release: v$(V) (all components)"
-	git tag error-tracker-v$(V)
-	git tag log-viewer-v$(V)
-	git tag metrics-collector-v$(V)
-	git tag browser-relay-v$(V)
-	git tag python-v$(V)
-	git tag js-v$(V)
+	git tag -a error-tracker-v$(V) -m "release: error-tracker v$(V)"
+	git tag -a log-viewer-v$(V) -m "release: log-viewer v$(V)"
+	git tag -a metrics-collector-v$(V) -m "release: metrics-collector v$(V)"
+	git tag -a browser-relay-v$(V) -m "release: browser-relay v$(V)"
+	git tag -a python-v$(V) -m "release: monlight (python) v$(V)"
+	git tag -a js-v$(V) -m "release: @monlight/browser v$(V)"
 	git push origin main \
 		error-tracker-v$(V) \
 		log-viewer-v$(V) \
