@@ -179,7 +179,7 @@ fn sseThread(ctx: SseContext) void {
         }
 
         // Sleep before next poll
-        std.time.sleep(poll_interval_s * std.time.ns_per_s);
+        std.Thread.sleep(poll_interval_s * std.time.ns_per_s);
     }
 }
 
@@ -206,9 +206,9 @@ fn pollNewEntries(
     const allocator = std.heap.page_allocator;
 
     // Build dynamic SQL
-    var sql_buf = std.ArrayList(u8).init(allocator);
-    defer sql_buf.deinit();
-    const sql_writer = sql_buf.writer();
+    var sql_buf: std.ArrayList(u8) = .{};
+    defer sql_buf.deinit(allocator);
+    const sql_writer = sql_buf.writer(allocator);
 
     try sql_writer.writeAll("SELECT id, timestamp, container, stream, level, message FROM log_entries WHERE id > ?");
 
@@ -220,7 +220,7 @@ fn pollNewEntries(
     }
 
     try sql_writer.writeAll(" ORDER BY id ASC LIMIT 100");
-    try sql_buf.append(0);
+    try sql_buf.append(allocator, 0);
 
     const sql_z: [*:0]const u8 = @ptrCast(sql_buf.items[0 .. sql_buf.items.len - 1 :0]);
 
@@ -252,9 +252,9 @@ fn pollNewEntries(
         const message = row.text(5) orelse "";
 
         // Build JSON event data
-        var json_buf = std.ArrayList(u8).init(allocator);
-        defer json_buf.deinit();
-        const writer = json_buf.writer();
+        var json_buf: std.ArrayList(u8) = .{};
+        defer json_buf.deinit(allocator);
+        const writer = json_buf.writer(allocator);
 
         try writer.writeAll("{\"id\": ");
         try writer.print("{d}", .{id});

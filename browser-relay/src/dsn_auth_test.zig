@@ -51,7 +51,7 @@ const TestServer = struct {
 
     fn start(self: *TestServer, n: usize) !void {
         self.thread = try std.Thread.spawn(.{}, acceptLoop, .{ self, n });
-        std.time.sleep(10 * std.time.ns_per_ms);
+        std.Thread.sleep(10 * std.time.ns_per_ms);
     }
 
     fn acceptLoop(self: *TestServer, count: usize) void {

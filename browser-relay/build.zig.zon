@@ -1,5 +1,6 @@
 .{
-    .name = "browser-relay",
+    .name = .browser_relay,
+    .fingerprint = 0x3201f5a8482b0f58,
     .version = "0.2.0",
     .paths = .{
         "build.zig",

@@ -184,13 +184,7 @@ fn extractContextJson(body: []const u8) ?[]const u8 {
     }
 
     // Serialize the context value back to JSON
-    var ctx_buf: [16384]u8 = undefined;
-    var ctx_stream = std.io.fixedBufferStream(&ctx_buf);
-    std.json.stringify(ctx_val, .{}, ctx_stream.writer()) catch return null;
-    // We need to return a stable pointer — copy to page allocator
-    const result = std.heap.page_allocator.alloc(u8, ctx_stream.pos) catch return null;
-    @memcpy(result, ctx_buf[0..ctx_stream.pos]);
-    return result;
+    return std.json.Stringify.valueAlloc(std.heap.page_allocator, ctx_val, .{}) catch return null;
 }
 
 /// Forward a browser error to the error-tracker service.
@@ -216,12 +210,10 @@ fn forwardToErrorTracker(
     var client = std.http.Client{ .allocator = allocator };
     defer client.deinit();
 
-    var header_buf: [4096]u8 = undefined;
-    var req = client.open(.POST, uri, .{
-        .server_header_buffer = &header_buf,
+    var req = client.request(.POST, uri, .{
         .extra_headers = &.{
-            .{ .name = "Content-Type", .value = "application/json" },
-            .{ .name = "X-API-Key", .value = error_tracker_api_key },
+            .{ .name = "content-type", .value = "application/json" },
+            .{ .name = "x-api-key", .value = error_tracker_api_key },
         },
     }) catch |err| {
         log.warn("Failed to connect to error tracker: {}", .{err});
@@ -229,37 +221,39 @@ fn forwardToErrorTracker(
     };
     defer req.deinit();
 
-    req.transfer_encoding = .{ .content_length = payload.len };
-    req.send() catch |err| {
+    // Send the request body
+    const body_copy = allocator.dupe(u8, payload) catch {
+        log.warn("Failed to allocate payload copy", .{});
+        return null;
+    };
+    defer allocator.free(body_copy);
+
+    req.sendBodyComplete(body_copy) catch |err| {
         log.warn("Failed to send to error tracker: {}", .{err});
         return null;
     };
-    req.writeAll(payload) catch |err| {
-        log.warn("Failed to write error tracker payload: {}", .{err});
-        return null;
-    };
-    req.finish() catch |err| {
-        log.warn("Failed to finish error tracker request: {}", .{err});
-        return null;
-    };
-    req.wait() catch |err| {
+
+    // Receive the response head
+    var redirect_buf: [4096]u8 = undefined;
+    var response = req.receiveHead(&redirect_buf) catch |err| {
         log.warn("Failed to get error tracker response: {}", .{err});
         return null;
     };
 
     // Read response body
+    var transfer_buf: [8192]u8 = undefined;
+    const reader = response.reader(&transfer_buf);
     var response_buf: [4096]u8 = undefined;
-    const reader = req.reader();
-    const response_len = reader.readAll(&response_buf) catch {
+    const response_len = reader.readSliceShort(&response_buf) catch {
         // Even if we can't read the body, we have the status
         return ForwardResult{
-            .status = req.response.status,
+            .status = response.head.status,
             .body = null,
         };
     };
 
     return ForwardResult{
-        .status = req.response.status,
+        .status = response.head.status,
         .body = if (response_len > 0) response_buf[0..response_len] else null,
     };
 }
@@ -279,9 +273,10 @@ pub fn handleBrowserError(
     db: *sqlite.Database,
 ) !?[]const u8 {
     // Read the request body
-    const reader = try request.reader();
+    var reader_buf: [8192]u8 = undefined;
+    const reader = request.readerExpectNone(&reader_buf);
     var body_buf: [max_payload_size]u8 = undefined;
-    const body_len = reader.readAll(&body_buf) catch {
+    const body_len = reader.readSliceShort(&body_buf) catch {
         return "Failed to read request body";
     };
     const body = body_buf[0..body_len];
@@ -375,9 +370,10 @@ pub fn handleBrowserErrorWithCors(
     db: *sqlite.Database,
 ) !void {
     // Read the request body
-    const reader = try request.reader();
+    var reader_buf: [8192]u8 = undefined;
+    const reader = request.readerExpectNone(&reader_buf);
     var body_buf: [max_payload_size]u8 = undefined;
-    const body_len = reader.readAll(&body_buf) catch {
+    const body_len = reader.readSliceShort(&body_buf) catch {
         try sendResponse(request, .bad_request, "{\"detail\": \"Failed to read request body\"}", cors_origin);
         return;
     };

@@ -112,8 +112,11 @@ pub fn main() !void {
 pub fn handleConnection(conn: net.Server.Connection, admin_api_key: []const u8, limiter: *rate_limit.RateLimiter, db: *sqlite.Database, cfg: *const app_config.Config, cors_config: *const cors.CorsConfig) !void {
     defer conn.stream.close();
 
-    var buf: [max_header_size]u8 = undefined;
-    var http_server = std.http.Server.init(conn, &buf);
+    var read_buf: [max_header_size]u8 = undefined;
+    var write_buf: [max_header_size]u8 = undefined;
+    var reader = net.Stream.Reader.init(conn.stream, &read_buf);
+    var writer = net.Stream.Writer.init(conn.stream, &write_buf);
+    var http_server = std.http.Server.init(reader.interface(), &writer.interface);
 
     var request = http_server.receiveHead() catch |err| {
         log.err("Failed to receive request head: {}", .{err});

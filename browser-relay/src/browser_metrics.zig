@@ -17,9 +17,10 @@ pub fn handleBrowserMetricsWithCors(
     cors_origin: ?[]const u8,
 ) !void {
     // Read the request body
-    const reader = try request.reader();
+    var reader_buf: [8192]u8 = undefined;
+    const reader = request.readerExpectNone(&reader_buf);
     var body_buf: [max_payload_size]u8 = undefined;
-    const body_len = reader.readAll(&body_buf) catch {
+    const body_len = reader.readSliceShort(&body_buf) catch {
         try sendResponse(request, .bad_request, "{\"detail\": \"Failed to read request body\"}", cors_origin);
         return;
     };
@@ -369,9 +370,7 @@ fn forwardToMetricsCollector(
     var client = std.http.Client{ .allocator = allocator };
     defer client.deinit();
 
-    var header_buf: [4096]u8 = undefined;
-    var req = client.open(.POST, uri, .{
-        .server_header_buffer = &header_buf,
+    var req = client.request(.POST, uri, .{
         .extra_headers = &.{
             .{ .name = "Content-Type", .value = "application/json" },
             .{ .name = "X-API-Key", .value = metrics_collector_api_key },
@@ -382,26 +381,27 @@ fn forwardToMetricsCollector(
     };
     defer req.deinit();
 
-    req.transfer_encoding = .{ .content_length = payload.len };
-    req.send() catch |err| {
+    // Send the request body
+    const body_copy = allocator.dupe(u8, payload) catch {
+        log.warn("Failed to allocate payload copy", .{});
+        return null;
+    };
+    defer allocator.free(body_copy);
+
+    req.sendBodyComplete(body_copy) catch |err| {
         log.warn("Failed to send to metrics collector: {}", .{err});
         return null;
     };
-    req.writeAll(payload) catch |err| {
-        log.warn("Failed to write metrics collector payload: {}", .{err});
-        return null;
-    };
-    req.finish() catch |err| {
-        log.warn("Failed to finish metrics collector request: {}", .{err});
-        return null;
-    };
-    req.wait() catch |err| {
+
+    // Receive the response head
+    var redirect_buf: [4096]u8 = undefined;
+    const response = req.receiveHead(&redirect_buf) catch |err| {
         log.warn("Failed to get metrics collector response: {}", .{err});
         return null;
     };
 
     return ForwardResult{
-        .status = req.response.status,
+        .status = response.head.status,
     };
 }
 

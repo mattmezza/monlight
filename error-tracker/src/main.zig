@@ -108,8 +108,11 @@ pub fn main() !void {
 pub fn handleConnection(conn: net.Server.Connection, api_key: []const u8, limiter: *rate_limit.RateLimiter, db: *sqlite.Database, cfg: *const app_config.Config) !void {
     defer conn.stream.close();
 
-    var buf: [max_header_size]u8 = undefined;
-    var http_server = std.http.Server.init(conn, &buf);
+    var read_buf: [max_header_size]u8 = undefined;
+    var write_buf: [max_header_size]u8 = undefined;
+    var connection_reader = conn.stream.reader(&read_buf);
+    var connection_writer = conn.stream.writer(&write_buf);
+    var http_server: std.http.Server = .init(connection_reader.interface(), &connection_writer.interface);
 
     var request = http_server.receiveHead() catch |err| {
         log.err("Failed to receive request head: {}", .{err});
@@ -177,7 +180,8 @@ fn handleHealth(request: *std.http.Server.Request) !void {
 
 fn handleErrorIngestion(request: *std.http.Server.Request, db: *sqlite.Database, cfg: *const app_config.Config) void {
     // Read request body
-    const body_reader = request.reader() catch |err| {
+    var body_buf: [max_body_size]u8 = undefined;
+    const body_reader = request.readerExpectContinue(&body_buf) catch |err| {
         log.err("Failed to get request reader: {}", .{err});
         return;
     };
@@ -186,7 +190,7 @@ fn handleErrorIngestion(request: *std.http.Server.Request, db: *sqlite.Database,
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const body = body_reader.readAllAlloc(allocator, max_body_size) catch |err| {
+    const body = body_reader.allocRemaining(allocator, std.Io.Limit.limited(max_body_size)) catch |err| {
         log.err("Failed to read request body: {}", .{err});
         sendJsonResponse(request, .bad_request, "{\"detail\": \"Failed to read request body\"}") catch {};
         return;
@@ -407,7 +411,7 @@ fn sendSmtpEmail(
     defer stream.close();
 
     // Set read timeout (10 seconds) to prevent indefinite hangs
-    const timeout = std.posix.timeval{ .tv_sec = 10, .tv_usec = 0 };
+    const timeout = std.posix.timeval{ .sec = 10, .usec = 0 };
     std.posix.setsockopt(stream.handle, std.posix.SOL.SOCKET, std.posix.SO.RCVTIMEO, std.mem.asBytes(&timeout)) catch {};
     std.posix.setsockopt(stream.handle, std.posix.SOL.SOCKET, std.posix.SO.SNDTIMEO, std.mem.asBytes(&timeout)) catch {};
 
@@ -456,9 +460,13 @@ fn sendSmtpEmail(
         };
         defer ca_bundle.deinit(allocator);
 
-        var tls_client = std.crypto.tls.Client.init(&reader, &writer, .{
+        var tls_read_buf: [std.crypto.tls.max_ciphertext_record_len]u8 = undefined;
+        var tls_write_buf: [std.crypto.tls.max_ciphertext_record_len]u8 = undefined;
+        var tls_client = std.crypto.tls.Client.init(reader.interface(), &writer.interface, .{
             .host = .{ .explicit = host },
             .ca = .{ .bundle = ca_bundle },
+            .read_buffer = &tls_read_buf,
+            .write_buffer = &tls_write_buf,
         }) catch |err| {
             log.warn("TLS handshake failed with {s}:{d}: {}", .{ host, port, err });
             return;
@@ -482,8 +490,8 @@ fn sendSmtpEmail(
     }
 }
 
-const SmtpReader = std.Io.Reader;
-const SmtpWriter = std.Io.Writer;
+const SmtpReader = net.Stream.Reader;
+const SmtpWriter = net.Stream.Writer;
 
 /// Perform AUTH LOGIN + mail send over a TLS connection.
 fn smtpAuthAndSend(tls: *std.crypto.tls.Client, username: ?[]const u8, password: ?[]const u8, from_email: []const u8, to_email: []const u8, subject: []const u8, body: []const u8) void {
@@ -495,14 +503,14 @@ fn smtpAuthAndSend(tls: *std.crypto.tls.Client, username: ?[]const u8, password:
         var user_b64_buf: [512]u8 = undefined;
         const user_b64_len = std.base64.standard.Encoder.calcSize(username.?.len);
         _ = std.base64.standard.Encoder.encode(user_b64_buf[0..user_b64_len], username.?);
-        _ = tls.writer().write(user_b64_buf[0..user_b64_len]) catch return;
+        _ = tls.writer.write(user_b64_buf[0..user_b64_len]) catch return;
         smtpSendTls(tls, "\r\n") catch return;
         if (!smtpReadReplyTls(tls, "334")) return;
 
         var pass_b64_buf: [512]u8 = undefined;
         const pass_b64_len = std.base64.standard.Encoder.calcSize(password.?.len);
         _ = std.base64.standard.Encoder.encode(pass_b64_buf[0..pass_b64_len], password.?);
-        _ = tls.writer().write(pass_b64_buf[0..pass_b64_len]) catch return;
+        _ = tls.writer.write(pass_b64_buf[0..pass_b64_len]) catch return;
         smtpSendTls(tls, "\r\n") catch return;
         if (!smtpReadReplyTls(tls, "235")) {
             log.warn("SMTP authentication failed", .{});
@@ -545,14 +553,14 @@ fn smtpAuthAndSendPlain(reader: *SmtpReader, writer: *SmtpWriter, username: ?[]c
         var user_b64_buf: [512]u8 = undefined;
         const user_b64_len = std.base64.standard.Encoder.calcSize(username.?.len);
         _ = std.base64.standard.Encoder.encode(user_b64_buf[0..user_b64_len], username.?);
-        _ = writer.write(user_b64_buf[0..user_b64_len]) catch return;
+        _ = writer.interface.write(user_b64_buf[0..user_b64_len]) catch return;
         smtpSend(writer, "\r\n") catch return;
         if (!smtpReadReply(reader, "334")) return;
 
         var pass_b64_buf: [512]u8 = undefined;
         const pass_b64_len = std.base64.standard.Encoder.calcSize(password.?.len);
         _ = std.base64.standard.Encoder.encode(pass_b64_buf[0..pass_b64_len], password.?);
-        _ = writer.write(pass_b64_buf[0..pass_b64_len]) catch return;
+        _ = writer.interface.write(pass_b64_buf[0..pass_b64_len]) catch return;
         smtpSend(writer, "\r\n") catch return;
         if (!smtpReadReply(reader, "235")) {
             log.warn("SMTP authentication failed", .{});
@@ -588,8 +596,8 @@ fn smtpAuthAndSendPlain(reader: *SmtpReader, writer: *SmtpWriter, username: ?[]c
 // --- SMTP I/O helpers for plain streams ---
 
 fn smtpSend(writer: *SmtpWriter, data: []const u8) !void {
-    _ = try writer.write(data);
-    try writer.flush();
+    _ = try writer.interface.write(data);
+    try writer.interface.flush();
 }
 
 fn smtpReadOk(reader: *SmtpReader) bool {
@@ -600,13 +608,13 @@ const SmtpResponse = struct { buf: [1024]u8, len: usize };
 
 fn smtpReadResponse(reader: *SmtpReader) SmtpResponse {
     var resp = SmtpResponse{ .buf = undefined, .len = 0 };
-    resp.len = reader.read(&resp.buf) catch 0;
+    resp.len = reader.interface().readSliceShort(&resp.buf) catch 0;
     return resp;
 }
 
 fn smtpReadReply(reader: *SmtpReader, expected_prefix: []const u8) bool {
     var buf: [1024]u8 = undefined;
-    const n = reader.read(&buf) catch return false;
+    const n = reader.interface().readSliceShort(&buf) catch return false;
     if (n < expected_prefix.len) return false;
     return std.mem.startsWith(u8, buf[0..n], expected_prefix);
 }
@@ -614,8 +622,8 @@ fn smtpReadReply(reader: *SmtpReader, expected_prefix: []const u8) bool {
 // --- SMTP I/O helpers for TLS streams ---
 
 fn smtpSendTls(tls: *std.crypto.tls.Client, data: []const u8) !void {
-    _ = try tls.writer().write(data);
-    tls.writer().flush() catch {};
+    _ = try tls.writer.write(data);
+    tls.writer.flush() catch {};
 }
 
 fn smtpReadOkTls(tls: *std.crypto.tls.Client) bool {
@@ -624,7 +632,7 @@ fn smtpReadOkTls(tls: *std.crypto.tls.Client) bool {
 
 fn smtpReadReplyTls(tls: *std.crypto.tls.Client, expected_prefix: []const u8) bool {
     var buf: [1024]u8 = undefined;
-    const n = tls.reader().read(&buf) catch return false;
+    const n = tls.reader.readSliceShort(&buf) catch return false;
     if (n < expected_prefix.len) return false;
     return std.mem.startsWith(u8, buf[0..n], expected_prefix);
 }

@@ -22,9 +22,10 @@ pub fn handleCreateDsnKey(
     }
 
     // Read request body
-    const reader = try request.reader();
+    var reader_buf: [4096]u8 = undefined;
+    const reader = request.readerExpectNone(&reader_buf);
     var body_buf: [4096]u8 = undefined;
-    const body_len = reader.readAll(&body_buf) catch {
+    const body_len = reader.readSliceShort(&body_buf) catch {
         try sendJsonResponse(request, .bad_request, "{\"detail\": \"Failed to read request body\"}");
         return;
     };
@@ -65,7 +66,7 @@ pub fn handleCreateDsnKey(
     std.crypto.random.bytes(&random_bytes);
 
     var hex_buf: [key_bytes * 2]u8 = undefined;
-    const hex_key = std.fmt.bufPrint(&hex_buf, "{s}", .{std.fmt.fmtSliceHexLower(&random_bytes)}) catch {
+    const hex_key = std.fmt.bufPrint(&hex_buf, "{x}", .{@as([]const u8, &random_bytes)}) catch {
         try sendJsonResponse(request, .internal_server_error, "{\"detail\": \"Failed to generate key\"}");
         return;
     };
@@ -271,7 +272,7 @@ test "handleCreateDsnKey creates a key" {
     var random_bytes: [key_bytes]u8 = undefined;
     std.crypto.random.bytes(&random_bytes);
     var hex_buf: [key_bytes * 2]u8 = undefined;
-    const hex_key = try std.fmt.bufPrint(&hex_buf, "{s}", .{std.fmt.fmtSliceHexLower(&random_bytes)});
+    const hex_key = try std.fmt.bufPrint(&hex_buf, "{x}", .{@as([]const u8, &random_bytes)});
 
     // Insert
     const stmt = try db.prepare("INSERT INTO dsn_keys (public_key, project) VALUES (?, ?);");
@@ -363,7 +364,7 @@ test "hex key generation produces 32 char string" {
     std.crypto.random.bytes(&random_bytes);
 
     var hex_buf: [key_bytes * 2]u8 = undefined;
-    const hex_key = try std.fmt.bufPrint(&hex_buf, "{s}", .{std.fmt.fmtSliceHexLower(&random_bytes)});
+    const hex_key = try std.fmt.bufPrint(&hex_buf, "{x}", .{@as([]const u8, &random_bytes)});
 
     try std.testing.expectEqual(@as(usize, 32), hex_key.len);
 
@@ -381,8 +382,8 @@ test "generated keys are unique" {
 
     var hex1: [key_bytes * 2]u8 = undefined;
     var hex2: [key_bytes * 2]u8 = undefined;
-    const k1 = try std.fmt.bufPrint(&hex1, "{s}", .{std.fmt.fmtSliceHexLower(&key1_bytes)});
-    const k2 = try std.fmt.bufPrint(&hex2, "{s}", .{std.fmt.fmtSliceHexLower(&key2_bytes)});
+    const k1 = try std.fmt.bufPrint(&hex1, "{x}", .{@as([]const u8, &key1_bytes)});
+    const k2 = try std.fmt.bufPrint(&hex2, "{x}", .{@as([]const u8, &key2_bytes)});
 
     try std.testing.expect(!std.mem.eql(u8, k1, k2));
 }

@@ -4,265 +4,81 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // Shared SQLite module from ../shared/
-    const sqlite_mod = b.addModule("sqlite", .{
-        .root_source_file = b.path("../shared/sqlite.zig"),
-    });
+    // Shared modules from ../shared/
+    const sqlite_mod = b.createModule(.{ .root_source_file = b.path("../shared/sqlite.zig") });
+    const config_mod = b.createModule(.{ .root_source_file = b.path("../shared/config.zig") });
+    const auth_mod = b.createModule(.{ .root_source_file = b.path("../shared/auth.zig") });
+    const rate_limit_mod = b.createModule(.{ .root_source_file = b.path("../shared/rate_limit.zig") });
 
-    // Shared config module from ../shared/
-    const config_mod = b.addModule("config", .{
-        .root_source_file = b.path("../shared/config.zig"),
-    });
+    const all_imports: []const std.Build.Module.Import = &.{
+        .{ .name = "sqlite", .module = sqlite_mod },
+        .{ .name = "config", .module = config_mod },
+        .{ .name = "auth", .module = auth_mod },
+        .{ .name = "rate_limit", .module = rate_limit_mod },
+    };
+    const sqlite_import: []const std.Build.Module.Import = &.{
+        .{ .name = "sqlite", .module = sqlite_mod },
+    };
+    const config_import: []const std.Build.Module.Import = &.{
+        .{ .name = "config", .module = config_mod },
+    };
 
-    // Shared auth module from ../shared/
-    const auth_mod = b.addModule("auth", .{
-        .root_source_file = b.path("../shared/auth.zig"),
-    });
-
-    // Shared rate limiting module from ../shared/
-    const rate_limit_mod = b.addModule("rate_limit", .{
-        .root_source_file = b.path("../shared/rate_limit.zig"),
-    });
-
-    const exe = b.addExecutable(.{
-        .name = "error-tracker",
+    // Main executable
+    const exe_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
+        .imports = all_imports,
     });
+    exe_mod.linkSystemLibrary("sqlite3", .{});
+    exe_mod.link_libc = true;
 
-    // Add shared modules
-    exe.root_module.addImport("sqlite", sqlite_mod);
-    exe.root_module.addImport("config", config_mod);
-    exe.root_module.addImport("auth", auth_mod);
-    exe.root_module.addImport("rate_limit", rate_limit_mod);
-
-    // Link SQLite C library
-    exe.linkSystemLibrary("sqlite3");
-    exe.linkLibC();
-
+    const exe = b.addExecutable(.{ .name = "error-tracker", .root_module = exe_mod });
     b.installArtifact(exe);
 
     // Run step
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
+    if (b.args) |args| run_cmd.addArgs(args);
     const run_step = b.step("run", "Run the error tracker server");
     run_step.dependOn(&run_cmd.step);
 
-    // Test step — tests for main.zig
-    const main_tests = b.addTest(.{
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    main_tests.root_module.addImport("sqlite", sqlite_mod);
-    main_tests.root_module.addImport("config", config_mod);
-    main_tests.root_module.addImport("auth", auth_mod);
-    main_tests.root_module.addImport("rate_limit", rate_limit_mod);
-    main_tests.linkSystemLibrary("sqlite3");
-    main_tests.linkLibC();
-
-    const run_main_tests = b.addRunArtifact(main_tests);
-
-    // Test step — tests for database.zig
-    const db_tests = b.addTest(.{
-        .root_source_file = b.path("src/database.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    db_tests.root_module.addImport("sqlite", sqlite_mod);
-    db_tests.linkSystemLibrary("sqlite3");
-    db_tests.linkLibC();
-
-    const run_db_tests = b.addRunArtifact(db_tests);
-
-    // Test step — tests for config.zig
-    const config_tests = b.addTest(.{
-        .root_source_file = b.path("src/config.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    config_tests.root_module.addImport("config", config_mod);
-
-    const run_config_tests = b.addRunArtifact(config_tests);
-
-    // Test step — tests for shared sqlite module
-    const sqlite_tests = b.addTest(.{
-        .root_source_file = b.path("../shared/sqlite.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    sqlite_tests.linkSystemLibrary("sqlite3");
-    sqlite_tests.linkLibC();
-
-    const run_sqlite_tests = b.addRunArtifact(sqlite_tests);
-
-    // Test step — tests for shared config module
-    const shared_config_tests = b.addTest(.{
-        .root_source_file = b.path("../shared/config.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
-    const run_shared_config_tests = b.addRunArtifact(shared_config_tests);
-
-    // Test step — tests for shared auth module
-    const auth_tests = b.addTest(.{
-        .root_source_file = b.path("../shared/auth.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
-    const run_auth_tests = b.addRunArtifact(auth_tests);
-
-    // Test step — tests for shared rate_limit module
-    const rate_limit_tests = b.addTest(.{
-        .root_source_file = b.path("../shared/rate_limit.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
-    const run_rate_limit_tests = b.addRunArtifact(rate_limit_tests);
-
-    // Test step — integration tests for auth (auth_test.zig)
-    const auth_integration_tests = b.addTest(.{
-        .root_source_file = b.path("src/auth_test.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    auth_integration_tests.root_module.addImport("sqlite", sqlite_mod);
-    auth_integration_tests.root_module.addImport("config", config_mod);
-    auth_integration_tests.root_module.addImport("auth", auth_mod);
-    auth_integration_tests.root_module.addImport("rate_limit", rate_limit_mod);
-    auth_integration_tests.linkSystemLibrary("sqlite3");
-    auth_integration_tests.linkLibC();
-
-    const run_auth_integration_tests = b.addRunArtifact(auth_integration_tests);
-
-    // Test step — integration tests for rate limiting and body size (rate_limit_test.zig)
-    const rate_limit_integration_tests = b.addTest(.{
-        .root_source_file = b.path("src/rate_limit_test.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    rate_limit_integration_tests.root_module.addImport("sqlite", sqlite_mod);
-    rate_limit_integration_tests.root_module.addImport("config", config_mod);
-    rate_limit_integration_tests.root_module.addImport("auth", auth_mod);
-    rate_limit_integration_tests.root_module.addImport("rate_limit", rate_limit_mod);
-    rate_limit_integration_tests.linkSystemLibrary("sqlite3");
-    rate_limit_integration_tests.linkLibC();
-
-    const run_rate_limit_integration_tests = b.addRunArtifact(rate_limit_integration_tests);
-
-    // Test step — tests for fingerprint module
-    const fingerprint_tests = b.addTest(.{
-        .root_source_file = b.path("src/fingerprint.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
-    const run_fingerprint_tests = b.addRunArtifact(fingerprint_tests);
-
-    // Test step — tests for error_ingestion module
-    const error_ingestion_tests = b.addTest(.{
-        .root_source_file = b.path("src/error_ingestion.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    error_ingestion_tests.root_module.addImport("sqlite", sqlite_mod);
-    error_ingestion_tests.linkSystemLibrary("sqlite3");
-    error_ingestion_tests.linkLibC();
-
-    const run_error_ingestion_tests = b.addRunArtifact(error_ingestion_tests);
-
-    // Test step — tests for error_listing module
-    const error_listing_tests = b.addTest(.{
-        .root_source_file = b.path("src/error_listing.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    error_listing_tests.root_module.addImport("sqlite", sqlite_mod);
-    error_listing_tests.linkSystemLibrary("sqlite3");
-    error_listing_tests.linkLibC();
-
-    const run_error_listing_tests = b.addRunArtifact(error_listing_tests);
-
-    // Test step — tests for error_detail module
-    const error_detail_tests = b.addTest(.{
-        .root_source_file = b.path("src/error_detail.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    error_detail_tests.root_module.addImport("sqlite", sqlite_mod);
-    error_detail_tests.linkSystemLibrary("sqlite3");
-    error_detail_tests.linkLibC();
-
-    const run_error_detail_tests = b.addRunArtifact(error_detail_tests);
-
-    // Test step — tests for error_resolve module
-    const error_resolve_tests = b.addTest(.{
-        .root_source_file = b.path("src/error_resolve.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    error_resolve_tests.root_module.addImport("sqlite", sqlite_mod);
-    error_resolve_tests.linkSystemLibrary("sqlite3");
-    error_resolve_tests.linkLibC();
-
-    const run_error_resolve_tests = b.addRunArtifact(error_resolve_tests);
-
-    // Test step — tests for projects_listing module
-    const projects_listing_tests = b.addTest(.{
-        .root_source_file = b.path("src/projects_listing.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    projects_listing_tests.root_module.addImport("sqlite", sqlite_mod);
-    projects_listing_tests.linkSystemLibrary("sqlite3");
-    projects_listing_tests.linkLibC();
-
-    const run_projects_listing_tests = b.addRunArtifact(projects_listing_tests);
-
-    // Test step — tests for retention module
-    const retention_tests = b.addTest(.{
-        .root_source_file = b.path("src/retention.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    retention_tests.root_module.addImport("sqlite", sqlite_mod);
-    retention_tests.linkSystemLibrary("sqlite3");
-    retention_tests.linkLibC();
-
-    const run_retention_tests = b.addRunArtifact(retention_tests);
-
-    // Test step — tests for web_ui module
-    const web_ui_tests = b.addTest(.{
-        .root_source_file = b.path("src/web_ui.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
-    const run_web_ui_tests = b.addRunArtifact(web_ui_tests);
-
+    // Tests
     const test_step = b.step("test", "Run all unit tests");
-    test_step.dependOn(&run_main_tests.step);
-    test_step.dependOn(&run_db_tests.step);
-    test_step.dependOn(&run_config_tests.step);
-    test_step.dependOn(&run_sqlite_tests.step);
-    test_step.dependOn(&run_shared_config_tests.step);
-    test_step.dependOn(&run_auth_tests.step);
-    test_step.dependOn(&run_rate_limit_tests.step);
-    test_step.dependOn(&run_auth_integration_tests.step);
-    test_step.dependOn(&run_rate_limit_integration_tests.step);
-    test_step.dependOn(&run_fingerprint_tests.step);
-    test_step.dependOn(&run_error_ingestion_tests.step);
-    test_step.dependOn(&run_error_listing_tests.step);
-    test_step.dependOn(&run_error_detail_tests.step);
-    test_step.dependOn(&run_error_resolve_tests.step);
-    test_step.dependOn(&run_projects_listing_tests.step);
-    test_step.dependOn(&run_retention_tests.step);
-    test_step.dependOn(&run_web_ui_tests.step);
+
+    const TestDef = struct { path: []const u8, imports: []const std.Build.Module.Import, sqlite: bool };
+    const tests = [_]TestDef{
+        .{ .path = "src/main.zig", .imports = all_imports, .sqlite = true },
+        .{ .path = "src/database.zig", .imports = sqlite_import, .sqlite = true },
+        .{ .path = "src/config.zig", .imports = config_import, .sqlite = false },
+        .{ .path = "../shared/sqlite.zig", .imports = &.{}, .sqlite = true },
+        .{ .path = "../shared/config.zig", .imports = &.{}, .sqlite = false },
+        .{ .path = "../shared/auth.zig", .imports = &.{}, .sqlite = false },
+        .{ .path = "../shared/rate_limit.zig", .imports = &.{}, .sqlite = false },
+        .{ .path = "src/auth_test.zig", .imports = all_imports, .sqlite = true },
+        .{ .path = "src/rate_limit_test.zig", .imports = all_imports, .sqlite = true },
+        .{ .path = "src/fingerprint.zig", .imports = &.{}, .sqlite = false },
+        .{ .path = "src/error_ingestion.zig", .imports = sqlite_import, .sqlite = true },
+        .{ .path = "src/error_listing.zig", .imports = sqlite_import, .sqlite = true },
+        .{ .path = "src/error_detail.zig", .imports = sqlite_import, .sqlite = true },
+        .{ .path = "src/error_resolve.zig", .imports = sqlite_import, .sqlite = true },
+        .{ .path = "src/projects_listing.zig", .imports = sqlite_import, .sqlite = true },
+        .{ .path = "src/retention.zig", .imports = sqlite_import, .sqlite = true },
+        .{ .path = "src/web_ui.zig", .imports = &.{}, .sqlite = false },
+    };
+
+    for (tests) |t| {
+        const mod = b.createModule(.{
+            .root_source_file = b.path(t.path),
+            .target = target,
+            .optimize = optimize,
+            .imports = t.imports,
+        });
+        if (t.sqlite) {
+            mod.linkSystemLibrary("sqlite3", .{});
+            mod.link_libc = true;
+        }
+        const run = b.addRunArtifact(b.addTest(.{ .root_module = mod }));
+        test_step.dependOn(&run.step);
+    }
 }

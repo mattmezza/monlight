@@ -1,5 +1,6 @@
 .{
-    .name = "metrics-collector",
+    .name = .metrics_collector,
+    .fingerprint = 0xbd2afb8c86b4e025,
     .version = "0.1.0",
     .paths = .{
         "build.zig",

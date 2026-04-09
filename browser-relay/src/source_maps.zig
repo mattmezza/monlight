@@ -20,9 +20,10 @@ pub fn handleUploadSourceMap(
     }
 
     // Read request body — source maps can be large
-    const reader = try request.reader();
+    var reader_buf: [8192]u8 = undefined;
+    const reader = request.readerExpectNone(&reader_buf);
     var body_buf: [max_source_map_size]u8 = undefined;
-    const body_len = reader.readAll(&body_buf) catch {
+    const body_len = reader.readSliceShort(&body_buf) catch {
         try sendJsonResponse(request, .bad_request, "{\"detail\": \"Failed to read request body\"}");
         return;
     };

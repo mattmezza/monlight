@@ -165,9 +165,10 @@ pub fn handleConnection(conn: net.Server.Connection, api_key: []const u8, limite
 }
 
 fn handleHealth(request: *std.http.Server.Request, db: *sqlite.Database) void {
-    var response = std.ArrayList(u8).init(std.heap.page_allocator);
-    defer response.deinit();
-    var writer = response.writer();
+    const alloc = std.heap.page_allocator;
+    var response = std.ArrayList(u8){};
+    defer response.deinit(alloc);
+    var writer = response.writer(alloc);
 
     writer.writeAll("{\"status\": \"ok\"") catch {
         sendJsonResponse(request, .ok, "{\"status\": \"ok\"}") catch {};
@@ -228,9 +229,10 @@ fn handleApiMetrics(request: *std.http.Server.Request, db: *sqlite.Database) voi
         return;
     }
 
-    var response = std.ArrayList(u8).init(std.heap.page_allocator);
-    defer response.deinit();
-    var writer = response.writer();
+    const alloc = std.heap.page_allocator;
+    var response = std.ArrayList(u8){};
+    defer response.deinit(alloc);
+    var writer = response.writer(alloc);
 
     _ = metrics_query.queryMetrics(db, &params, &writer) catch |err| {
         log.err("Failed to query metrics: {}", .{err});
@@ -242,10 +244,11 @@ fn handleApiMetrics(request: *std.http.Server.Request, db: *sqlite.Database) voi
 }
 
 fn handleApiMetricsNames(request: *std.http.Server.Request, db: *sqlite.Database) void {
+    const alloc = std.heap.page_allocator;
     const project = parseDashboardProject(request.head.target);
-    var response = std.ArrayList(u8).init(std.heap.page_allocator);
-    defer response.deinit();
-    var writer = response.writer();
+    var response = std.ArrayList(u8){};
+    defer response.deinit(alloc);
+    var writer = response.writer(alloc);
 
     _ = metrics_query.queryMetricNames(db, &writer, project) catch |err| {
         log.err("Failed to query metric names: {}", .{err});
@@ -257,15 +260,16 @@ fn handleApiMetricsNames(request: *std.http.Server.Request, db: *sqlite.Database
 }
 
 fn handleApiDashboard(request: *std.http.Server.Request, db: *sqlite.Database) void {
+    const alloc = std.heap.page_allocator;
     // Parse period from query params (default: 24h)
     const target = request.head.target;
     const period = parseDashboardPeriod(target);
     const offset = periodToOffset(period);
     const project = parseDashboardProject(target);
 
-    var response = std.ArrayList(u8).init(std.heap.page_allocator);
-    defer response.deinit();
-    var writer = response.writer();
+    var response = std.ArrayList(u8){};
+    defer response.deinit(alloc);
+    var writer = response.writer(alloc);
 
     buildDashboardJson(db, &writer, offset, period, project) catch |err| {
         log.err("Failed to build dashboard data: {}", .{err});
@@ -767,9 +771,10 @@ fn handleApiProjects(request: *std.http.Server.Request, db: *sqlite.Database) vo
     };
     defer stmt.deinit();
 
-    var response = std.ArrayList(u8).init(std.heap.page_allocator);
-    defer response.deinit();
-    var writer = response.writer();
+    const alloc = std.heap.page_allocator;
+    var response = std.ArrayList(u8){};
+    defer response.deinit(alloc);
+    var writer = response.writer(alloc);
 
     writer.writeAll("{\"projects\": [") catch return;
     var iter = stmt.query();
@@ -886,9 +891,9 @@ test "buildDashboardJson without web vitals data" {
         _ = try stmt.exec();
     }
 
-    var response = std.ArrayList(u8).init(std.testing.allocator);
-    defer response.deinit();
-    var writer = response.writer();
+    var response = std.ArrayList(u8){};
+    defer response.deinit(std.testing.allocator);
+    var writer = response.writer(std.testing.allocator);
 
     try buildDashboardJson(&db, &writer, "-24 hours", "24h", null);
 
@@ -923,9 +928,9 @@ test "buildDashboardJson with web vitals data" {
         _ = try stmt.exec();
     }
 
-    var response = std.ArrayList(u8).init(std.testing.allocator);
-    defer response.deinit();
-    var writer = response.writer();
+    var response = std.ArrayList(u8){};
+    defer response.deinit(std.testing.allocator);
+    var writer = response.writer(std.testing.allocator);
 
     try buildDashboardJson(&db, &writer, "-24 hours", "24h", null);
 
@@ -979,9 +984,9 @@ test "buildDashboardJson web vitals ratings are correct" {
         _ = try stmt.exec();
     }
 
-    var response = std.ArrayList(u8).init(std.testing.allocator);
-    defer response.deinit();
-    var writer = response.writer();
+    var response = std.ArrayList(u8){};
+    defer response.deinit(std.testing.allocator);
+    var writer = response.writer(std.testing.allocator);
 
     try buildDashboardJson(&db, &writer, "-24 hours", "24h", null);
 

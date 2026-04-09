@@ -185,8 +185,8 @@ pub fn queryAndFormat(allocator: std.mem.Allocator, db: *sqlite.Database, params
     try stmt.bindInt(limit_pos + 1, offset_val);
 
     // Build JSON response
-    var json_buf = std.ArrayList(u8).init(allocator);
-    const writer = json_buf.writer();
+    var json_buf: std.ArrayList(u8) = .{};
+    const writer = json_buf.writer(allocator);
 
     try writer.writeAll("{\"errors\": [");
 
@@ -245,7 +245,7 @@ pub fn queryAndFormat(allocator: std.mem.Allocator, db: *sqlite.Database, params
     try writer.print("{d}", .{params.offset});
     try writer.writeByte('}');
 
-    return json_buf.toOwnedSlice();
+    return json_buf.toOwnedSlice(allocator);
 }
 
 /// Write a string with JSON escaping (escapes backslash, double-quote, newline, tab, etc.)

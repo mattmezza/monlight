@@ -49,8 +49,8 @@ pub fn queryAndFormat(allocator: std.mem.Allocator, db: *sqlite.Database, error_
     const resolved_at = row.text(10); // nullable
 
     // Step 2: Build JSON response
-    var json_buf = std.ArrayList(u8).init(allocator);
-    const writer = json_buf.writer();
+    var json_buf: std.ArrayList(u8) = .{};
+    const writer = json_buf.writer(allocator);
 
     try writer.writeAll("{\"id\": ");
     try writer.print("{d}", .{id});
@@ -173,7 +173,7 @@ pub fn queryAndFormat(allocator: std.mem.Allocator, db: *sqlite.Database, error_
 
     try writer.writeAll("]}");
 
-    const result: []const u8 = try json_buf.toOwnedSlice();
+    const result: []const u8 = try json_buf.toOwnedSlice(allocator);
     return result;
 }
 

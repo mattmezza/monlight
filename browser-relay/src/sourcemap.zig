@@ -237,8 +237,8 @@ fn decodeMappings(allocator: std.mem.Allocator, mappings: []const u8) ![]Mapping
         }
     }
     // Rough estimate: each segment has at least 1 char
-    var entries = std.ArrayList(MappingEntry).init(allocator);
-    defer entries.deinit();
+    var entries = std.ArrayList(MappingEntry){};
+    defer entries.deinit(allocator);
 
     var generated_line: u32 = 0;
     var generated_col: i64 = 0;
@@ -274,7 +274,7 @@ fn decodeMappings(allocator: std.mem.Allocator, mappings: []const u8) ![]Mapping
         // Check if there are more fields in this segment
         if (pos >= mappings.len or mappings[pos] == ',' or mappings[pos] == ';') {
             // 1-field segment: only generated column
-            try entries.append(.{
+            try entries.append(allocator, .{
                 .generated_line = generated_line,
                 .generated_col = @intCast(@as(u64, @bitCast(generated_col))),
                 .source_index = null,
@@ -309,7 +309,7 @@ fn decodeMappings(allocator: std.mem.Allocator, mappings: []const u8) ![]Mapping
             entry_name_index = @intCast(@as(u64, @bitCast(name_index)));
         }
 
-        try entries.append(.{
+        try entries.append(allocator, .{
             .generated_line = generated_line,
             .generated_col = @intCast(@as(u64, @bitCast(generated_col))),
             .source_index = @intCast(@as(u64, @bitCast(source_index))),
@@ -319,7 +319,7 @@ fn decodeMappings(allocator: std.mem.Allocator, mappings: []const u8) ![]Mapping
         });
     }
 
-    return try entries.toOwnedSlice();
+    return try entries.toOwnedSlice(allocator);
 }
 
 // ============================================================
@@ -338,8 +338,8 @@ pub const StackFrame = struct {
 /// Parse a JavaScript stack trace string into individual frames.
 /// Supports Chrome/V8, Firefox, and Safari formats.
 pub fn parseStackTrace(allocator: std.mem.Allocator, stack: []const u8) ![]StackFrame {
-    var frames = std.ArrayList(StackFrame).init(allocator);
-    defer frames.deinit();
+    var frames = std.ArrayList(StackFrame){};
+    defer frames.deinit(allocator);
 
     var line_iter = std.mem.splitScalar(u8, stack, '\n');
     while (line_iter.next()) |line| {
@@ -351,7 +351,7 @@ pub fn parseStackTrace(allocator: std.mem.Allocator, stack: []const u8) ![]Stack
         if (parseChromeFrame(trimmed)) |frame| {
             var f = frame;
             f.raw_line = trimmed;
-            try frames.append(f);
+            try frames.append(allocator, f);
             continue;
         }
 
@@ -360,14 +360,14 @@ pub fn parseStackTrace(allocator: std.mem.Allocator, stack: []const u8) ![]Stack
         if (parseFirefoxFrame(trimmed)) |frame| {
             var f = frame;
             f.raw_line = trimmed;
-            try frames.append(f);
+            try frames.append(allocator, f);
             continue;
         }
 
         // Skip lines we can't parse (e.g. error message line)
     }
 
-    return try frames.toOwnedSlice();
+    return try frames.toOwnedSlice(allocator);
 }
 
 /// Parse a Chrome/V8 style stack frame:
@@ -494,15 +494,15 @@ pub fn rewriteStackTrace(
 
     if (frames.len == 0) return try allocator.dupe(u8, stack);
 
-    var result = std.ArrayList(u8).init(allocator);
-    defer result.deinit();
+    var result = std.ArrayList(u8){};
+    defer result.deinit(allocator);
 
     var line_iter = std.mem.splitScalar(u8, stack, '\n');
     var frame_idx: usize = 0;
 
     while (line_iter.next()) |line| {
         if (result.items.len > 0) {
-            try result.append('\n');
+            try result.append(allocator, '\n');
         }
 
         const trimmed = std.mem.trim(u8, line, " \t\r");
@@ -520,27 +520,27 @@ pub fn rewriteStackTrace(
                 // Parse source map and look up original position
                 var source_map = parseSourceMap(allocator, map_content) catch {
                     // Can't parse source map, keep original line
-                    try result.appendSlice(line);
+                    try result.appendSlice(allocator, line);
                     continue;
                 };
                 defer source_map.deinit();
 
                 if (source_map.lookup(frame.line, frame.column)) |original| {
                     // Rewrite the frame with original location
-                    try writeRewrittenFrame(&result, frame, original, line);
+                    try writeRewrittenFrame(allocator, &result, frame, original, line);
                     continue;
                 }
             }
 
             // No source map or no mapping found — keep original line
-            try result.appendSlice(line);
+            try result.appendSlice(allocator, line);
         } else {
             // Not a frame line, keep as-is
-            try result.appendSlice(line);
+            try result.appendSlice(allocator, line);
         }
     }
 
-    return try result.toOwnedSlice();
+    return try result.toOwnedSlice(allocator);
 }
 
 /// Normalize a file URL for source map lookup.
@@ -561,6 +561,7 @@ fn normalizeFileUrl(url: []const u8) []const u8 {
 
 /// Write a rewritten stack frame to the output.
 fn writeRewrittenFrame(
+    allocator: std.mem.Allocator,
     result: *std.ArrayList(u8),
     frame: StackFrame,
     original: LookupResult,
@@ -576,54 +577,54 @@ fn writeRewrittenFrame(
     // Determine format based on original frame format
     if (std.mem.indexOf(u8, frame.raw_line, "at ") != null) {
         // Chrome format
-        try result.appendSlice(indent_str);
-        try result.appendSlice("at ");
+        try result.appendSlice(allocator, indent_str);
+        try result.appendSlice(allocator, "at ");
         if (original.name) |name| {
-            try result.appendSlice(name);
-            try result.appendSlice(" (");
-            try result.appendSlice(original.source);
-            try result.appendSlice(":");
-            try appendU32(result, original.line);
-            try result.appendSlice(":");
-            try appendU32(result, original.column);
-            try result.appendSlice(")");
+            try result.appendSlice(allocator, name);
+            try result.appendSlice(allocator, " (");
+            try result.appendSlice(allocator, original.source);
+            try result.appendSlice(allocator, ":");
+            try appendU32(allocator, result, original.line);
+            try result.appendSlice(allocator, ":");
+            try appendU32(allocator, result, original.column);
+            try result.appendSlice(allocator, ")");
         } else if (frame.function_name) |func| {
-            try result.appendSlice(func);
-            try result.appendSlice(" (");
-            try result.appendSlice(original.source);
-            try result.appendSlice(":");
-            try appendU32(result, original.line);
-            try result.appendSlice(":");
-            try appendU32(result, original.column);
-            try result.appendSlice(")");
+            try result.appendSlice(allocator, func);
+            try result.appendSlice(allocator, " (");
+            try result.appendSlice(allocator, original.source);
+            try result.appendSlice(allocator, ":");
+            try appendU32(allocator, result, original.line);
+            try result.appendSlice(allocator, ":");
+            try appendU32(allocator, result, original.column);
+            try result.appendSlice(allocator, ")");
         } else {
-            try result.appendSlice(original.source);
-            try result.appendSlice(":");
-            try appendU32(result, original.line);
-            try result.appendSlice(":");
-            try appendU32(result, original.column);
+            try result.appendSlice(allocator, original.source);
+            try result.appendSlice(allocator, ":");
+            try appendU32(allocator, result, original.line);
+            try result.appendSlice(allocator, ":");
+            try appendU32(allocator, result, original.column);
         }
     } else {
         // Firefox/Safari format
-        try result.appendSlice(indent_str);
+        try result.appendSlice(allocator, indent_str);
         if (original.name) |name| {
-            try result.appendSlice(name);
+            try result.appendSlice(allocator, name);
         } else if (frame.function_name) |func| {
-            try result.appendSlice(func);
+            try result.appendSlice(allocator, func);
         }
-        try result.appendSlice("@");
-        try result.appendSlice(original.source);
-        try result.appendSlice(":");
-        try appendU32(result, original.line);
-        try result.appendSlice(":");
-        try appendU32(result, original.column);
+        try result.appendSlice(allocator, "@");
+        try result.appendSlice(allocator, original.source);
+        try result.appendSlice(allocator, ":");
+        try appendU32(allocator, result, original.line);
+        try result.appendSlice(allocator, ":");
+        try appendU32(allocator, result, original.column);
     }
 }
 
-fn appendU32(list: *std.ArrayList(u8), value: u32) !void {
+fn appendU32(allocator: std.mem.Allocator, list: *std.ArrayList(u8), value: u32) !void {
     var buf: [16]u8 = undefined;
     const s = std.fmt.bufPrint(&buf, "{d}", .{value}) catch unreachable;
-    try list.appendSlice(s);
+    try list.appendSlice(allocator, s);
 }
 
 // ============================================================
@@ -665,8 +666,8 @@ pub fn deobfuscateStackTrace(
 
     if (frames.len == 0) return try allocator.dupe(u8, stack);
 
-    var result = std.ArrayList(u8).init(allocator);
-    defer result.deinit();
+    var result = std.ArrayList(u8){};
+    defer result.deinit(allocator);
 
     // Cache parsed source maps by file_url to avoid re-parsing
     var sm_cache = std.StringHashMap(?SourceMapCacheEntry).init(allocator);
@@ -685,7 +686,7 @@ pub fn deobfuscateStackTrace(
 
     while (line_iter.next()) |line| {
         if (result.items.len > 0) {
-            try result.append('\n');
+            try result.append(allocator, '\n');
         }
 
         const trimmed = std.mem.trim(u8, line, " \t\r");
@@ -701,12 +702,12 @@ pub fn deobfuscateStackTrace(
             if (cached) |cache_entry| {
                 if (cache_entry) |*entry| {
                     if (entry.sm.lookup(frame.line, frame.column)) |original| {
-                        try writeRewrittenFrame(&result, frame, original, line);
+                        try writeRewrittenFrame(allocator, &result, frame, original, line);
                         continue;
                     }
                 }
                 // Cached as null (no source map found) or no mapping
-                try result.appendSlice(line);
+                try result.appendSlice(allocator, line);
                 continue;
             }
 
@@ -714,18 +715,18 @@ pub fn deobfuscateStackTrace(
             if (lookupSourceMapFromDb(db, project, release, file_url)) |map_content| {
                 // Need to dupe the content since the DB row may be freed
                 const duped = allocator.dupe(u8, map_content) catch {
-                    try result.appendSlice(line);
+                    try result.appendSlice(allocator, line);
                     continue;
                 };
 
                 var sm = parseSourceMap(allocator, duped) catch {
                     sm_cache.put(file_url, null) catch {};
-                    try result.appendSlice(line);
+                    try result.appendSlice(allocator, line);
                     continue;
                 };
 
                 if (sm.lookup(frame.line, frame.column)) |original| {
-                    try writeRewrittenFrame(&result, frame, original, line);
+                    try writeRewrittenFrame(allocator, &result, frame, original, line);
                     sm_cache.put(file_url, SourceMapCacheEntry{ .sm = sm }) catch {
                         sm.deinit();
                     };
@@ -739,13 +740,13 @@ pub fn deobfuscateStackTrace(
                 sm_cache.put(file_url, null) catch {};
             }
 
-            try result.appendSlice(line);
+            try result.appendSlice(allocator, line);
         } else {
-            try result.appendSlice(line);
+            try result.appendSlice(allocator, line);
         }
     }
 
-    return try result.toOwnedSlice();
+    return try result.toOwnedSlice(allocator);
 }
 
 const SourceMapCacheEntry = struct {

@@ -1,5 +1,6 @@
 .{
-    .name = "log-viewer",
+    .name = .log_viewer,
+    .fingerprint = 0x16a6fff7dbdb080c,
     .version = "0.1.0",
     .paths = .{
         "build.zig",

@@ -44,14 +44,14 @@ pub fn aggregateMinuteBucket(db: *sqlite.Database, bucket: []const u8) !usize {
     const allocator = gpa.allocator();
 
     const Group = struct { name: []const u8, labels: []const u8, metric_type: []const u8 };
-    var groups = std.ArrayList(Group).init(allocator);
+    var groups = std.ArrayList(Group){};
     defer {
         for (groups.items) |g| {
             allocator.free(g.name);
             allocator.free(g.labels);
             allocator.free(g.metric_type);
         }
-        groups.deinit();
+        groups.deinit(allocator);
     }
 
     var groups_iter = groups_stmt.query();
@@ -71,7 +71,7 @@ pub fn aggregateMinuteBucket(db: *sqlite.Database, bucket: []const u8) !usize {
             continue;
         };
 
-        groups.append(.{ .name = name, .labels = labels, .metric_type = metric_type }) catch {
+        groups.append(allocator, .{ .name = name, .labels = labels, .metric_type = metric_type }) catch {
             allocator.free(name);
             allocator.free(labels);
             allocator.free(metric_type);
@@ -214,12 +214,12 @@ fn computePercentiles(
         try val_stmt.bindText(4, bucket);
     }
 
-    var values = std.ArrayList(f64).init(allocator);
-    defer values.deinit();
+    var values = std.ArrayList(f64){};
+    defer values.deinit(allocator);
 
     var val_iter = val_stmt.query();
     while (val_iter.next()) |row| {
-        try values.append(row.float(0));
+        try values.append(allocator, row.float(0));
     }
 
     if (values.items.len == 0) return error.TestUnexpectedResult;
@@ -324,13 +324,13 @@ pub fn aggregateHourBucket(db: *sqlite.Database, bucket: []const u8) !usize {
     const allocator = gpa.allocator();
 
     const Group = struct { name: []const u8, labels: []const u8 };
-    var groups = std.ArrayList(Group).init(allocator);
+    var groups = std.ArrayList(Group){};
     defer {
         for (groups.items) |g| {
             allocator.free(g.name);
             allocator.free(g.labels);
         }
-        groups.deinit();
+        groups.deinit(allocator);
     }
 
     var groups_iter = groups_stmt.query();
@@ -344,7 +344,7 @@ pub fn aggregateHourBucket(db: *sqlite.Database, bucket: []const u8) !usize {
             continue;
         };
 
-        groups.append(.{ .name = name, .labels = labels }) catch {
+        groups.append(allocator, .{ .name = name, .labels = labels }) catch {
             allocator.free(name);
             allocator.free(labels);
             continue;
@@ -484,7 +484,7 @@ pub fn aggregationThread(
         // Sleep in 1-second chunks for responsive stop-flag checking
         var slept: i64 = 0;
         while (slept < interval_seconds and !stop.load(.acquire)) {
-            std.time.sleep(1_000_000_000); // 1 second
+            std.Thread.sleep(1_000_000_000); // 1 second
             slept += 1;
         }
 

@@ -1,5 +1,6 @@
 .{
-    .name = "error-tracker",
+    .name = .error_tracker,
+    .fingerprint = 0x31277b8337213967,
     .version = "0.2.0",
     .paths = .{
         "build.zig",

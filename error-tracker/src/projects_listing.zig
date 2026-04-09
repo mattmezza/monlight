@@ -13,8 +13,8 @@ pub fn queryAndFormat(allocator: std.mem.Allocator, db: *sqlite.Database) ![]con
     var iter = stmt.query();
     // Note: do NOT call iter.deinit() — stmt.deinit() already finalizes the underlying statement
 
-    var buf = std.ArrayList(u8).init(allocator);
-    const writer = buf.writer();
+    var buf: std.ArrayList(u8) = .{};
+    const writer = buf.writer(allocator);
 
     try writer.writeAll("{\"projects\": [");
 
@@ -32,7 +32,7 @@ pub fn queryAndFormat(allocator: std.mem.Allocator, db: *sqlite.Database) ![]con
 
     try writer.writeAll("]}");
 
-    return buf.toOwnedSlice();
+    return buf.toOwnedSlice(allocator);
 }
 
 /// Write a string with JSON escaping.

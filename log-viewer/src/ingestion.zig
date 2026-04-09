@@ -102,6 +102,8 @@ fn extractJsonStringValue(json: []const u8, key: []const u8) ?[]const u8 {
 pub const BufferedEntry = struct {
     /// Accumulated message lines
     lines: std.ArrayList(u8),
+    /// Allocator for lines
+    allocator: std.mem.Allocator,
     /// Stream (stdout/stderr)
     stream: [16]u8,
     stream_len: usize,
@@ -113,7 +115,8 @@ pub const BufferedEntry = struct {
 
     pub fn init(allocator: std.mem.Allocator) BufferedEntry {
         return .{
-            .lines = std.ArrayList(u8).init(allocator),
+            .lines = .{},
+            .allocator = allocator,
             .stream = undefined,
             .stream_len = 0,
             .timestamp = undefined,
@@ -123,7 +126,7 @@ pub const BufferedEntry = struct {
     }
 
     pub fn deinit(self: *BufferedEntry) void {
-        self.lines.deinit();
+        self.lines.deinit(self.allocator);
     }
 
     pub fn setStream(self: *BufferedEntry, stream: []const u8) void {
@@ -148,9 +151,9 @@ pub const BufferedEntry = struct {
 
     pub fn appendLine(self: *BufferedEntry, line: []const u8) !void {
         if (self.lines.items.len > 0) {
-            try self.lines.append('\n');
+            try self.lines.append(self.allocator, '\n');
         }
-        try self.lines.appendSlice(line);
+        try self.lines.appendSlice(self.allocator, line);
     }
 
     pub fn getMessage(self: *const BufferedEntry) []const u8 {
@@ -434,12 +437,12 @@ pub fn getFileSize(path: []const u8) !i64 {
 
 /// Parse comma-separated container names into a list.
 pub fn parseContainerNames(allocator: std.mem.Allocator, containers_str: []const u8) !std.ArrayList([]const u8) {
-    var list = std.ArrayList([]const u8).init(allocator);
+    var list: std.ArrayList([]const u8) = .{};
     var iter = std.mem.splitScalar(u8, containers_str, ',');
     while (iter.next()) |name| {
         const trimmed = std.mem.trim(u8, name, " \t");
         if (trimmed.len > 0) {
-            try list.append(trimmed);
+            try list.append(allocator, trimmed);
         }
     }
     return list;
@@ -631,7 +634,7 @@ pub fn ingestionThread(
         log.err("ingestion thread: failed to parse container names: {}", .{err});
         return;
     };
-    defer container_names.deinit();
+    defer container_names.deinit(allocator);
 
     log.info("ingestion thread started: watching {d} container(s), poll interval {d}s", .{
         container_names.items.len,
@@ -727,7 +730,7 @@ pub fn ingestionThread(
         var slept: u64 = 0;
         while (slept < poll_interval_ns and !stop.load(.acquire)) {
             const sleep_chunk = @min(std.time.ns_per_s, poll_interval_ns - slept);
-            std.time.sleep(sleep_chunk);
+            std.Thread.sleep(sleep_chunk);
             slept += sleep_chunk;
         }
     }
@@ -1014,7 +1017,7 @@ test "cleanupOldEntries keeps FTS index consistent" {
 test "parseContainerNames splits comma-separated list" {
     const allocator = std.testing.allocator;
     var names = try parseContainerNames(allocator, "web, api, worker");
-    defer names.deinit();
+    defer names.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 3), names.items.len);
     try std.testing.expectEqualStrings("web", names.items[0]);
@@ -1025,7 +1028,7 @@ test "parseContainerNames splits comma-separated list" {
 test "parseContainerNames handles single container" {
     const allocator = std.testing.allocator;
     var names = try parseContainerNames(allocator, "web");
-    defer names.deinit();
+    defer names.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 1), names.items.len);
     try std.testing.expectEqualStrings("web", names.items[0]);
@@ -1034,7 +1037,7 @@ test "parseContainerNames handles single container" {
 test "parseContainerNames handles empty and whitespace" {
     const allocator = std.testing.allocator;
     var names = try parseContainerNames(allocator, "");
-    defer names.deinit();
+    defer names.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), names.items.len);
 }

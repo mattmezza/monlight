@@ -52,13 +52,13 @@ pub fn queryLogs(db: *sqlite.Database, params: LogQueryParams) ![]const u8 {
     const allocator = std.heap.page_allocator;
 
     // Build SQL dynamically based on which parameters are present
-    var sql_buf = std.ArrayList(u8).init(allocator);
-    defer sql_buf.deinit();
-    const sql_writer = sql_buf.writer();
+    var sql_buf: std.ArrayList(u8) = .{};
+    defer sql_buf.deinit(allocator);
+    const sql_writer = sql_buf.writer(allocator);
 
-    var count_sql_buf = std.ArrayList(u8).init(allocator);
-    defer count_sql_buf.deinit();
-    const count_writer = count_sql_buf.writer();
+    var count_sql_buf: std.ArrayList(u8) = .{};
+    defer count_sql_buf.deinit(allocator);
+    const count_writer = count_sql_buf.writer(allocator);
 
     // Base query
     try sql_writer.writeAll("SELECT id, timestamp, container, stream, level, message FROM log_entries");
@@ -112,8 +112,8 @@ pub fn queryLogs(db: *sqlite.Database, params: LogQueryParams) ![]const u8 {
     try sql_writer.writeAll(" ORDER BY timestamp DESC LIMIT ? OFFSET ?");
 
     // Null-terminate SQL strings
-    try sql_buf.append(0);
-    try count_sql_buf.append(0);
+    try sql_buf.append(allocator, 0);
+    try count_sql_buf.append(allocator, 0);
 
     const sql_z: [*:0]const u8 = @ptrCast(sql_buf.items[0 .. sql_buf.items.len - 1 :0]);
     const count_sql_z: [*:0]const u8 = @ptrCast(count_sql_buf.items[0 .. count_sql_buf.items.len - 1 :0]);
@@ -182,8 +182,8 @@ pub fn queryLogs(db: *sqlite.Database, params: LogQueryParams) ![]const u8 {
     try stmt.bindInt(bind_idx, @as(i64, params.offset));
 
     // Build JSON response
-    var json_buf = std.ArrayList(u8).init(allocator);
-    const writer = json_buf.writer();
+    var json_buf: std.ArrayList(u8) = .{};
+    const writer = json_buf.writer(allocator);
 
     try writer.writeAll("{\"logs\": [");
 
@@ -225,7 +225,7 @@ pub fn queryLogs(db: *sqlite.Database, params: LogQueryParams) ![]const u8 {
     try writer.print("{d}", .{params.offset});
     try writer.writeByte('}');
 
-    return json_buf.toOwnedSlice();
+    return json_buf.toOwnedSlice(allocator);
 }
 
 /// Build containers listing JSON response.
@@ -237,8 +237,8 @@ pub fn queryContainers(db: *sqlite.Database) ![]const u8 {
     );
     defer stmt.deinit();
 
-    var json_buf = std.ArrayList(u8).init(allocator);
-    const writer = json_buf.writer();
+    var json_buf: std.ArrayList(u8) = .{};
+    const writer = json_buf.writer(allocator);
 
     try writer.writeAll("{\"containers\": [");
 
@@ -262,15 +262,15 @@ pub fn queryContainers(db: *sqlite.Database) ![]const u8 {
 
     try writer.writeAll("]}");
 
-    return json_buf.toOwnedSlice();
+    return json_buf.toOwnedSlice(allocator);
 }
 
 /// Build stats JSON response.
 pub fn queryStats(db: *sqlite.Database) ![]const u8 {
     const allocator = std.heap.page_allocator;
 
-    var json_buf = std.ArrayList(u8).init(allocator);
-    const writer = json_buf.writer();
+    var json_buf: std.ArrayList(u8) = .{};
+    const writer = json_buf.writer(allocator);
 
     try writer.writeAll("{");
 
@@ -354,15 +354,15 @@ pub fn queryStats(db: *sqlite.Database) ![]const u8 {
 
     try writer.writeByte('}');
 
-    return json_buf.toOwnedSlice();
+    return json_buf.toOwnedSlice(allocator);
 }
 
 /// Build enhanced health JSON response.
 pub fn queryHealth(db: *sqlite.Database) ![]const u8 {
     const allocator = std.heap.page_allocator;
 
-    var json_buf = std.ArrayList(u8).init(allocator);
-    const writer = json_buf.writer();
+    var json_buf: std.ArrayList(u8) = .{};
+    const writer = json_buf.writer(allocator);
 
     try writer.writeAll("{\"status\": \"ok\"");
 
@@ -396,7 +396,7 @@ pub fn queryHealth(db: *sqlite.Database) ![]const u8 {
 
     try writer.writeByte('}');
 
-    return json_buf.toOwnedSlice();
+    return json_buf.toOwnedSlice(allocator);
 }
 
 /// Escape a string for JSON output.

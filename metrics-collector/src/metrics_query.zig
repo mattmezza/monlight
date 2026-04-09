@@ -421,9 +421,9 @@ test "queryMetrics returns error for missing name" {
         .project = null,
     };
 
-    var response = std.ArrayList(u8).init(std.testing.allocator);
-    defer response.deinit();
-    var writer = response.writer();
+    var response = std.ArrayList(u8){};
+    defer response.deinit(std.testing.allocator);
+    var writer = response.writer(std.testing.allocator);
 
     const result = queryMetrics(&db, &params, &writer);
     try std.testing.expectError(error.MissingName, result);
@@ -451,9 +451,9 @@ test "queryMetrics returns data for existing metric" {
         .project = null,
     };
 
-    var response = std.ArrayList(u8).init(std.testing.allocator);
-    defer response.deinit();
-    var writer = response.writer();
+    var response = std.ArrayList(u8){};
+    defer response.deinit(std.testing.allocator);
+    var writer = response.writer(std.testing.allocator);
 
     const count = try queryMetrics(&db, &params, &writer);
     try std.testing.expectEqual(@as(usize, 1), count);
@@ -478,9 +478,9 @@ test "queryMetrics returns empty data for non-existent metric" {
         .project = null,
     };
 
-    var response = std.ArrayList(u8).init(std.testing.allocator);
-    defer response.deinit();
-    var writer = response.writer();
+    var response = std.ArrayList(u8){};
+    defer response.deinit(std.testing.allocator);
+    var writer = response.writer(std.testing.allocator);
 
     const count = try queryMetrics(&db, &params, &writer);
     try std.testing.expectEqual(@as(usize, 0), count);
@@ -514,9 +514,9 @@ test "queryMetricNames returns distinct names" {
         _ = try stmt.exec();
     }
 
-    var response = std.ArrayList(u8).init(std.testing.allocator);
-    defer response.deinit();
-    var writer = response.writer();
+    var response = std.ArrayList(u8){};
+    defer response.deinit(std.testing.allocator);
+    var writer = response.writer(std.testing.allocator);
 
     const count = try queryMetricNames(&db, &writer, null);
     try std.testing.expectEqual(@as(usize, 2), count);

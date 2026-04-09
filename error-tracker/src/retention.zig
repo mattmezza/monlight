@@ -57,7 +57,7 @@ pub fn retentionThread(db_path_z: [*:0]const u8, retention_days: i64, interval_n
         var slept: u64 = 0;
         while (slept < interval_ns and !stop.load(.acquire)) {
             const sleep_chunk = @min(std.time.ns_per_s, interval_ns - slept);
-            std.time.sleep(sleep_chunk);
+            std.Thread.sleep(sleep_chunk);
             slept += sleep_chunk;
         }
 

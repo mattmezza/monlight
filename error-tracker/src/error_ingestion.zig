@@ -135,9 +135,7 @@ fn serializeJsonField(allocator: std.mem.Allocator, obj: std.json.ObjectMap, key
     return switch (val) {
         .null => null,
         else => {
-            var buf = std.ArrayList(u8).init(allocator);
-            std.json.stringify(val, .{}, buf.writer()) catch return null;
-            return buf.toOwnedSlice() catch null;
+            return std.json.Stringify.valueAlloc(allocator, val, .{}) catch null;
         },
     };
 }
