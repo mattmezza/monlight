@@ -131,12 +131,11 @@ class MetricsClient:
             metrics_to_send = self._buffer.copy()
             self._buffer.clear()
 
-        payload = {"metrics": metrics_to_send}
         try:
             with httpx.Client(timeout=self.timeout) as client:
                 response = client.post(
                     f"{self.base_url}/api/metrics",
-                    json=payload,
+                    json=metrics_to_send,
                     headers={"X-API-Key": self.api_key},
                 )
                 if response.status_code not in (200, 202):

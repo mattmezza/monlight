@@ -164,8 +164,8 @@ class TestFlush:
         assert requests[0].method == "POST"
 
         body = json.loads(requests[0].read())
-        assert "metrics" in body
-        assert len(body["metrics"]) == 2
+        assert isinstance(body, list)
+        assert len(body) == 2
 
     def test_flush_sends_to_correct_url(self, client: MetricsClient, httpx_mock):
         """flush() POSTs to {base_url}/api/metrics."""
@@ -224,7 +224,7 @@ class TestFlush:
 
         requests = httpx_mock.get_requests()
         body = json.loads(requests[0].read())
-        metric = body["metrics"][0]
+        metric = body[0]
 
         assert metric["name"] == "http_requests_total"
         assert metric["type"] == "counter"
@@ -404,7 +404,7 @@ class TestPeriodicFlush:
             assert len(requests) >= 1
 
             body = json.loads(requests[0].read())
-            assert body["metrics"][0]["name"] == "test_auto_flush"
+            assert body[0]["name"] == "test_auto_flush"
         finally:
             client.shutdown()
 
@@ -453,7 +453,7 @@ class TestShutdown:
         assert len(requests) == 1
 
         body = json.loads(requests[0].read())
-        assert body["metrics"][0]["name"] == "final_metric"
+        assert body[0]["name"] == "final_metric"
 
     def test_shutdown_with_empty_buffer(self, client: MetricsClient, httpx_mock):
         """shutdown() with no buffered metrics does not send request."""
