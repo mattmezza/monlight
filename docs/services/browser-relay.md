@@ -36,8 +36,19 @@ This design keeps API keys out of client-side code while still allowing browsers
 | `CORS_ORIGINS` | No | -- | Comma-separated allowed origins (no trailing slashes) |
 | `MAX_BODY_SIZE` | No | `65536` | Max request body in bytes |
 | `RATE_LIMIT` | No | `300` | Requests per minute per key |
+| `DSN_KEYS` | No | -- | Seed DSN keys on startup (see below) |
 | `RETENTION_DAYS` | No | `90` | Days to keep source maps |
 | `LOG_LEVEL` | No | `info` | `error`, `warn`, `info`, `debug` |
+
+## Seeding DSN keys via environment
+
+Use `DSN_KEYS` to pre-create DSN keys without hitting the admin API. Format: comma-separated `project:key` pairs.
+
+```bash
+DSN_KEYS=my-app:abc123def456,other-app:789xyz000111
+```
+
+Keys are inserted on startup if they don't already exist. This is useful for automated deployments and docker-compose setups where you want deterministic DSN keys.
 
 ## API -- Admin endpoints
 

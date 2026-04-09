@@ -17,7 +17,7 @@ All services are configured via environment variables. No configuration files.
 | `LOG_LEVEL` | No | `info` | `error`, `warn`, `info`, `debug` |
 | `RETENTION_DAYS` | No | `90` | Days before resolved errors are deleted |
 | `SMTP_HOST` | No | -- | SMTP server host for email alerts |
-| `SMTP_PORT` | No | `25` | SMTP server port |
+| `SMTP_PORT` | No | `25` | SMTP server port (use 587 for STARTTLS) |
 | `SMTP_USERNAME` | No | -- | SMTP username for authentication |
 | `SMTP_PASSWORD` | No | -- | SMTP password for authentication |
 | `SMTP_FROM` | No | `errors@example.com` | Sender email for alerts |
@@ -61,6 +61,7 @@ All services are configured via environment variables. No configuration files.
 | `CORS_ORIGINS` | No | -- | Comma-separated allowed origins |
 | `MAX_BODY_SIZE` | No | `65536` | Max request body in bytes |
 | `RATE_LIMIT` | No | `300` | Requests per minute per key |
+| `DSN_KEYS` | No | -- | Seed DSN keys: `project:key,project2:key2` |
 | `RETENTION_DAYS` | No | `90` | Days to keep source maps |
 | `LOG_LEVEL` | No | `info` | `error`, `warn`, `info`, `debug` |
 
@@ -78,7 +79,10 @@ BROWSER_RELAY_ADMIN_API_KEY=<random-32-char-string>
 # CONTAINERS=my_app,my_worker
 # LOG_LEVEL=info
 
-# SMTP email alerts (optional)
+# DSN key seeding (optional, browser relay)
+# DSN_KEYS=my-app:my-dsn-key,other-app:other-key
+
+# SMTP email alerts (optional, STARTTLS auto-detected)
 # SMTP_HOST=smtp.example.com
 # SMTP_PORT=587
 # SMTP_USERNAME=

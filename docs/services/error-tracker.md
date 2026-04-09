@@ -33,11 +33,26 @@ Stack traces from both Python and JavaScript (Chrome V8, Firefox, Safari) are pa
 | `LOG_LEVEL` | No | `info` | `error`, `warn`, `info`, `debug` |
 | `RETENTION_DAYS` | No | `90` | Days to keep resolved errors before deletion |
 | `SMTP_HOST` | No | -- | SMTP server host for email alerts |
-| `SMTP_PORT` | No | `25` | SMTP server port |
+| `SMTP_PORT` | No | `25` | SMTP server port (use 587 for STARTTLS) |
 | `SMTP_USERNAME` | No | -- | SMTP username for authentication |
 | `SMTP_PASSWORD` | No | -- | SMTP password for authentication |
 | `SMTP_FROM` | No | `errors@example.com` | Sender email for alerts |
 | `ALERT_EMAILS` | No | -- | Comma-separated recipient emails |
+
+### SMTP and STARTTLS
+
+STARTTLS is automatically detected and used when the server advertises it in the EHLO response. No additional configuration is needed -- just point `SMTP_HOST` and `SMTP_PORT` at your mail server:
+
+- **Port 587** (recommended): STARTTLS upgrade from plain to encrypted
+- **Port 25**: Plain SMTP (STARTTLS used if advertised)
+
+Authentication (`SMTP_USERNAME`/`SMTP_PASSWORD`) works over both plain and STARTTLS connections.
+
+## Web UI
+
+The error tracker includes a built-in web interface at `/`. The UI requires an API key for authentication -- on first visit, a prompt asks for the key, which is stored in the browser's localStorage.
+
+The UI supports filtering by project, resolution status, source (browser/server), and text search.
 
 ## API
 

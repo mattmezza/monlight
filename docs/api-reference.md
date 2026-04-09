@@ -51,7 +51,7 @@ Returns `201` (new) or `200` (existing fingerprint).
 | GET | `/api/logs/stats` | API Key | Aggregated statistics |
 | GET | `/health` | None | Health check |
 
-**GET /api/logs** query params: `container`, `level` (DEBUG/INFO/WARNING/ERROR/CRITICAL), `search` (FTS5 MATCH), `since`, `until` (ISO 8601), `limit` (default 100, max 500), `offset`.
+**GET /api/logs** query params: `container`, `level` (DEBUG/INFO/WARNING/ERROR/CRITICAL), `search` or `q` (FTS5 MATCH), `since`, `until` (ISO 8601), `limit` (default 100, max 500), `offset`.
 
 **GET /api/logs/tail** query params: `container`, `level`. Returns SSE stream with `event: log` (JSON data), `event: heartbeat`, `event: close`. Max 5 concurrent connections, 30min timeout.
 
@@ -76,12 +76,13 @@ Returns `201` (new) or `200` (existing fingerprint).
     "type": "counter",
     "value": 1,
     "labels": {"method": "GET", "status": "200"},
+    "project": "my-app",
     "timestamp": "2026-01-01T12:00:00Z"
   }
 ]
 ```
 
-Returns `202`.
+`project` is optional. Returns `202`.
 
 **GET /api/metrics** query params: `name` (required), `period` (`1h`/`24h`/`7d`/`30d`, default `24h`), `resolution` (`minute`/`hour`/`auto`, default `auto`), `labels` (`key:value,key2:value2`).
 

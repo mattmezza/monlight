@@ -71,6 +71,7 @@ Submit a batch of metric data points.
 - `type`: `counter`, `histogram`, or `gauge`
 - `value`: numeric value
 - `labels`: optional key-value pairs (stored as JSON)
+- `project`: optional project identifier for multi-tenant setups
 - `timestamp`: optional ISO 8601 (defaults to server time)
 - Max 1000 items per batch
 

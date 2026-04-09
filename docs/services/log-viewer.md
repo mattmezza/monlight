@@ -49,7 +49,7 @@ Query indexed logs with filtering and full-text search.
 |-------|-------------|
 | `container` | Filter by container name |
 | `level` | Filter by level: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` |
-| `search` | Full-text search query (FTS5 MATCH syntax) |
+| `search` (or `q`) | Full-text search query (FTS5 MATCH syntax) |
 | `since` | ISO 8601 start time |
 | `until` | ISO 8601 end time |
 | `limit` | Max results (default 100, max 500) |
@@ -127,6 +127,10 @@ Aggregated statistics.
 ### GET /health
 
 **Response:** `{"status":"ok"}`
+
+## Web UI
+
+The log viewer includes a built-in web interface at `/`. The UI requires an API key for authentication -- on first visit, a prompt asks for the key, which is stored in the browser's localStorage.
 
 ## Log level detection
 

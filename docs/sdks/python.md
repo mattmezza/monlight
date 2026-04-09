@@ -93,6 +93,7 @@ metrics.start()
 |-----------|------|---------|-------------|
 | `base_url` | str | **(required)** | Metrics collector URL |
 | `api_key` | str | **(required)** | API key |
+| `project` | str | `None` | Project identifier (added to every metric when set) |
 | `flush_interval` | float | `10.0` | Seconds between automatic flushes |
 | `timeout` | float | `5.0` | HTTP timeout in seconds |
 
@@ -154,7 +155,7 @@ def shutdown():
 | `error_tracker_url` | str | `None` | Error tracker URL (omit to disable) |
 | `metrics_collector_url` | str | `None` | Metrics collector URL (omit to disable) |
 | `api_key` | str | **(required)** | Shared API key |
-| `project` | str | `"default"` | Project name for error reports |
+| `project` | str | `"default"` | Project name for error reports and metrics |
 | `flush_interval` | float | `10.0` | Metrics flush interval |
 
 **Returns:** `{"error_client": ErrorClient | None, "metrics_client": MetricsClient | None}`
