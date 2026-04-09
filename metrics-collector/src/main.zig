@@ -890,7 +890,7 @@ test "buildDashboardJson without web vitals data" {
     defer response.deinit();
     var writer = response.writer();
 
-    try buildDashboardJson(&db, &writer, "-24 hours", "24h");
+    try buildDashboardJson(&db, &writer, "-24 hours", "24h", null);
 
     const json = response.items;
     // Should have period, summary, top_metrics
@@ -927,7 +927,7 @@ test "buildDashboardJson with web vitals data" {
     defer response.deinit();
     var writer = response.writer();
 
-    try buildDashboardJson(&db, &writer, "-24 hours", "24h");
+    try buildDashboardJson(&db, &writer, "-24 hours", "24h", null);
 
     const json = response.items;
     // Should have web_vitals section
@@ -983,7 +983,7 @@ test "buildDashboardJson web vitals ratings are correct" {
     defer response.deinit();
     var writer = response.writer();
 
-    try buildDashboardJson(&db, &writer, "-24 hours", "24h");
+    try buildDashboardJson(&db, &writer, "-24 hours", "24h", null);
 
     const json = response.items;
     // LCP 5000 >= 4000 -> poor

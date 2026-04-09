@@ -448,6 +448,7 @@ test "queryMetrics returns data for existing metric" {
         .period = "24h",
         .resolution = "auto",
         .labels = null,
+        .project = null,
     };
 
     var response = std.ArrayList(u8).init(std.testing.allocator);
@@ -474,6 +475,7 @@ test "queryMetrics returns empty data for non-existent metric" {
         .period = "24h",
         .resolution = "auto",
         .labels = null,
+        .project = null,
     };
 
     var response = std.ArrayList(u8).init(std.testing.allocator);
@@ -516,7 +518,7 @@ test "queryMetricNames returns distinct names" {
     defer response.deinit();
     var writer = response.writer();
 
-    const count = try queryMetricNames(&db, &writer);
+    const count = try queryMetricNames(&db, &writer, null);
     try std.testing.expectEqual(@as(usize, 2), count);
 
     const json = response.items;
