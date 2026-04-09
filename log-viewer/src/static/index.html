@@ -79,6 +79,17 @@
       </div>
     </div>
 
+    <!-- API Key Modal -->
+    <div id="api-key-modal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+      <div class="bg-gray-800 border border-gray-700 rounded-lg p-6 w-full max-w-sm mx-4">
+        <h2 class="text-lg font-bold text-white mb-2">API Key Required</h2>
+        <p class="text-gray-400 text-sm mb-4">Enter your API key to access the Log Viewer.</p>
+        <input id="api-key-input" type="password" placeholder="your-api-key"
+          class="w-full bg-gray-900 border border-gray-600 text-gray-200 text-sm rounded px-3 py-2 mb-4 focus:outline-none focus:border-blue-500">
+        <button id="api-key-submit" class="w-full bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded px-4 py-2 transition-colors">Connect</button>
+      </div>
+    </div>
+
     <!-- Pagination -->
     <div id="pagination" class="flex items-center justify-between mt-4 text-sm text-gray-400">
       <span id="pagination-info"></span>
@@ -90,7 +101,7 @@
   </div>
 
   <script>
-    const API_KEY = localStorage.getItem('api_key') || '';
+    let API_KEY = localStorage.getItem('api_key') || '';
     let currentOffset = 0;
     const LIMIT = 100;
     let eventSource = null;
@@ -204,6 +215,7 @@
     async function loadContainers() {
       try {
         const res = await fetch('/api/containers', { headers: headers() });
+        if (res.status === 401) { showApiKeyModal(); return; }
         const data = await res.json();
         const sel = document.getElementById('filter-container');
         (data.containers || []).forEach(c => {
@@ -220,6 +232,7 @@
     async function loadStats() {
       try {
         const res = await fetch('/api/stats', { headers: headers() });
+        if (res.status === 401) { showApiKeyModal(); return; }
         const data = await res.json();
         document.getElementById('stats-bar').textContent =
           `${data.total_logs.toLocaleString()} logs indexed`;
@@ -246,6 +259,7 @@
 
       try {
         const res = await fetch('/api/logs?' + params.toString(), { headers: headers() });
+        if (res.status === 401) { showApiKeyModal(); return; }
         const data = await res.json();
 
         if (!data.logs || data.logs.length === 0) {
@@ -387,10 +401,35 @@
     document.getElementById('filter-level').addEventListener('change', () => { currentOffset = 0; loadLogs(); });
     document.getElementById('filter-time').addEventListener('change', () => { currentOffset = 0; loadLogs(); });
 
+    function showApiKeyModal() {
+      document.getElementById('api-key-modal').classList.remove('hidden');
+      document.getElementById('api-key-input').focus();
+    }
+
+    function handleApiKeySubmit() {
+      const key = document.getElementById('api-key-input').value.trim();
+      if (!key) return;
+      API_KEY = key;
+      localStorage.setItem('api_key', key);
+      document.getElementById('api-key-modal').classList.add('hidden');
+      loadContainers();
+      loadStats();
+      loadLogs();
+    }
+
+    document.getElementById('api-key-submit').addEventListener('click', handleApiKeySubmit);
+    document.getElementById('api-key-input').addEventListener('keydown', e => {
+      if (e.key === 'Enter') handleApiKeySubmit();
+    });
+
     // Initial load
-    loadContainers();
-    loadStats();
-    loadLogs();
+    if (!API_KEY) {
+      showApiKeyModal();
+    } else {
+      loadContainers();
+      loadStats();
+      loadLogs();
+    }
   </script>
 </body>
 </html>
