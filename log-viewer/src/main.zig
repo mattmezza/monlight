@@ -110,8 +110,11 @@ pub fn handleConnection(conn: net.Server.Connection, api_key: []const u8, limite
         if (owns_stream) conn.stream.close();
     }
 
-    var buf: [max_header_size]u8 = undefined;
-    var http_server = std.http.Server.init(conn, &buf);
+    var read_buf: [max_header_size]u8 = undefined;
+    var write_buf: [max_header_size]u8 = undefined;
+    var connection_reader = conn.stream.reader(&read_buf);
+    var connection_writer = conn.stream.writer(&write_buf);
+    var http_server: std.http.Server = .init(connection_reader.interface(), &connection_writer.interface);
 
     var request = http_server.receiveHead() catch |err| {
         log.err("Failed to receive request head: {}", .{err});

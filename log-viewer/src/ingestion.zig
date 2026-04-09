@@ -509,8 +509,7 @@ pub fn ingestContainerLogs(
     defer buffer.deinit();
 
     var line_buf: [65536]u8 = undefined;
-    var read_buf = std.io.bufferedReader(file.reader());
-    var reader = read_buf.reader();
+    var reader = file.deprecatedReader();
     var entries_inserted: usize = 0;
 
     while (true) {

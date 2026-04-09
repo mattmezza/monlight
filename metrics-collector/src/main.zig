@@ -100,8 +100,11 @@ pub fn main() !void {
 pub fn handleConnection(conn: net.Server.Connection, api_key: []const u8, limiter: *rate_limit.RateLimiter, db: *sqlite.Database) !void {
     defer conn.stream.close();
 
-    var buf: [max_header_size]u8 = undefined;
-    var http_server = std.http.Server.init(conn, &buf);
+    var read_buf: [max_header_size]u8 = undefined;
+    var write_buf: [max_header_size]u8 = undefined;
+    var connection_reader = conn.stream.reader(&read_buf);
+    var connection_writer = conn.stream.writer(&write_buf);
+    var http_server: std.http.Server = .init(connection_reader.interface(), &connection_writer.interface);
 
     var request = http_server.receiveHead() catch |err| {
         log.err("Failed to receive request head: {}", .{err});
@@ -685,7 +688,8 @@ fn writeWebVitalField(writer: *std.ArrayList(u8).Writer, prefix: []const u8, row
 
 fn handleApiMetricsIngest(request: *std.http.Server.Request, db: *sqlite.Database) void {
     // Read request body
-    const body_reader = request.reader() catch |err| {
+    var body_buf: [max_body_size]u8 = undefined;
+    const body_reader = request.readerExpectContinue(&body_buf) catch |err| {
         log.err("Failed to get request reader: {}", .{err});
         return;
     };
@@ -694,7 +698,7 @@ fn handleApiMetricsIngest(request: *std.http.Server.Request, db: *sqlite.Databas
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const body = body_reader.readAllAlloc(allocator, max_body_size) catch |err| {
+    const body = body_reader.allocRemaining(allocator, std.Io.Limit.limited(max_body_size)) catch |err| {
         log.err("Failed to read request body: {}", .{err});
         sendJsonResponse(request, .bad_request, "{\"detail\": \"Failed to read request body\"}") catch {};
         return;
