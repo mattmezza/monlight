@@ -280,7 +280,8 @@ fn parseDashboardPeriod(target: []const u8) []const u8 {
         const key = pair[0..eq_pos];
         const value = pair[eq_pos + 1 ..];
         if (std.mem.eql(u8, key, "period")) {
-            if (std.mem.eql(u8, value, "1h") or std.mem.eql(u8, value, "24h") or
+            if (std.mem.eql(u8, value, "1m") or std.mem.eql(u8, value, "5m") or
+                std.mem.eql(u8, value, "1h") or std.mem.eql(u8, value, "24h") or
                 std.mem.eql(u8, value, "7d") or std.mem.eql(u8, value, "30d"))
             {
                 return value;
@@ -291,6 +292,8 @@ fn parseDashboardPeriod(target: []const u8) []const u8 {
 }
 
 fn periodToOffset(period: []const u8) []const u8 {
+    if (std.mem.eql(u8, period, "1m")) return "-1 minutes";
+    if (std.mem.eql(u8, period, "5m")) return "-5 minutes";
     if (std.mem.eql(u8, period, "1h")) return "-1 hours";
     if (std.mem.eql(u8, period, "24h")) return "-24 hours";
     if (std.mem.eql(u8, period, "7d")) return "-7 days";
