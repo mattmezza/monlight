@@ -200,6 +200,40 @@ fn makeTestConfig() app_config.Config {
     return cfg;
 }
 
+test "/api/test-alert tolerates POST without Content-Length (regression)" {
+    // Reproduces the original `curl -X POST` panic: a POST with no
+    // Content-Length and no Connection: close header. std.http.Server.respond()
+    // would assert during keep-alive cleanup; the handler must disable
+    // keep-alive to avoid hitting that path.
+    var srv = try TestServer.init();
+    defer srv.waitAndDeinit();
+    try srv.start(1);
+
+    const address = net.Address.initIp4(.{ 127, 0, 0, 1 }, srv.port());
+    const stream = try net.tcpConnectToAddress(address);
+    defer stream.close();
+
+    // Note: deliberately no Content-Length and no Connection: close
+    const raw =
+        "POST /api/test-alert HTTP/1.1\r\n" ++
+        "Host: localhost\r\n" ++
+        "X-API-Key: " ++ test_api_key ++ "\r\n" ++
+        "\r\n";
+    try stream.writeAll(raw);
+
+    var response_buf: [8192]u8 = undefined;
+    var total_read: usize = 0;
+    while (total_read < response_buf.len) {
+        const n = stream.read(response_buf[total_read..]) catch break;
+        if (n == 0) break;
+        total_read += n;
+    }
+    try std.testing.expect(total_read > 0); // server must not panic / drop the connection
+    const status_code = parseStatusCode(response_buf[0..total_read]) orelse return error.InvalidResponse;
+    // SMTP not configured in test config → 503 (proves we got past the panic site)
+    try std.testing.expectEqual(@as(u16, 503), status_code);
+}
+
 test "/api/test-alert returns 503 when SMTP not configured" {
     var srv = try TestServer.init();
     defer srv.waitAndDeinit();

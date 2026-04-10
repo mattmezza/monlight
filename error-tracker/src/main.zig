@@ -385,6 +385,13 @@ fn handleErrorResolve(request: *std.http.Server.Request, db: *sqlite.Database, e
 /// 202 if the alert was dispatched (delivery happens in a background thread —
 /// check service logs for the actual SMTP transaction result).
 fn handleTestAlert(request: *std.http.Server.Request, cfg: *const app_config.Config) void {
+    // This endpoint never reads its request body. std.http.Server.respond()
+    // will panic during keep-alive cleanup if a POST arrives without
+    // Content-Length / Transfer-Encoding (e.g. `curl -X POST` with no `-d`),
+    // because it cannot determine body framing in order to discard it.
+    // Disabling keep-alive bypasses that cleanup path entirely.
+    request.head.keep_alive = false;
+
     if (cfg.smtp_host == null) {
         sendJsonResponse(request, .service_unavailable, "{\"detail\": \"SMTP not configured: SMTP_HOST is not set\"}") catch {};
         return;
