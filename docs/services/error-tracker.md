@@ -154,6 +154,26 @@ Get error details including recent occurrences.
 }
 ```
 
+### POST /api/test-alert
+
+Dispatch a synthetic SMTP alert so you can verify your `SMTP_*` and `ALERT_EMAILS` configuration without polluting the error database. The email is sent in a background thread; the actual SMTP transaction result is logged by the service.
+
+**Headers:** `X-API-Key: <api-key>`
+
+**Responses:**
+- `202` -- alert dispatched: `{"status":"test alert dispatched","detail":"Check service logs for SMTP transaction result"}`
+- `503` -- SMTP not configured: `{"detail":"SMTP not configured: SMTP_HOST is not set"}` (or `ALERT_EMAILS`)
+- `401` -- missing or invalid API key
+
+Example:
+
+```bash
+curl -X POST http://localhost:5010/api/test-alert \
+  -H "X-API-Key: $API_KEY"
+```
+
+Then watch the service logs for `Email alert sent to <addr> via SMTP (...)` on success, or `SMTP ...` warn lines on failure.
+
 ### POST /api/errors/{id}/resolve
 
 Mark an error as resolved. It will reopen automatically if the same fingerprint is reported again.

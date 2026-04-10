@@ -20,6 +20,16 @@ const max_header_size = 8192;
 /// Maximum request body size in bytes (256KB for Error Tracker).
 pub const max_body_size: usize = 256 * 1024;
 
+/// Context passed to the background SMTP alert thread.
+/// Held by value (copied) so the spawning function's stack can unwind safely.
+const AlertContext = struct {
+    cfg: *const app_config.Config,
+    subject: [512]u8,
+    subject_len: usize,
+    body: [8192]u8,
+    body_len: usize,
+};
+
 /// Maximum requests per minute (rate limit for Error Tracker).
 const rate_limit_max_requests: usize = 100;
 /// Rate limit window in milliseconds (1 minute).
@@ -153,6 +163,8 @@ pub fn handleConnection(conn: net.Server.Connection, api_key: []const u8, limite
         try handleHealth(&request);
     } else if (std.mem.eql(u8, target, "/api/errors") and request.head.method == .POST) {
         handleErrorIngestion(&request, db, cfg);
+    } else if (std.mem.eql(u8, target, "/api/test-alert") and request.head.method == .POST) {
+        handleTestAlert(&request, cfg);
     } else if (request.head.method == .POST and error_resolve.extractResolveId(target) != null) {
         // POST /api/errors/{id}/resolve
         const resolve_id = error_resolve.extractResolveId(target).?;
@@ -232,13 +244,6 @@ fn handleErrorIngestion(request: *std.http.Server.Request, db: *sqlite.Database,
 
     // Trigger email alert for new errors in a background thread (non-blocking)
     if (result.is_new) {
-        const AlertContext = struct {
-            cfg: *const app_config.Config,
-            subject: [512]u8,
-            subject_len: usize,
-            body: [8192]u8,
-            body_len: usize,
-        };
         var ctx = AlertContext{
             .cfg = cfg,
             .subject = undefined,
@@ -373,6 +378,51 @@ fn handleErrorResolve(request: *std.http.Server.Request, db: *sqlite.Database, e
     };
 
     sendJsonResponse(request, status, resp_json) catch {};
+}
+
+/// Send a synthetic alert email so operators can verify SMTP configuration
+/// without polluting the error database. Returns 503 if SMTP is not configured,
+/// 202 if the alert was dispatched (delivery happens in a background thread —
+/// check service logs for the actual SMTP transaction result).
+fn handleTestAlert(request: *std.http.Server.Request, cfg: *const app_config.Config) void {
+    if (cfg.smtp_host == null) {
+        sendJsonResponse(request, .service_unavailable, "{\"detail\": \"SMTP not configured: SMTP_HOST is not set\"}") catch {};
+        return;
+    }
+    if (cfg.alert_emails == null) {
+        sendJsonResponse(request, .service_unavailable, "{\"detail\": \"SMTP not configured: ALERT_EMAILS is not set\"}") catch {};
+        return;
+    }
+
+    var ctx = AlertContext{
+        .cfg = cfg,
+        .subject = undefined,
+        .subject_len = 0,
+        .body = undefined,
+        .body_len = 0,
+    };
+
+    const subject = std.fmt.bufPrint(&ctx.subject, "[error-tracker] SMTP test alert", .{}) catch "SMTP test alert";
+    ctx.subject_len = subject.len;
+
+    const body = std.fmt.bufPrint(&ctx.body,
+        \\This is a test alert from the Error Tracker.
+        \\
+        \\If you received this email, your SMTP configuration is working correctly.
+        \\
+        \\---
+        \\Dashboard: {s}
+    , .{cfg.base_url}) catch "SMTP test alert from error-tracker";
+    ctx.body_len = body.len;
+
+    const thread = std.Thread.spawn(.{}, sendAlertEmails, .{ctx}) catch |err| {
+        log.warn("Failed to spawn test alert thread: {}", .{err});
+        sendJsonResponse(request, .internal_server_error, "{\"detail\": \"Failed to dispatch test alert\"}") catch {};
+        return;
+    };
+    thread.detach();
+
+    sendJsonResponse(request, .accepted, "{\"status\": \"test alert dispatched\", \"detail\": \"Check service logs for SMTP transaction result\"}") catch {};
 }
 
 /// Background thread entry: send alert emails to all configured recipients.

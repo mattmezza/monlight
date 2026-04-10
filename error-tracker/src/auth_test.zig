@@ -200,6 +200,27 @@ fn makeTestConfig() app_config.Config {
     return cfg;
 }
 
+test "/api/test-alert returns 503 when SMTP not configured" {
+    var srv = try TestServer.init();
+    defer srv.waitAndDeinit();
+    try srv.start(1);
+
+    // makeTestConfig() leaves smtp_host = null, so dispatch should be refused
+    const header = "X-API-Key: " ++ test_api_key ++ "\r\nContent-Length: 0\r\n";
+    const resp = try sendRequest(srv.port(), "POST", "/api/test-alert", header);
+    try std.testing.expectEqual(@as(u16, 503), resp.status_code);
+    try std.testing.expect(std.mem.indexOf(u8, resp.body, "SMTP not configured") != null);
+}
+
+test "/api/test-alert requires authentication" {
+    var srv = try TestServer.init();
+    defer srv.waitAndDeinit();
+    try srv.start(1);
+
+    const resp = try sendRequest(srv.port(), "POST", "/api/test-alert", "Content-Length: 0\r\n");
+    try std.testing.expectEqual(@as(u16, 401), resp.status_code);
+}
+
 test "auth 401 response has JSON content-type" {
     var srv = try TestServer.init();
     defer srv.waitAndDeinit();

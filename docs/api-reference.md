@@ -16,6 +16,7 @@ All endpoints use JSON. Authentication is via `X-API-Key` header unless otherwis
 | GET | `/api/errors` | API Key | List errors (filterable) |
 | GET | `/api/errors/{id}` | API Key | Error details with occurrences |
 | POST | `/api/errors/{id}/resolve` | API Key | Mark error resolved |
+| POST | `/api/test-alert` | API Key | Dispatch synthetic SMTP test alert |
 | GET | `/api/projects` | API Key | List projects |
 | GET | `/health` | None | Health check |
 
