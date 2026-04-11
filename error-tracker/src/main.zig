@@ -146,6 +146,9 @@ pub fn handleConnection(conn: net.Server.Connection, api_key: []const u8, limite
         } else if (std.mem.eql(u8, target, "/tailwind.css")) {
             web_ui.serveTailwindCss(&request);
             return;
+        } else if (std.mem.eql(u8, target, "/alpine.js")) {
+            web_ui.serveAlpineJs(&request);
+            return;
         } else if (web_ui.isErrorDetailPath(target)) {
             web_ui.serveErrorDetail(&request);
             return;

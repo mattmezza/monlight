@@ -5,11 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Error Tracker</title>
   <link rel="stylesheet" href="/tailwind.css">
+  <script defer src="/alpine.js"></script>
   <style>
     body { font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace; }
+    [x-cloak] { display: none !important; }
   </style>
 </head>
-<body class="bg-gray-900 text-gray-100 min-h-screen">
+<body class="bg-gray-900 text-gray-100 min-h-screen" x-data="errorTracker()" x-init="init()" x-cloak>
   <div class="max-w-7xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
     <header class="mb-4 sm:mb-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
       <div>
@@ -17,46 +19,49 @@
         <p class="text-gray-400 text-xs sm:text-sm mt-1">Monitor and manage application errors</p>
       </div>
       <div class="flex items-center gap-2">
-        <select id="filter-refresh" class="bg-gray-800 border border-gray-700 text-gray-200 text-xs sm:text-sm rounded px-2 sm:px-3 py-1.5 focus:outline-none focus:border-blue-500">
+        <select x-model="refresh" class="bg-gray-800 border border-gray-700 text-gray-200 text-xs sm:text-sm rounded px-2 sm:px-3 py-1.5 focus:outline-none focus:border-blue-500">
           <option value="0">Auto-refresh: off</option>
           <option value="5">Every 5s</option>
           <option value="30">Every 30s</option>
           <option value="60">Every 1m</option>
           <option value="300">Every 5m</option>
         </select>
-        <span id="refresh-indicator" class="hidden text-green-400 text-xs">&#9679; live</span>
+        <span x-show="refresh !== '0'" class="text-green-400 text-xs">&#9679; live</span>
       </div>
     </header>
 
     <!-- Session ID filter banner -->
-    <div id="session-filter-banner" class="hidden mb-4 bg-amber-900/30 border border-amber-700/40 text-amber-300 text-sm rounded px-3 sm:px-4 py-2 flex flex-wrap items-center justify-between gap-2">
-      <span>Showing errors from session: <strong id="session-filter-value" class="break-all"></strong></span>
-      <button id="clear-session-filter" class="text-amber-400 hover:text-amber-200 text-xs underline">Clear filter</button>
+    <div x-show="sessionId" class="mb-4 bg-amber-900/30 border border-amber-700/40 text-amber-300 text-sm rounded px-3 sm:px-4 py-2 flex flex-wrap items-center justify-between gap-2">
+      <span>Showing errors from session: <strong class="break-all" x-text="sessionId"></strong></span>
+      <button @click="clearSession()" class="text-amber-400 hover:text-amber-200 text-xs underline">Clear filter</button>
     </div>
 
     <!-- Filters -->
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:flex lg:flex-wrap gap-3 sm:gap-4 mb-4 sm:mb-6 lg:items-end">
       <div>
         <label class="block text-xs text-gray-400 mb-1">Project</label>
-        <select id="filter-project" class="w-full lg:w-auto bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded px-3 py-1.5 focus:outline-none focus:border-blue-500">
+        <select x-model="project" class="w-full lg:w-auto bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded px-3 py-1.5 focus:outline-none focus:border-blue-500">
           <option value="">All projects</option>
+          <template x-for="p in projects" :key="p">
+            <option :value="p" x-text="p"></option>
+          </template>
         </select>
       </div>
       <div>
         <label class="block text-xs text-gray-400 mb-1">Source</label>
-        <select id="filter-source" class="w-full lg:w-auto bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded px-3 py-1.5 focus:outline-none focus:border-blue-500">
+        <select x-model="source" class="w-full lg:w-auto bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded px-3 py-1.5 focus:outline-none focus:border-blue-500">
           <option value="">All sources</option>
           <option value="server">Server</option>
           <option value="browser">Browser</option>
         </select>
       </div>
       <div class="flex items-center gap-2 sm:col-span-2 lg:col-span-1 lg:pb-1">
-        <input type="checkbox" id="filter-resolved" class="rounded bg-gray-800 border-gray-700 text-blue-500 focus:ring-blue-500 focus:ring-offset-gray-900">
+        <input type="checkbox" id="filter-resolved" x-model="resolved" class="rounded bg-gray-800 border-gray-700 text-blue-500 focus:ring-blue-500 focus:ring-offset-gray-900">
         <label for="filter-resolved" class="text-xs text-gray-400">Show resolved</label>
       </div>
     </div>
 
-    <!-- Error Table (desktop) / cards (mobile) -->
+    <!-- Error Table (desktop) -->
     <div class="hidden md:block overflow-x-auto rounded-lg border border-gray-700">
       <table class="w-full text-sm">
         <thead class="bg-gray-800 text-gray-400 text-xs uppercase tracking-wider">
@@ -70,322 +75,288 @@
             <th class="px-4 py-3 text-left">Source</th>
           </tr>
         </thead>
-        <tbody id="error-table-body" class="divide-y divide-gray-800">
-          <tr><td colspan="7" class="px-4 py-8 text-center text-gray-500">Loading...</td></tr>
+        <tbody class="divide-y divide-gray-800">
+          <template x-if="loading">
+            <tr><td colspan="7" class="px-4 py-8 text-center text-gray-500">Loading...</td></tr>
+          </template>
+          <template x-if="!loading && errors.length === 0">
+            <tr><td colspan="7" class="px-4 py-8 text-center text-gray-500">No errors found</td></tr>
+          </template>
+          <template x-for="err in errors" :key="err.id">
+            <tr class="hover:bg-gray-800/50 cursor-pointer transition-colors" @click="window.location='/errors/' + err.id">
+              <td class="px-4 py-3"><span class="text-red-400 font-medium" x-text="err.exception_type"></span></td>
+              <td class="px-4 py-3 text-gray-300 max-w-xs truncate" x-text="truncate(err.message, 80)"></td>
+              <td class="px-4 py-3">
+                <span class="inline-block bg-blue-900/40 text-blue-300 text-xs px-2 py-0.5 rounded" x-text="err.project"></span>
+              </td>
+              <td class="px-4 py-3 text-right font-medium" :class="countClass(err.count)" x-text="err.count"></td>
+              <td class="px-4 py-3 text-gray-400 whitespace-nowrap" :title="formatDate(err.first_seen)" x-text="timeAgo(err.first_seen)"></td>
+              <td class="px-4 py-3 text-gray-400 whitespace-nowrap" :title="formatDate(err.last_seen)" x-text="timeAgo(err.last_seen)"></td>
+              <td class="px-4 py-3">
+                <span class="inline-block text-xs px-2 py-0.5 rounded" :class="sourceBadge(err.source)" x-text="err.source || 'server'"></span>
+              </td>
+            </tr>
+          </template>
         </tbody>
       </table>
     </div>
-    <div id="error-cards" class="md:hidden space-y-2">
-      <div class="px-4 py-8 text-center text-gray-500 rounded-lg border border-gray-700">Loading...</div>
+
+    <!-- Error cards (mobile) -->
+    <div class="md:hidden space-y-2">
+      <template x-if="loading">
+        <div class="px-4 py-8 text-center text-gray-500 rounded-lg border border-gray-700">Loading...</div>
+      </template>
+      <template x-if="!loading && errors.length === 0">
+        <div class="px-4 py-8 text-center text-gray-500 rounded-lg border border-gray-700">No errors found</div>
+      </template>
+      <template x-for="err in errors" :key="err.id">
+        <a :href="'/errors/' + err.id" class="block rounded-lg border border-gray-700 bg-gray-900/50 hover:bg-gray-800/70 transition-colors p-3">
+          <div class="flex items-start justify-between gap-2">
+            <span class="text-red-400 font-medium break-all" x-text="err.exception_type"></span>
+            <span class="font-medium text-sm whitespace-nowrap" :class="countClass(err.count)" x-text="err.count + '×'"></span>
+          </div>
+          <div class="text-gray-300 text-sm mt-1 break-words" x-text="truncate(err.message, 120)"></div>
+          <div class="flex flex-wrap items-center gap-2 mt-2 text-xs">
+            <span class="inline-block bg-blue-900/40 text-blue-300 px-2 py-0.5 rounded" x-text="err.project"></span>
+            <span class="inline-block px-2 py-0.5 rounded" :class="sourceBadge(err.source)" x-text="err.source || 'server'"></span>
+            <span class="text-gray-500" x-text="'first ' + timeAgo(err.first_seen)"></span>
+            <span class="text-gray-500" x-text="'last ' + timeAgo(err.last_seen)"></span>
+          </div>
+        </a>
+      </template>
     </div>
 
     <!-- API Key Modal -->
-    <div id="api-key-modal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-50 px-4">
+    <div x-show="showApiKeyModalFlag" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 px-4">
       <div class="bg-gray-800 border border-gray-700 rounded-lg p-6 w-full max-w-sm">
         <h2 class="text-lg font-bold text-white mb-2">API Key Required</h2>
         <p class="text-gray-400 text-sm mb-4">Enter your API key to access the Error Tracker.</p>
-        <input id="api-key-input" type="password" placeholder="your-api-key"
+        <input x-model="apiKeyInput" type="password" placeholder="your-api-key"
+          @keydown.enter="submitApiKey()" x-ref="apiKeyInputEl"
           class="w-full bg-gray-900 border border-gray-600 text-gray-200 text-sm rounded px-3 py-2 mb-4 focus:outline-none focus:border-blue-500">
-        <button id="api-key-submit" class="w-full bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded px-4 py-2 transition-colors">Connect</button>
+        <button @click="submitApiKey()"
+          class="w-full bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded px-4 py-2 transition-colors">Connect</button>
       </div>
     </div>
 
     <!-- Pagination -->
-    <div id="pagination" class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mt-4 text-sm text-gray-400">
-      <span id="pagination-info"></span>
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mt-4 text-sm text-gray-400">
+      <span x-text="paginationInfo"></span>
       <div class="flex gap-2">
-        <button id="btn-prev" class="px-3 py-1 rounded bg-gray-800 border border-gray-700 hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed" disabled>Prev</button>
-        <button id="btn-next" class="px-3 py-1 rounded bg-gray-800 border border-gray-700 hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed" disabled>Next</button>
+        <button @click="prevPage()" :disabled="offset === 0"
+          class="px-3 py-1 rounded bg-gray-800 border border-gray-700 hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed">Prev</button>
+        <button @click="nextPage()" :disabled="offset + limit >= total"
+          class="px-3 py-1 rounded bg-gray-800 border border-gray-700 hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed">Next</button>
       </div>
     </div>
   </div>
 
   <script>
-    let API_KEY = localStorage.getItem('api_key') || '';
-    let currentOffset = 0;
-    const LIMIT = 50;
-    let suppressUrlSync = false;
-    let autoRefreshTimer = null;
-    let sessionIdFilter = '';
+    function errorTracker() {
+      return {
+        // Auth
+        apiKey: localStorage.getItem('api_key') || '',
+        apiKeyInput: '',
+        showApiKeyModalFlag: false,
 
-    // ─── URL state ────────────────────────────────────────────────────
-    function readUrlState() {
-      suppressUrlSync = true;
-      const params = new URLSearchParams(window.location.search);
-      sessionIdFilter = params.get('session_id') || '';
-      const project = params.get('project') || '';
-      const source = params.get('source') || '';
-      const resolved = params.get('resolved') === 'true';
-      const refresh = params.get('refresh') || '0';
-      const offset = parseInt(params.get('offset') || '0', 10);
-      // project select populated later — store pending
-      document.getElementById('filter-project').dataset.pending = project;
-      document.getElementById('filter-source').value = source;
-      document.getElementById('filter-resolved').checked = resolved;
-      document.getElementById('filter-refresh').value = refresh;
-      currentOffset = isNaN(offset) ? 0 : offset;
-      suppressUrlSync = false;
-    }
+        // Filter / query state (mirrored to URL)
+        project: '',
+        source: '',
+        resolved: false,
+        refresh: '0',
+        sessionId: '',
+        offset: 0,
+        limit: 50,
 
-    function writeUrlState() {
-      if (suppressUrlSync) return;
-      const params = new URLSearchParams();
-      if (sessionIdFilter) params.set('session_id', sessionIdFilter);
-      const project = document.getElementById('filter-project').value;
-      const source = document.getElementById('filter-source').value;
-      const resolved = document.getElementById('filter-resolved').checked;
-      const refresh = document.getElementById('filter-refresh').value;
-      if (project) params.set('project', project);
-      if (source) params.set('source', source);
-      if (resolved) params.set('resolved', 'true');
-      if (refresh && refresh !== '0') params.set('refresh', refresh);
-      if (currentOffset > 0) params.set('offset', String(currentOffset));
-      const qs = params.toString();
-      window.history.replaceState({}, '', window.location.pathname + (qs ? '?' + qs : ''));
-    }
+        // Server data
+        errors: [],
+        total: 0,
+        projects: [],
+        loading: true,
 
-    function initSessionBanner() {
-      const banner = document.getElementById('session-filter-banner');
-      if (sessionIdFilter) {
-        banner.classList.remove('hidden');
-        document.getElementById('session-filter-value').textContent = sessionIdFilter;
-      } else {
-        banner.classList.add('hidden');
-      }
-    }
+        // Internals
+        autoRefreshTimer: null,
+        suppressUrlSync: false,
 
-    document.getElementById('clear-session-filter').addEventListener('click', () => {
-      sessionIdFilter = '';
-      initSessionBanner();
-      currentOffset = 0;
-      loadErrors();
-    });
+        init() {
+          this.readUrlState();
 
-    function headers() {
-      const h = { 'Content-Type': 'application/json' };
-      if (API_KEY) h['X-API-Key'] = API_KEY;
-      return h;
-    }
+          this.$watch('project',  () => { this.offset = 0; this.loadErrors(); });
+          this.$watch('source',   () => { this.offset = 0; this.loadErrors(); });
+          this.$watch('resolved', () => { this.offset = 0; this.loadErrors(); });
+          this.$watch('refresh',  () => this.setupAutoRefresh());
 
-    function truncate(s, n) {
-      if (!s) return '';
-      return s.length > n ? s.substring(0, n) + '...' : s;
-    }
+          window.addEventListener('popstate', () => {
+            this.readUrlState();
+            this.setupAutoRefresh();
+            this.loadErrors();
+          });
 
-    function formatDate(iso) {
-      if (!iso) return '';
-      const d = new Date(iso.endsWith('Z') ? iso : iso + 'Z');
-      return d.toLocaleString();
-    }
+          this.setupAutoRefresh();
+          if (!this.apiKey) {
+            this.openApiKeyModal();
+          } else {
+            this.loadProjects().then(() => this.loadErrors());
+          }
+        },
 
-    function timeAgo(iso) {
-      if (!iso) return '';
-      const now = Date.now();
-      const then = new Date(iso.endsWith('Z') ? iso : iso + 'Z').getTime();
-      const diff = Math.floor((now - then) / 1000);
-      if (diff < 60) return diff + 's ago';
-      if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
-      if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
-      return Math.floor(diff / 86400) + 'd ago';
-    }
+        // ─── URL state ──────────────────────────────────────────────
+        readUrlState() {
+          this.suppressUrlSync = true;
+          const p = new URLSearchParams(window.location.search);
+          this.sessionId = p.get('session_id') || '';
+          this.project   = p.get('project')    || '';
+          this.source    = p.get('source')     || '';
+          this.resolved  = p.get('resolved') === 'true';
+          this.refresh   = p.get('refresh')    || '0';
+          const off = parseInt(p.get('offset') || '0', 10);
+          this.offset = isNaN(off) ? 0 : off;
+          this.suppressUrlSync = false;
+        },
 
-    async function loadProjects() {
-      try {
-        const res = await fetch('/api/projects', { headers: headers() });
-        if (res.status === 401) { showApiKeyModal(); return; }
-        const data = await res.json();
-        const sel = document.getElementById('filter-project');
-        const pending = sel.dataset.pending || sel.value || '';
-        sel.innerHTML = '<option value="">All projects</option>';
-        (data.projects || []).forEach(p => {
-          const opt = document.createElement('option');
-          opt.value = p;
-          opt.textContent = p;
-          sel.appendChild(opt);
-        });
-        if (pending) sel.value = pending;
-        delete sel.dataset.pending;
-      } catch (e) {
-        console.error('Failed to load projects:', e);
-      }
-    }
+        writeUrlState() {
+          if (this.suppressUrlSync) return;
+          const p = new URLSearchParams();
+          if (this.sessionId) p.set('session_id', this.sessionId);
+          if (this.project)   p.set('project', this.project);
+          if (this.source)    p.set('source', this.source);
+          if (this.resolved)  p.set('resolved', 'true');
+          if (this.refresh && this.refresh !== '0') p.set('refresh', this.refresh);
+          if (this.offset > 0) p.set('offset', String(this.offset));
+          const qs = p.toString();
+          window.history.replaceState({}, '', window.location.pathname + (qs ? '?' + qs : ''));
+        },
 
-    function countClass(c) {
-      if (c > 100) return 'text-red-400';
-      if (c > 10) return 'text-yellow-400';
-      return 'text-gray-300';
-    }
+        clearSession() {
+          this.sessionId = '';
+          this.offset = 0;
+          this.loadErrors();
+        },
 
-    function sourceBadge(src) {
-      return src === 'browser'
-        ? 'bg-purple-900/40 text-purple-300'
-        : 'bg-gray-700/40 text-gray-300';
-    }
+        // ─── Helpers ────────────────────────────────────────────────
+        headers() {
+          const h = { 'Content-Type': 'application/json' };
+          if (this.apiKey) h['X-API-Key'] = this.apiKey;
+          return h;
+        },
 
-    async function loadErrors() {
-      const project = document.getElementById('filter-project').value;
-      const source = document.getElementById('filter-source').value;
-      const resolved = document.getElementById('filter-resolved').checked;
+        truncate(s, n) {
+          if (!s) return '';
+          return s.length > n ? s.substring(0, n) + '...' : s;
+        },
 
-      const params = new URLSearchParams();
-      if (project) params.set('project', project);
-      if (source) params.set('source', source);
-      if (sessionIdFilter) params.set('session_id', sessionIdFilter);
-      if (resolved) params.set('resolved', 'true');
-      params.set('limit', LIMIT);
-      params.set('offset', currentOffset);
+        formatDate(iso) {
+          if (!iso) return '';
+          const d = new Date(iso.endsWith('Z') ? iso : iso + 'Z');
+          return d.toLocaleString();
+        },
 
-      writeUrlState();
+        timeAgo(iso) {
+          if (!iso) return '';
+          const now = Date.now();
+          const then = new Date(iso.endsWith('Z') ? iso : iso + 'Z').getTime();
+          const diff = Math.floor((now - then) / 1000);
+          if (diff < 60) return diff + 's ago';
+          if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+          if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+          return Math.floor(diff / 86400) + 'd ago';
+        },
 
-      const tbody = document.getElementById('error-table-body');
-      const cards = document.getElementById('error-cards');
+        countClass(c) {
+          if (c > 100) return 'text-red-400';
+          if (c > 10) return 'text-yellow-400';
+          return 'text-gray-300';
+        },
 
-      try {
-        const res = await fetch('/api/errors?' + params.toString(), { headers: headers() });
-        if (res.status === 401) { showApiKeyModal(); return; }
-        const data = await res.json();
+        sourceBadge(src) {
+          return src === 'browser'
+            ? 'bg-purple-900/40 text-purple-300'
+            : 'bg-gray-700/40 text-gray-300';
+        },
 
-        if (!data.errors || data.errors.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-500">No errors found</td></tr>';
-          cards.innerHTML = '<div class="px-4 py-8 text-center text-gray-500 rounded-lg border border-gray-700">No errors found</div>';
-          updatePagination(0, 0);
-          return;
-        }
+        get paginationInfo() {
+          if (this.total === 0) return 'No errors';
+          const start = this.offset + 1;
+          const end = Math.min(this.offset + this.limit, this.total);
+          return `Showing ${start}-${end} of ${this.total}`;
+        },
 
-        tbody.innerHTML = data.errors.map(err => `
-          <tr class="hover:bg-gray-800/50 cursor-pointer transition-colors" onclick="window.location='/errors/${err.id}'">
-            <td class="px-4 py-3">
-              <span class="text-red-400 font-medium">${esc(err.exception_type)}</span>
-            </td>
-            <td class="px-4 py-3 text-gray-300 max-w-xs truncate">${esc(truncate(err.message, 80))}</td>
-            <td class="px-4 py-3">
-              <span class="inline-block bg-blue-900/40 text-blue-300 text-xs px-2 py-0.5 rounded">${esc(err.project)}</span>
-            </td>
-            <td class="px-4 py-3 text-right font-medium ${countClass(err.count)}">${err.count}</td>
-            <td class="px-4 py-3 text-gray-400 whitespace-nowrap" title="${esc(formatDate(err.first_seen))}">${timeAgo(err.first_seen)}</td>
-            <td class="px-4 py-3 text-gray-400 whitespace-nowrap" title="${esc(formatDate(err.last_seen))}">${timeAgo(err.last_seen)}</td>
-            <td class="px-4 py-3">
-              <span class="inline-block text-xs px-2 py-0.5 rounded ${sourceBadge(err.source)}">${esc(err.source || 'server')}</span>
-            </td>
-          </tr>
-        `).join('');
+        // ─── Data fetching ──────────────────────────────────────────
+        async loadProjects() {
+          try {
+            const res = await fetch('/api/projects', { headers: this.headers() });
+            if (res.status === 401) { this.openApiKeyModal(); return; }
+            const data = await res.json();
+            this.projects = data.projects || [];
+          } catch (e) {
+            console.error('Failed to load projects:', e);
+          }
+        },
 
-        cards.innerHTML = data.errors.map(err => `
-          <a href="/errors/${err.id}" class="block rounded-lg border border-gray-700 bg-gray-900/50 hover:bg-gray-800/70 transition-colors p-3">
-            <div class="flex items-start justify-between gap-2">
-              <span class="text-red-400 font-medium break-all">${esc(err.exception_type)}</span>
-              <span class="font-medium ${countClass(err.count)} text-sm whitespace-nowrap">${err.count}×</span>
-            </div>
-            <div class="text-gray-300 text-sm mt-1 break-words">${esc(truncate(err.message, 120))}</div>
-            <div class="flex flex-wrap items-center gap-2 mt-2 text-xs">
-              <span class="inline-block bg-blue-900/40 text-blue-300 px-2 py-0.5 rounded">${esc(err.project)}</span>
-              <span class="inline-block ${sourceBadge(err.source)} px-2 py-0.5 rounded">${esc(err.source || 'server')}</span>
-              <span class="text-gray-500">first ${timeAgo(err.first_seen)}</span>
-              <span class="text-gray-500">last ${timeAgo(err.last_seen)}</span>
-            </div>
-          </a>
-        `).join('');
+        async loadErrors() {
+          this.writeUrlState();
+          const params = new URLSearchParams();
+          if (this.project)   params.set('project', this.project);
+          if (this.source)    params.set('source', this.source);
+          if (this.sessionId) params.set('session_id', this.sessionId);
+          if (this.resolved)  params.set('resolved', 'true');
+          params.set('limit', this.limit);
+          params.set('offset', this.offset);
 
-        updatePagination(data.total, data.offset);
-      } catch (e) {
-        tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-red-400">Failed to load errors</td></tr>';
-        cards.innerHTML = '<div class="px-4 py-8 text-center text-red-400 rounded-lg border border-gray-700">Failed to load errors</div>';
-        console.error('Failed to load errors:', e);
-      }
-    }
+          this.loading = true;
+          try {
+            const res = await fetch('/api/errors?' + params.toString(), { headers: this.headers() });
+            if (res.status === 401) { this.openApiKeyModal(); return; }
+            const data = await res.json();
+            this.errors = data.errors || [];
+            this.total = data.total || 0;
+          } catch (e) {
+            console.error('Failed to load errors:', e);
+            this.errors = [];
+            this.total = 0;
+          } finally {
+            this.loading = false;
+          }
+        },
 
-    function esc(s) {
-      if (!s) return '';
-      const d = document.createElement('div');
-      d.textContent = s;
-      return d.innerHTML;
-    }
+        prevPage() {
+          this.offset = Math.max(0, this.offset - this.limit);
+          this.loadErrors();
+        },
 
-    function updatePagination(total, offset) {
-      const info = document.getElementById('pagination-info');
-      const btnPrev = document.getElementById('btn-prev');
-      const btnNext = document.getElementById('btn-next');
+        nextPage() {
+          this.offset += this.limit;
+          this.loadErrors();
+        },
 
-      if (total === 0) {
-        info.textContent = 'No errors';
-        btnPrev.disabled = true;
-        btnNext.disabled = true;
-        return;
-      }
+        // ─── Auto-refresh ───────────────────────────────────────────
+        setupAutoRefresh() {
+          this.writeUrlState();
+          if (this.autoRefreshTimer) {
+            clearInterval(this.autoRefreshTimer);
+            this.autoRefreshTimer = null;
+          }
+          const seconds = parseInt(this.refresh, 10);
+          if (seconds > 0) {
+            this.autoRefreshTimer = setInterval(() => this.loadErrors(), seconds * 1000);
+          }
+        },
 
-      const start = offset + 1;
-      const end = Math.min(offset + LIMIT, total);
-      info.textContent = `Showing ${start}-${end} of ${total}`;
+        // ─── API key modal ──────────────────────────────────────────
+        openApiKeyModal() {
+          this.showApiKeyModalFlag = true;
+          this.$nextTick(() => this.$refs.apiKeyInputEl?.focus());
+        },
 
-      btnPrev.disabled = offset === 0;
-      btnNext.disabled = offset + LIMIT >= total;
-    }
-
-    function setAutoRefresh() {
-      const seconds = parseInt(document.getElementById('filter-refresh').value, 10);
-      const indicator = document.getElementById('refresh-indicator');
-      if (autoRefreshTimer) {
-        clearInterval(autoRefreshTimer);
-        autoRefreshTimer = null;
-      }
-      if (seconds > 0) {
-        autoRefreshTimer = setInterval(loadErrors, seconds * 1000);
-        indicator.classList.remove('hidden');
-      } else {
-        indicator.classList.add('hidden');
-      }
-      writeUrlState();
-    }
-
-    document.getElementById('btn-prev').addEventListener('click', () => {
-      currentOffset = Math.max(0, currentOffset - LIMIT);
-      loadErrors();
-    });
-
-    document.getElementById('btn-next').addEventListener('click', () => {
-      currentOffset += LIMIT;
-      loadErrors();
-    });
-
-    document.getElementById('filter-project').addEventListener('change', () => { currentOffset = 0; loadErrors(); });
-    document.getElementById('filter-source').addEventListener('change', () => { currentOffset = 0; loadErrors(); });
-    document.getElementById('filter-resolved').addEventListener('change', () => { currentOffset = 0; loadErrors(); });
-    document.getElementById('filter-refresh').addEventListener('change', setAutoRefresh);
-
-    window.addEventListener('popstate', () => {
-      readUrlState();
-      initSessionBanner();
-      setAutoRefresh();
-      loadErrors();
-    });
-
-    function showApiKeyModal() {
-      document.getElementById('api-key-modal').classList.remove('hidden');
-      document.getElementById('api-key-input').focus();
-    }
-
-    function handleApiKeySubmit() {
-      const key = document.getElementById('api-key-input').value.trim();
-      if (!key) return;
-      API_KEY = key;
-      localStorage.setItem('api_key', key);
-      document.getElementById('api-key-modal').classList.add('hidden');
-      loadProjects().then(loadErrors);
-    }
-
-    document.getElementById('api-key-submit').addEventListener('click', handleApiKeySubmit);
-    document.getElementById('api-key-input').addEventListener('keydown', e => {
-      if (e.key === 'Enter') handleApiKeySubmit();
-    });
-
-    // Initial load
-    readUrlState();
-    initSessionBanner();
-    setAutoRefresh();
-    if (!API_KEY) {
-      showApiKeyModal();
-    } else {
-      loadProjects().then(loadErrors);
+        submitApiKey() {
+          const key = (this.apiKeyInput || '').trim();
+          if (!key) return;
+          this.apiKey = key;
+          localStorage.setItem('api_key', key);
+          this.showApiKeyModalFlag = false;
+          this.loadProjects().then(() => this.loadErrors());
+        },
+      };
     }
   </script>
 </body>

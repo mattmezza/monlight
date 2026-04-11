@@ -9,6 +9,9 @@ const error_detail_html = @embedFile("static/error_detail.html");
 /// git, then embedded into the binary at build time via @embedFile).
 const tailwind_css = @embedFile("static/tailwind.css");
 
+/// Self-hosted Alpine.js v3 minified bundle. Vendored to avoid a CDN dependency.
+const alpine_js = @embedFile("static/alpine.min.js");
+
 /// Serve the error listing page (GET /).
 pub fn serveIndex(request: *std.http.Server.Request) void {
     sendResponse(request, .ok, index_html, "text/html; charset=utf-8") catch {};
@@ -23,6 +26,11 @@ pub fn serveErrorDetail(request: *std.http.Server.Request) void {
 /// Serve the compiled Tailwind CSS (GET /tailwind.css).
 pub fn serveTailwindCss(request: *std.http.Server.Request) void {
     sendResponse(request, .ok, tailwind_css, "text/css; charset=utf-8") catch {};
+}
+
+/// Serve the vendored Alpine.js bundle (GET /alpine.js).
+pub fn serveAlpineJs(request: *std.http.Server.Request) void {
+    sendResponse(request, .ok, alpine_js, "application/javascript; charset=utf-8") catch {};
 }
 
 /// Check if the path matches /errors/{id} (numeric ID, for the web UI page).
@@ -82,4 +90,8 @@ test "isErrorDetailPath rejects invalid paths" {
 
 test "tailwind_css is embedded and non-empty" {
     try std.testing.expect(tailwind_css.len > 0);
+}
+
+test "alpine_js is embedded and non-empty" {
+    try std.testing.expect(alpine_js.len > 0);
 }
