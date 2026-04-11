@@ -56,9 +56,20 @@
         </select>
       </div>
       <div>
-        <button id="btn-tail" class="w-full lg:w-auto px-3 py-1.5 rounded text-sm font-medium bg-gray-800 border border-gray-700 hover:bg-gray-700 transition-colors">
+        <label class="block text-xs text-gray-400 mb-1">Auto-refresh</label>
+        <select id="filter-refresh" class="w-full lg:w-auto bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded px-3 py-1.5 focus:outline-none focus:border-blue-500">
+          <option value="0">Off</option>
+          <option value="5">Every 5s</option>
+          <option value="30">Every 30s</option>
+          <option value="60">Every 1m</option>
+          <option value="300">Every 5m</option>
+        </select>
+      </div>
+      <div class="flex gap-2 lg:items-end">
+        <button id="btn-tail" class="flex-1 lg:flex-initial w-full lg:w-auto px-3 py-1.5 rounded text-sm font-medium bg-gray-800 border border-gray-700 hover:bg-gray-700 transition-colors">
           Live Tail
         </button>
+        <span id="refresh-indicator" class="hidden self-center text-green-400 text-xs whitespace-nowrap">&#9679; live</span>
       </div>
     </div>
 
@@ -108,6 +119,7 @@
     let tailActive = false;
     let tailCount = 0;
     let suppressUrlSync = false;
+    let autoRefreshTimer = null;
 
     function headers() {
       const h = { 'Content-Type': 'application/json' };
@@ -223,12 +235,14 @@
       const container = params.get('container') || '';
       const level = params.get('level') || '';
       const time = params.get('time') || '';
+      const refresh = params.get('refresh') || '0';
       const offset = parseInt(params.get('offset') || '0', 10);
       document.getElementById('filter-search').value = search;
       // container select is populated later — store the desired value
       document.getElementById('filter-container').dataset.pending = container;
       document.getElementById('filter-level').value = level;
       document.getElementById('filter-time').value = time;
+      document.getElementById('filter-refresh').value = refresh;
       currentOffset = isNaN(offset) ? 0 : offset;
       suppressUrlSync = false;
     }
@@ -240,14 +254,34 @@
       const container = document.getElementById('filter-container').value;
       const level = document.getElementById('filter-level').value;
       const time = document.getElementById('filter-time').value;
+      const refresh = document.getElementById('filter-refresh').value;
       if (search) params.set('search', search);
       if (container) params.set('container', container);
       if (level) params.set('level', level);
       if (time) params.set('time', time);
+      if (refresh && refresh !== '0') params.set('refresh', refresh);
       if (currentOffset > 0) params.set('offset', String(currentOffset));
       const qs = params.toString();
       const url = window.location.pathname + (qs ? '?' + qs : '');
       window.history.replaceState({}, '', url);
+    }
+
+    function setAutoRefresh() {
+      const seconds = parseInt(document.getElementById('filter-refresh').value, 10);
+      const indicator = document.getElementById('refresh-indicator');
+      if (autoRefreshTimer) {
+        clearInterval(autoRefreshTimer);
+        autoRefreshTimer = null;
+      }
+      // Auto-refresh is meaningless during live tail — tailing already
+      // streams new entries continuously.
+      if (seconds > 0 && !tailActive) {
+        autoRefreshTimer = setInterval(loadLogs, seconds * 1000);
+        indicator.classList.remove('hidden');
+      } else {
+        indicator.classList.add('hidden');
+      }
+      writeUrlState();
     }
 
     async function loadContainers() {
@@ -358,6 +392,9 @@
       eventSource = new EventSource(url);
       tailActive = true;
       tailCount = 0;
+      // Suspend any periodic refresh while tailing
+      if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
+      document.getElementById('refresh-indicator').classList.add('hidden');
 
       document.getElementById('btn-tail').textContent = 'Stop Tail';
       document.getElementById('btn-tail').classList.add('bg-green-900', 'border-green-700', 'text-green-300');
@@ -415,6 +452,8 @@
       // Reload logs to show current state
       currentOffset = 0;
       loadLogs();
+      // Resume periodic refresh if configured
+      setAutoRefresh();
     }
 
     // Event listeners
@@ -446,10 +485,12 @@
     document.getElementById('filter-container').addEventListener('change', () => { currentOffset = 0; loadLogs(); });
     document.getElementById('filter-level').addEventListener('change', () => { currentOffset = 0; loadLogs(); });
     document.getElementById('filter-time').addEventListener('change', () => { currentOffset = 0; loadLogs(); });
+    document.getElementById('filter-refresh').addEventListener('change', setAutoRefresh);
 
     // React to back/forward navigation
     window.addEventListener('popstate', () => {
       readUrlState();
+      setAutoRefresh();
       loadLogs();
     });
 
@@ -475,6 +516,7 @@
 
     // Initial load — read URL state, then fetch
     readUrlState();
+    setAutoRefresh();
     if (!API_KEY) {
       showApiKeyModal();
     } else {
