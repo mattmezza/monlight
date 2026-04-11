@@ -448,7 +448,13 @@ fn sendAlertEmails(ctx: anytype) void {
     }
 }
 
-/// Send an email via SMTP with STARTTLS support.
+/// Send an email via SMTP. Three transport modes are supported:
+///   - **Implicit TLS (SMTPS)**: auto-selected when `port == 465`. TLS handshake
+///     is performed immediately on the raw TCP stream — no plaintext phase.
+///   - **STARTTLS**: used on any other port if the server advertises STARTTLS in
+///     its EHLO response. Connection starts plaintext, then upgrades to TLS.
+///   - **Plain SMTP**: fallback when STARTTLS is not advertised. No encryption.
+///
 /// Runs in a background thread — failures are logged but do not affect service availability.
 fn sendSmtpEmail(
     host: []const u8,
@@ -478,9 +484,63 @@ fn sendSmtpEmail(
     var reader = stream.reader(&read_buf);
     var writer = stream.writer(&write_buf);
 
-    // Read server greeting (plaintext)
-    if (!smtpReadOk(&reader)) {
-        log.warn("SMTP server did not send greeting", .{});
+    // Implicit TLS (SMTPS) on port 465: handshake immediately, no plaintext phase.
+    if (port == 465) {
+        var ca_bundle: std.crypto.Certificate.Bundle = .{};
+        ca_bundle.rescan(allocator) catch |err| {
+            log.warn("Failed to load CA certificates: {}", .{err});
+            return;
+        };
+        defer ca_bundle.deinit(allocator);
+
+        var tls_read_buf: [std.crypto.tls.max_ciphertext_record_len]u8 = undefined;
+        var tls_write_buf: [std.crypto.tls.max_ciphertext_record_len]u8 = undefined;
+        var tls_client = std.crypto.tls.Client.init(reader.interface(), &writer.interface, .{
+            .host = .{ .explicit = host },
+            .ca = .{ .bundle = ca_bundle },
+            .read_buffer = &tls_read_buf,
+            .write_buffer = &tls_write_buf,
+        }) catch |err| {
+            log.warn("TLS handshake failed with {s}:{d}: {}", .{ host, port, err });
+            return;
+        };
+
+        // Read TLS greeting
+        const greeting = smtpReadResponseTls(&tls_client) catch |err| {
+            log.warn("Failed to read SMTP greeting from {s}:{d} (SMTPS): {}", .{ host, port, err });
+            return;
+        };
+        if (greeting.len == 0 or !std.mem.startsWith(u8, greeting.buf[0..greeting.len], "2")) {
+            log.warn("SMTP server did not send valid greeting from {s}:{d} (SMTPS, {d} bytes): {s}", .{
+                host, port, greeting.len, greeting.buf[0..@min(greeting.len, 200)],
+            });
+            return;
+        }
+
+        // EHLO over TLS
+        smtpSendTls(&tls_client, "EHLO localhost\r\n") catch {
+            log.warn("Failed to send EHLO over TLS", .{});
+            return;
+        };
+        if (!smtpReadOkTls(&tls_client)) {
+            log.warn("SMTP EHLO rejected over SMTPS", .{});
+            return;
+        }
+
+        smtpAuthAndSend(&tls_client, username, password, from_email, to_email, subject, body, "SMTPS");
+        return;
+    }
+
+    // Read server greeting (plaintext) — log raw bytes / underlying error so the
+    // user can tell EOF, timeout, and "wrong protocol" apart.
+    const greeting = smtpReadResponse(&reader) catch |err| {
+        log.warn("Failed to read SMTP greeting from {s}:{d}: {} (hint: try SMTP_PORT=465 for implicit TLS)", .{ host, port, err });
+        return;
+    };
+    if (greeting.len == 0 or !std.mem.startsWith(u8, greeting.buf[0..greeting.len], "2")) {
+        log.warn("SMTP server did not send valid greeting from {s}:{d} ({d} bytes): {s} (hint: try SMTP_PORT=465 for implicit TLS)", .{
+            host, port, greeting.len, greeting.buf[0..@min(greeting.len, 200)],
+        });
         return;
     }
 
@@ -489,9 +549,14 @@ fn sendSmtpEmail(
         log.warn("Failed to send EHLO", .{});
         return;
     };
-    const ehlo_response = smtpReadResponse(&reader);
-    if (!std.mem.startsWith(u8, &ehlo_response.buf, "2")) {
-        log.warn("SMTP EHLO rejected", .{});
+    const ehlo_response = smtpReadResponse(&reader) catch |err| {
+        log.warn("Failed to read EHLO response from {s}:{d}: {}", .{ host, port, err });
+        return;
+    };
+    if (ehlo_response.len == 0 or !std.mem.startsWith(u8, ehlo_response.buf[0..ehlo_response.len], "2")) {
+        log.warn("SMTP EHLO rejected by {s}:{d} ({d} bytes): {s}", .{
+            host, port, ehlo_response.len, ehlo_response.buf[0..@min(ehlo_response.len, 200)],
+        });
         return;
     }
 
@@ -540,7 +605,7 @@ fn sendSmtpEmail(
         }
 
         // AUTH + send message over TLS
-        smtpAuthAndSend(&tls_client, username, password, from_email, to_email, subject, body);
+        smtpAuthAndSend(&tls_client, username, password, from_email, to_email, subject, body, "STARTTLS");
     } else {
         // Plain SMTP (no TLS) — AUTH + send message
         smtpAuthAndSendPlain(&reader, &writer, username, password, from_email, to_email, subject, body);
@@ -550,8 +615,9 @@ fn sendSmtpEmail(
 const SmtpReader = net.Stream.Reader;
 const SmtpWriter = net.Stream.Writer;
 
-/// Perform AUTH LOGIN + mail send over a TLS connection.
-fn smtpAuthAndSend(tls: *std.crypto.tls.Client, username: ?[]const u8, password: ?[]const u8, from_email: []const u8, to_email: []const u8, subject: []const u8, body: []const u8) void {
+/// Perform AUTH LOGIN + mail send over a TLS connection. `mode_label` is used
+/// purely for the success log line so operators can tell SMTPS and STARTTLS apart.
+fn smtpAuthAndSend(tls: *std.crypto.tls.Client, username: ?[]const u8, password: ?[]const u8, from_email: []const u8, to_email: []const u8, subject: []const u8, body: []const u8, mode_label: []const u8) void {
     // AUTH LOGIN
     if (username != null and password != null) {
         smtpSendTls(tls, "AUTH LOGIN\r\n") catch return;
@@ -597,7 +663,7 @@ fn smtpAuthAndSend(tls: *std.crypto.tls.Client, username: ?[]const u8, password:
     if (!smtpReadOkTls(tls)) { log.warn("SMTP message rejected", .{}); return; }
 
     smtpSendTls(tls, "QUIT\r\n") catch {};
-    log.info("Email alert sent to {s} via SMTP (STARTTLS)", .{to_email});
+    log.info("Email alert sent to {s} via SMTP ({s})", .{ to_email, mode_label });
 }
 
 /// Perform AUTH LOGIN + mail send over a plain (non-TLS) connection.
@@ -663,9 +729,15 @@ fn smtpReadOk(reader: *SmtpReader) bool {
 
 const SmtpResponse = struct { buf: [1024]u8, len: usize };
 
-fn smtpReadResponse(reader: *SmtpReader) SmtpResponse {
+fn smtpReadResponse(reader: *SmtpReader) !SmtpResponse {
     var resp = SmtpResponse{ .buf = undefined, .len = 0 };
-    resp.len = reader.interface().readSliceShort(&resp.buf) catch 0;
+    resp.len = try reader.interface().readSliceShort(&resp.buf);
+    return resp;
+}
+
+fn smtpReadResponseTls(tls: *std.crypto.tls.Client) !SmtpResponse {
+    var resp = SmtpResponse{ .buf = undefined, .len = 0 };
+    resp.len = try tls.reader.readSliceShort(&resp.buf);
     return resp;
 }
 

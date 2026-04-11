@@ -39,14 +39,16 @@ Stack traces from both Python and JavaScript (Chrome V8, Firefox, Safari) are pa
 | `SMTP_FROM` | No | `errors@example.com` | Sender email for alerts |
 | `ALERT_EMAILS` | No | -- | Comma-separated recipient emails |
 
-### SMTP and STARTTLS
+### SMTP transport modes
 
-STARTTLS is automatically detected and used when the server advertises it in the EHLO response. No additional configuration is needed -- just point `SMTP_HOST` and `SMTP_PORT` at your mail server:
+The transport is auto-selected from `SMTP_PORT`:
 
-- **Port 587** (recommended): STARTTLS upgrade from plain to encrypted
-- **Port 25**: Plain SMTP (STARTTLS used if advertised)
+- **Port 465** -- **Implicit TLS (SMTPS)**. TLS handshake happens immediately on the raw TCP stream, no plaintext phase. Recommended for ZeptoMail, Gmail, SendGrid, Mailgun, and most modern providers.
+- **Port 587 / 25** -- **STARTTLS**. The connection starts plaintext; if the server advertises `STARTTLS` in its EHLO response, the connection is upgraded to TLS before authentication. Falls back to plain SMTP if STARTTLS is not advertised.
 
-Authentication (`SMTP_USERNAME`/`SMTP_PASSWORD`) works over both plain and STARTTLS connections.
+Authentication (`SMTP_USERNAME`/`SMTP_PASSWORD`) works in all three modes (SMTPS, STARTTLS, plain).
+
+If alerts aren't arriving, hit `POST /api/test-alert` (see below) and watch the service logs -- the warn lines now include the host:port, byte count, and the underlying error so you can tell timeouts, EOF, and "wrong protocol" apart. The most common fix is switching `SMTP_PORT` from `587` to `465`.
 
 ## Web UI
 
