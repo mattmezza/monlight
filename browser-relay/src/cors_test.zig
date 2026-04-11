@@ -106,8 +106,12 @@ fn sendRequest(srv_port: u16, method: []const u8, path: []const u8, headers: []c
     const stream = try net.tcpConnectToAddress(address);
     defer stream.close();
 
+    // Always send Content-Length: 0. Without it, the Zig std.http server's
+    // body reader for POST/PUT/PATCH falls back to the raw connection stream
+    // and blocks waiting for client bytes that never arrive — deadlocking
+    // any test that successfully passes auth on a body-bearing method.
     var request_buf: [2048]u8 = undefined;
-    const request_str = std.fmt.bufPrint(&request_buf, "{s} {s} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n{s}\r\n", .{
+    const request_str = std.fmt.bufPrint(&request_buf, "{s} {s} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Length: 0\r\n{s}\r\n", .{
         method,
         path,
         headers,
