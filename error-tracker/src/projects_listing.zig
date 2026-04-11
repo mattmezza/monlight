@@ -3,7 +3,7 @@ const sqlite = @import("sqlite");
 const log = std.log;
 
 /// Query the database for distinct project names and format the JSON response.
-/// Returns a JSON string like: {"projects": ["flowrent", "other-app"]}
+/// Returns a JSON string like: {"projects": ["myapp", "other-app"]}
 /// Caller owns the returned memory (allocated via the provided allocator).
 pub fn queryAndFormat(allocator: std.mem.Allocator, db: *sqlite.Database) ![]const u8 {
     const sql = "SELECT DISTINCT project FROM errors ORDER BY project ASC";
@@ -107,8 +107,8 @@ test "queryAndFormat returns distinct project names sorted" {
     );
 
     // Insert errors for multiple projects (with duplicates)
-    try db.execSimple("INSERT INTO errors (fingerprint, project, exception_type, message, traceback, first_seen, last_seen) VALUES ('fp1', 'flowrent', 'ValueError', 'msg', 'tb', '2025-01-01', '2025-01-01');");
-    try db.execSimple("INSERT INTO errors (fingerprint, project, exception_type, message, traceback, first_seen, last_seen) VALUES ('fp2', 'flowrent', 'TypeError', 'msg2', 'tb2', '2025-01-02', '2025-01-02');");
+    try db.execSimple("INSERT INTO errors (fingerprint, project, exception_type, message, traceback, first_seen, last_seen) VALUES ('fp1', 'myapp', 'ValueError', 'msg', 'tb', '2025-01-01', '2025-01-01');");
+    try db.execSimple("INSERT INTO errors (fingerprint, project, exception_type, message, traceback, first_seen, last_seen) VALUES ('fp2', 'myapp', 'TypeError', 'msg2', 'tb2', '2025-01-02', '2025-01-02');");
     try db.execSimple("INSERT INTO errors (fingerprint, project, exception_type, message, traceback, first_seen, last_seen) VALUES ('fp3', 'other-app', 'KeyError', 'msg3', 'tb3', '2025-01-03', '2025-01-03');");
     try db.execSimple("INSERT INTO errors (fingerprint, project, exception_type, message, traceback, first_seen, last_seen) VALUES ('fp4', 'alpha-service', 'RuntimeError', 'msg4', 'tb4', '2025-01-04', '2025-01-04');");
 
@@ -116,7 +116,7 @@ test "queryAndFormat returns distinct project names sorted" {
     defer std.testing.allocator.free(json);
 
     // Projects should be sorted alphabetically and deduplicated
-    try std.testing.expectEqualStrings("{\"projects\": [\"alpha-service\", \"flowrent\", \"other-app\"]}", json);
+    try std.testing.expectEqualStrings("{\"projects\": [\"alpha-service\", \"myapp\", \"other-app\"]}", json);
 }
 
 test "queryAndFormat handles single project" {
@@ -139,10 +139,10 @@ test "queryAndFormat handles single project" {
         \\);
     );
 
-    try db.execSimple("INSERT INTO errors (fingerprint, project, exception_type, message, traceback, first_seen, last_seen) VALUES ('fp1', 'flowrent', 'ValueError', 'msg', 'tb', '2025-01-01', '2025-01-01');");
+    try db.execSimple("INSERT INTO errors (fingerprint, project, exception_type, message, traceback, first_seen, last_seen) VALUES ('fp1', 'myapp', 'ValueError', 'msg', 'tb', '2025-01-01', '2025-01-01');");
 
     const json = try queryAndFormat(std.testing.allocator, &db);
     defer std.testing.allocator.free(json);
 
-    try std.testing.expectEqualStrings("{\"projects\": [\"flowrent\"]}", json);
+    try std.testing.expectEqualStrings("{\"projects\": [\"myapp\"]}", json);
 }

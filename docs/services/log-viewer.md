@@ -24,7 +24,7 @@ Log rotation is handled automatically via inode tracking. When a log file is rot
 
 ### Wildcard container patterns
 
-`CONTAINERS` accepts both exact names and glob patterns containing `*` (e.g. `flowrent_*` matches `flowrent_web`, `flowrent_worker`, `flowrent_db`, etc.). Patterns are expanded into the matching set of real container names at startup, and the log_sources directory is re-scanned every 30 seconds so newly-started containers matching a pattern are picked up automatically. Each container's logs are stored under its **real name**, not the pattern, so the Container filter dropdown shows one entry per concrete container.
+`CONTAINERS` accepts both exact names and glob patterns containing `*` (e.g. `myapp_*` matches `myapp_web`, `myapp_worker`, `myapp_db`, etc.). Patterns are expanded into the matching set of real container names at startup, and the log_sources directory is re-scanned every 30 seconds so newly-started containers matching a pattern are picked up automatically. Each container's logs are stored under its **real name**, not the pattern, so the Container filter dropdown shows one entry per concrete container.
 
 ## Configuration
 
@@ -32,7 +32,7 @@ Log rotation is handled automatically via inode tracking. When a log file is rot
 |----------|----------|---------|-------------|
 | `API_KEY` | Yes | -- | Authentication key |
 | `DATABASE_PATH` | No | `./data/logs.db` | Path to SQLite database |
-| `CONTAINERS` | No | *(empty = all)* | Comma-separated container names or glob patterns to monitor (e.g. `flowrent_*,prod_db`) |
+| `CONTAINERS` | No | *(empty = all)* | Comma-separated container names or glob patterns to monitor (e.g. `myapp_*,prod_db`) |
 | `LOG_SOURCES` | No | `/var/lib/docker/containers` | Docker containers directory path |
 | `MAX_ENTRIES` | No | `100000` | Maximum log entries to keep (ring buffer) |
 | `POLL_INTERVAL` | No | `2` | Seconds between log file polls |

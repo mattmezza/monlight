@@ -211,7 +211,7 @@ test "OPTIONS preflight with allowed origin returns 204 with CORS headers" {
     const origins = test_allowed_origin ++ "," ++ test_allowed_origin_2;
     var srv = try TestServer.init(origins);
     defer srv.waitAndDeinit();
-    try srv.insertDsnKey("cors_test_key_1", "flowrent", true);
+    try srv.insertDsnKey("cors_test_key_1", "myapp", true);
     try srv.start(1);
 
     const resp = try sendRequest(srv.port(), "OPTIONS", "/api/browser/errors", "Origin: " ++ test_allowed_origin ++ "\r\n");
@@ -259,7 +259,7 @@ test "OPTIONS preflight without Origin header does not return CORS headers" {
 test "POST with allowed origin includes Access-Control-Allow-Origin in response" {
     var srv = try TestServer.init(test_allowed_origin);
     defer srv.waitAndDeinit();
-    try srv.insertDsnKey("cors_test_key_2", "flowrent", true);
+    try srv.insertDsnKey("cors_test_key_2", "myapp", true);
     try srv.start(1);
 
     const resp = try sendRequest(srv.port(), "POST", "/api/browser/errors", "Origin: " ++ test_allowed_origin ++ "\r\nX-Monlight-Key: cors_test_key_2\r\n");
@@ -270,7 +270,7 @@ test "POST with allowed origin includes Access-Control-Allow-Origin in response"
 test "POST with disallowed origin does not include CORS headers" {
     var srv = try TestServer.init(test_allowed_origin);
     defer srv.waitAndDeinit();
-    try srv.insertDsnKey("cors_test_key_3", "flowrent", true);
+    try srv.insertDsnKey("cors_test_key_3", "myapp", true);
     try srv.start(1);
 
     const resp = try sendRequest(srv.port(), "POST", "/api/browser/errors", "Origin: https://evil.com\r\nX-Monlight-Key: cors_test_key_3\r\n");
@@ -280,7 +280,7 @@ test "POST with disallowed origin does not include CORS headers" {
 test "POST without Origin header does not include CORS headers" {
     var srv = try TestServer.init(test_allowed_origin);
     defer srv.waitAndDeinit();
-    try srv.insertDsnKey("cors_test_key_4", "flowrent", true);
+    try srv.insertDsnKey("cors_test_key_4", "myapp", true);
     try srv.start(1);
 
     const resp = try sendRequest(srv.port(), "POST", "/api/browser/errors", "X-Monlight-Key: cors_test_key_4\r\n");
@@ -294,7 +294,7 @@ test "POST without Origin header does not include CORS headers" {
 test "no CORS origins configured - no CORS headers on any request" {
     var srv = try TestServer.init(null);
     defer srv.waitAndDeinit();
-    try srv.insertDsnKey("cors_test_key_5", "flowrent", true);
+    try srv.insertDsnKey("cors_test_key_5", "myapp", true);
     try srv.start(1);
 
     const resp = try sendRequest(srv.port(), "POST", "/api/browser/errors", "Origin: https://example.com\r\nX-Monlight-Key: cors_test_key_5\r\n");

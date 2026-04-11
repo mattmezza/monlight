@@ -245,14 +245,14 @@ class TestFlush:
         c = MetricsClient(
             base_url="http://localhost:5012",
             api_key="test-key",
-            project="flowrent",
+            project="myapp",
         )
         c.counter("test_metric")
         c.flush()
 
         requests = httpx_mock.get_requests()
         body = json.loads(requests[0].read())
-        assert body[0]["project"] == "flowrent"
+        assert body[0]["project"] == "myapp"
 
     def test_flush_omits_project_when_not_set(self, client: MetricsClient, httpx_mock):
         """flush() does not include project field when not configured."""

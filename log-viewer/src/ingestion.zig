@@ -737,7 +737,7 @@ pub fn ingestionThread(
     const allocator = gpa.allocator();
 
     // Parse CONTAINERS into the list of patterns to watch (each entry may be an
-    // exact name or a glob like `flowrent_*`).
+    // exact name or a glob like `myapp_*`).
     var container_patterns = parseContainerNames(allocator, containers_str) catch |err| {
         log.err("ingestion thread: failed to parse container patterns: {}", .{err});
         return;
@@ -1177,32 +1177,32 @@ test "parseContainerNames handles empty and whitespace" {
 }
 
 test "globMatch exact" {
-    try std.testing.expect(globMatch("flowrent_web", "flowrent_web"));
-    try std.testing.expect(!globMatch("flowrent_web", "flowrent_worker"));
+    try std.testing.expect(globMatch("myapp_web", "myapp_web"));
+    try std.testing.expect(!globMatch("myapp_web", "myapp_worker"));
 }
 
 test "globMatch prefix wildcard" {
-    try std.testing.expect(globMatch("flowrent_*", "flowrent_web"));
-    try std.testing.expect(globMatch("flowrent_*", "flowrent_worker"));
-    try std.testing.expect(globMatch("flowrent_*", "flowrent_"));
-    try std.testing.expect(!globMatch("flowrent_*", "other_web"));
+    try std.testing.expect(globMatch("myapp_*", "myapp_web"));
+    try std.testing.expect(globMatch("myapp_*", "myapp_worker"));
+    try std.testing.expect(globMatch("myapp_*", "myapp_"));
+    try std.testing.expect(!globMatch("myapp_*", "other_web"));
 }
 
 test "globMatch suffix wildcard" {
-    try std.testing.expect(globMatch("*_web", "flowrent_web"));
     try std.testing.expect(globMatch("*_web", "myapp_web"));
-    try std.testing.expect(!globMatch("*_web", "flowrent_worker"));
+    try std.testing.expect(globMatch("*_web", "myapp_web"));
+    try std.testing.expect(!globMatch("*_web", "myapp_worker"));
 }
 
 test "globMatch middle wildcard" {
-    try std.testing.expect(globMatch("flow*app", "flowrent_app"));
-    try std.testing.expect(globMatch("flow*app", "flowapp"));
-    try std.testing.expect(!globMatch("flow*app", "flowrent_web"));
+    try std.testing.expect(globMatch("my*app", "myapp_app"));
+    try std.testing.expect(globMatch("my*app", "myapp"));
+    try std.testing.expect(!globMatch("my*app", "myapp_web"));
 }
 
 test "extractDockerName parses config JSON" {
-    try std.testing.expectEqualStrings("flowrent_web", extractDockerName(
-        \\{"ID":"abc","Name":"/flowrent_web","State":{}}
+    try std.testing.expectEqualStrings("myapp_web", extractDockerName(
+        \\{"ID":"abc","Name":"/myapp_web","State":{}}
     ).?);
     try std.testing.expectEqualStrings("my-app", extractDockerName(
         \\{"Name": "/my-app"}
@@ -1212,11 +1212,11 @@ test "extractDockerName parses config JSON" {
 
 test "wildcardMatchContainer matches pattern against docker config" {
     const config =
-        \\{"ID":"abc123","Name":"/flowrent_web","State":{"Running":true}}
+        \\{"ID":"abc123","Name":"/myapp_web","State":{"Running":true}}
     ;
-    try std.testing.expect(wildcardMatchContainer("flowrent_*", config));
+    try std.testing.expect(wildcardMatchContainer("myapp_*", config));
     try std.testing.expect(!wildcardMatchContainer("other_*", config));
-    try std.testing.expect(!wildcardMatchContainer("flowrent_web", config)); // no wildcard, uses exact path
+    try std.testing.expect(!wildcardMatchContainer("myapp_web", config)); // no wildcard, uses exact path
 }
 
 test "findContainerLogFiles expands wildcard into all matching containers" {
@@ -1227,8 +1227,8 @@ test "findContainerLogFiles expands wildcard into all matching containers" {
     defer tmp.cleanup();
 
     const fixtures = [_]struct { dir: []const u8, name: []const u8 }{
-        .{ .dir = "id_web", .name = "flowrent_web" },
-        .{ .dir = "id_worker", .name = "flowrent_worker" },
+        .{ .dir = "id_web", .name = "myapp_web" },
+        .{ .dir = "id_worker", .name = "myapp_worker" },
         .{ .dir = "id_other", .name = "other_app" },
     };
     for (fixtures) |f| {
@@ -1247,7 +1247,7 @@ test "findContainerLogFiles expands wildcard into all matching containers" {
     defer allocator.free(log_sources);
 
     // Wildcard should resolve to two real container names.
-    const wild = try findContainerLogFiles(allocator, log_sources, "flowrent_*");
+    const wild = try findContainerLogFiles(allocator, log_sources, "myapp_*");
     defer {
         for (wild) |r| {
             allocator.free(r.name);
@@ -1260,8 +1260,8 @@ test "findContainerLogFiles expands wildcard into all matching containers" {
     var saw_web = false;
     var saw_worker = false;
     for (wild) |r| {
-        if (std.mem.eql(u8, r.name, "flowrent_web")) saw_web = true;
-        if (std.mem.eql(u8, r.name, "flowrent_worker")) saw_worker = true;
+        if (std.mem.eql(u8, r.name, "myapp_web")) saw_web = true;
+        if (std.mem.eql(u8, r.name, "myapp_worker")) saw_worker = true;
         // log_path must point at the per-id-json log inside the matching dir.
         try std.testing.expect(std.mem.endsWith(u8, r.log_path, "-json.log"));
     }

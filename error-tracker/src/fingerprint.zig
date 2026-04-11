@@ -250,7 +250,7 @@ fn nextLineStart(text: []const u8, pos: usize) usize {
 // =============================================================================
 
 test "generate produces 32-character hex string" {
-    const fp = generate("flowrent", "ValueError", "some traceback");
+    const fp = generate("myapp", "ValueError", "some traceback");
     try std.testing.expectEqual(@as(usize, 32), fp.len);
 
     // Verify all characters are lowercase hex
@@ -270,8 +270,8 @@ test "generate is deterministic — same inputs produce same fingerprint" {
         \\ValueError: invalid input
     ;
 
-    const fp1 = generate("flowrent", "ValueError", traceback);
-    const fp2 = generate("flowrent", "ValueError", traceback);
+    const fp1 = generate("myapp", "ValueError", traceback);
+    const fp2 = generate("myapp", "ValueError", traceback);
 
     try std.testing.expectEqualSlices(u8, &fp1, &fp2);
 }
@@ -291,8 +291,8 @@ test "generate produces different fingerprints for different stack locations" {
         \\ValueError: invalid input
     ;
 
-    const fp1 = generate("flowrent", "ValueError", tb1);
-    const fp2 = generate("flowrent", "ValueError", tb2);
+    const fp1 = generate("myapp", "ValueError", tb1);
+    const fp2 = generate("myapp", "ValueError", tb2);
 
     try std.testing.expect(!std.mem.eql(u8, &fp1, &fp2));
 }
@@ -312,8 +312,8 @@ test "generate produces different fingerprints for different files" {
         \\ValueError: bad
     ;
 
-    const fp1 = generate("flowrent", "ValueError", tb1);
-    const fp2 = generate("flowrent", "ValueError", tb2);
+    const fp1 = generate("myapp", "ValueError", tb1);
+    const fp2 = generate("myapp", "ValueError", tb2);
 
     try std.testing.expect(!std.mem.eql(u8, &fp1, &fp2));
 }
@@ -326,8 +326,8 @@ test "generate produces different fingerprints for different exception types" {
         \\ValueError: invalid input
     ;
 
-    const fp1 = generate("flowrent", "ValueError", traceback);
-    const fp2 = generate("flowrent", "TypeError", traceback);
+    const fp1 = generate("myapp", "ValueError", traceback);
+    const fp2 = generate("myapp", "TypeError", traceback);
 
     try std.testing.expect(!std.mem.eql(u8, &fp1, &fp2));
 }
@@ -340,7 +340,7 @@ test "generate produces different fingerprints for different projects" {
         \\ValueError: invalid input
     ;
 
-    const fp1 = generate("flowrent", "ValueError", traceback);
+    const fp1 = generate("myapp", "ValueError", traceback);
     const fp2 = generate("other-app", "ValueError", traceback);
 
     try std.testing.expect(!std.mem.eql(u8, &fp1, &fp2));
@@ -404,7 +404,7 @@ test "generate with no traceback location falls back gracefully" {
 
 test "generate with spec example" {
     // Verify against the spec example:
-    // Key: "flowrent:ValueError:/app/app/utils/validation.py:56"
+    // Key: "myapp:ValueError:/app/app/utils/validation.py:56"
     const traceback =
         \\Traceback (most recent call last):
         \\  File "/app/app/routes/bookings.py", line 142, in create_booking
@@ -414,12 +414,12 @@ test "generate with spec example" {
         \\ValueError: invalid input
     ;
 
-    const fp = generate("flowrent", "ValueError", traceback);
+    const fp = generate("myapp", "ValueError", traceback);
 
-    // The key should be "flowrent:ValueError:/app/app/utils/validation.py:56"
+    // The key should be "myapp:ValueError:/app/app/utils/validation.py:56"
     // Compute expected MD5 manually
     var expected_digest: [Md5.digest_length]u8 = undefined;
-    Md5.hash("flowrent:ValueError:/app/app/utils/validation.py:56", &expected_digest, .{});
+    Md5.hash("myapp:ValueError:/app/app/utils/validation.py:56", &expected_digest, .{});
     const expected = hexEncode(expected_digest);
 
     try std.testing.expectEqualSlices(u8, &expected, &fp);

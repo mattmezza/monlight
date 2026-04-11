@@ -24,7 +24,7 @@ class ErrorClient:
     Args:
         base_url: Base URL of the Error Tracker service (e.g., "http://error-tracker:8000").
         api_key: API key for authentication.
-        project: Project identifier (e.g., "flowrent").
+        project: Project identifier (e.g., "myapp").
         timeout: HTTP request timeout in seconds. Defaults to 5.
         excluded_headers: Additional header names to strip from reports.
     """

@@ -261,10 +261,10 @@ test "findAllowedOrigin with empty config returns null" {
 }
 
 test "findAllowedOrigin matches wildcard subdomain" {
-    const config = parseCorsOrigins("https://*.flowrent.app");
-    const result = findAllowedOrigin(&config, "https://app.flowrent.app");
+    const config = parseCorsOrigins("https://*.example.com");
+    const result = findAllowedOrigin(&config, "https://app.example.com");
     try std.testing.expect(result != null);
-    try std.testing.expectEqualStrings("https://app.flowrent.app", result.?);
+    try std.testing.expectEqualStrings("https://app.example.com", result.?);
 }
 
 test "findAllowedOrigin wildcard matches different subdomains" {

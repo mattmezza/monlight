@@ -199,7 +199,7 @@ test "browser endpoint with deactivated DSN key returns 401" {
 test "browser endpoint with valid DSN key passes auth" {
     var srv = try TestServer.init();
     defer srv.waitAndDeinit();
-    try srv.insertDsnKey("valid_browser_key_123456", "flowrent", true);
+    try srv.insertDsnKey("valid_browser_key_123456", "myapp", true);
     try srv.start(1);
 
     // With a valid DSN key, the request should pass auth. Since the actual
@@ -211,7 +211,7 @@ test "browser endpoint with valid DSN key passes auth" {
 test "browser metrics endpoint with valid DSN key passes auth" {
     var srv = try TestServer.init();
     defer srv.waitAndDeinit();
-    try srv.insertDsnKey("metrics_key_789abc", "flowrent", true);
+    try srv.insertDsnKey("metrics_key_789abc", "myapp", true);
     try srv.start(1);
 
     const resp = try sendRequest(srv.port(), "POST", "/api/browser/metrics", "X-Monlight-Key: metrics_key_789abc\r\n");

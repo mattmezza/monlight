@@ -150,12 +150,12 @@ test "lookupProject returns project for valid active key" {
     var db = try database.init(":memory:");
     defer db.close();
 
-    try insertTestKey(&db, "abc123def456", "flowrent", true);
+    try insertTestKey(&db, "abc123def456", "myapp", true);
 
     var buf: [max_project_len]u8 = undefined;
     const project = lookupProject(&db, "abc123def456", &buf);
     try std.testing.expect(project != null);
-    try std.testing.expectEqualStrings("flowrent", project.?);
+    try std.testing.expectEqualStrings("myapp", project.?);
 }
 
 test "lookupProject returns null for nonexistent key" {
@@ -239,8 +239,8 @@ test "DsnAuthResult project method returns correct slice" {
     var result = DsnAuthResult{
         .authenticated = true,
         .project_buf = undefined,
-        .project_len = 8,
+        .project_len = 5,
     };
-    @memcpy(result.project_buf[0..8], "flowrent");
-    try std.testing.expectEqualStrings("flowrent", result.project());
+    @memcpy(result.project_buf[0..5], "myapp");
+    try std.testing.expectEqualStrings("myapp", result.project());
 }

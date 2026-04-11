@@ -309,7 +309,7 @@ test "query planner uses idx_project for project queries" {
 
     const detail = try getQueryPlanDetail(
         &db,
-        "SELECT id FROM errors WHERE project = 'flowrent';",
+        "SELECT id FROM errors WHERE project = 'myapp';",
     ) orelse return error.TestUnexpectedResult;
 
     try std.testing.expect(std.mem.indexOf(u8, detail, "idx_project") != null);

@@ -12,7 +12,7 @@ pub const ListParams = struct {
     offset: u32 = 0,
 };
 
-/// Parse query parameters from a URL target string (e.g., "/api/errors?project=flowrent&limit=10").
+/// Parse query parameters from a URL target string (e.g., "/api/errors?project=myapp&limit=10").
 /// Returns parsed ListParams or null if the path doesn't match /api/errors.
 pub fn parseQueryParams(target: []const u8) ListParams {
     var params = ListParams{};
@@ -306,8 +306,8 @@ test "parseQueryParams with no query string" {
 }
 
 test "parseQueryParams with all parameters" {
-    const params = parseQueryParams("/api/errors?project=flowrent&resolved=true&limit=10&offset=20");
-    try std.testing.expectEqualStrings("flowrent", params.project.?);
+    const params = parseQueryParams("/api/errors?project=myapp&resolved=true&limit=10&offset=20");
+    try std.testing.expectEqualStrings("myapp", params.project.?);
     try std.testing.expect(params.resolved);
     try std.testing.expectEqual(@as(u32, 10), params.limit);
     try std.testing.expectEqual(@as(u32, 20), params.offset);
@@ -353,8 +353,8 @@ test "queryAndFormat returns unresolved errors by default" {
     var db = try setupTestDb();
     defer db.close();
 
-    _ = try insertTestError(&db, "flowrent", "ValueError", "bad input", false);
-    _ = try insertTestError(&db, "flowrent", "TypeError", "type error", true); // resolved
+    _ = try insertTestError(&db, "myapp", "ValueError", "bad input", false);
+    _ = try insertTestError(&db, "myapp", "TypeError", "type error", true); // resolved
 
     const params = ListParams{};
     const json = try queryAndFormat(std.testing.allocator, &db, &params);
@@ -370,11 +370,11 @@ test "queryAndFormat filters by project" {
     var db = try setupTestDb();
     defer db.close();
 
-    _ = try insertTestError(&db, "flowrent", "ValueError", "err1", false);
+    _ = try insertTestError(&db, "myapp", "ValueError", "err1", false);
     _ = try insertTestError(&db, "other-app", "TypeError", "err2", false);
 
     var params = ListParams{};
-    params.project = "flowrent";
+    params.project = "myapp";
     const json = try queryAndFormat(std.testing.allocator, &db, &params);
     defer std.testing.allocator.free(json);
 
@@ -395,7 +395,7 @@ test "queryAndFormat pagination works correctly" {
         const fp = std.fmt.bufPrint(&fp_buf, "fp_unique_{d}", .{i}) catch "fp";
         const stmt = try db.prepare(
             "INSERT INTO errors (fingerprint, project, exception_type, message, traceback, count, resolved) " ++
-                "VALUES (?, 'flowrent', ?, 'msg', 'tb', 1, 0);",
+                "VALUES (?, 'myapp', ?, 'msg', 'tb', 1, 0);",
         );
         defer stmt.deinit();
         try stmt.bindText(1, fp);
@@ -441,7 +441,7 @@ test "queryAndFormat response shape matches spec" {
     var db = try setupTestDb();
     defer db.close();
 
-    _ = try insertTestError(&db, "flowrent", "ValueError", "invalid input", false);
+    _ = try insertTestError(&db, "myapp", "ValueError", "invalid input", false);
 
     const params = ListParams{};
     const json = try queryAndFormat(std.testing.allocator, &db, &params);
@@ -469,8 +469,8 @@ test "queryAndFormat shows resolved errors when resolved=true" {
     var db = try setupTestDb();
     defer db.close();
 
-    _ = try insertTestError(&db, "flowrent", "ValueError", "err1", false);
-    _ = try insertTestError(&db, "flowrent", "TypeError", "err2", true);
+    _ = try insertTestError(&db, "myapp", "ValueError", "err1", false);
+    _ = try insertTestError(&db, "myapp", "TypeError", "err2", true);
 
     var params = ListParams{};
     params.resolved = true;

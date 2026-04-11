@@ -66,13 +66,13 @@ class TestFullSetup:
             error_tracker_url="http://errors:5010",
             metrics_collector_url="http://metrics:5012",
             api_key="my-key",
-            project="flowrent",
+            project="myapp",
         )
         try:
             ec = result["error_client"]
             assert ec.base_url == "http://errors:5010"
             assert ec.api_key == "my-key"
-            assert ec.project == "flowrent"
+            assert ec.project == "myapp"
         finally:
             if result["metrics_client"]:
                 result["metrics_client"].shutdown()
@@ -278,7 +278,7 @@ class TestDefaults:
 
 class TestEndToEnd:
     """Verifies the key acceptance criterion: a single function call
-    in FlowRent's main.py enables all monitoring."""
+    in your app's main.py enables all monitoring."""
 
     @pytest.mark.httpx_mock(can_send_already_matched_responses=True)
     def test_single_call_enables_everything(self, httpx_mock):
@@ -299,7 +299,7 @@ class TestEndToEnd:
             error_tracker_url="http://errors:5010",
             metrics_collector_url="http://metrics:5012",
             api_key="shared-key",
-            project="flowrent",
+            project="myapp",
         )
 
         try:

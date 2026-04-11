@@ -366,7 +366,7 @@ test "seedDsnKeys inserts keys from comma-separated string" {
     var db = try init(":memory:");
     defer db.close();
 
-    try seedDsnKeys(&db, "flowrent:my-key-123,other-app:other-key-456");
+    try seedDsnKeys(&db, "myapp:my-key-123,other-app:other-key-456");
 
     const stmt = try db.prepare("SELECT COUNT(*) FROM dsn_keys;");
     defer stmt.deinit();
@@ -380,8 +380,8 @@ test "seedDsnKeys skips duplicates" {
     var db = try init(":memory:");
     defer db.close();
 
-    try seedDsnKeys(&db, "flowrent:my-key-123");
-    try seedDsnKeys(&db, "flowrent:my-key-123"); // duplicate
+    try seedDsnKeys(&db, "myapp:my-key-123");
+    try seedDsnKeys(&db, "myapp:my-key-123"); // duplicate
 
     const stmt = try db.prepare("SELECT COUNT(*) FROM dsn_keys;");
     defer stmt.deinit();
@@ -409,7 +409,7 @@ test "seedDsnKeys stores correct project and key" {
     var db = try init(":memory:");
     defer db.close();
 
-    try seedDsnKeys(&db, "flowrent:my-dsn-key");
+    try seedDsnKeys(&db, "myapp:my-dsn-key");
 
     const stmt = try db.prepare("SELECT public_key, project FROM dsn_keys WHERE public_key = 'my-dsn-key';");
     defer stmt.deinit();
@@ -418,7 +418,7 @@ test "seedDsnKeys stores correct project and key" {
         const key = row.text(0) orelse "";
         const project = row.text(1) orelse "";
         try std.testing.expectEqualStrings("my-dsn-key", key);
-        try std.testing.expectEqualStrings("flowrent", project);
+        try std.testing.expectEqualStrings("myapp", project);
     } else {
         return error.TestUnexpectedResult;
     }

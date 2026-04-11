@@ -297,7 +297,7 @@ test "queryAndFormat returns full error details" {
 
     const error_id = try insertTestError(
         &db,
-        "flowrent",
+        "myapp",
         "ValueError",
         "invalid input",
         "Traceback (most recent call last):\n  File \"/app/main.py\", line 42\nValueError: invalid input",
@@ -322,7 +322,7 @@ test "queryAndFormat returns full error details" {
     try std.testing.expect(std.mem.indexOf(u8, json, "\"occurrences\":") != null);
 
     // Verify specific values
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"flowrent\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"myapp\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"ValueError\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"invalid input\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"resolved\": false") != null);
@@ -333,7 +333,7 @@ test "queryAndFormat includes occurrences with request context" {
     var db = try setupTestDb();
     defer db.close();
 
-    const error_id = try insertTestError(&db, "flowrent", "ValueError", "msg", "tb", false);
+    const error_id = try insertTestError(&db, "myapp", "ValueError", "msg", "tb", false);
 
     // Insert occurrences with context
     _ = try insertTestOccurrence(
@@ -380,7 +380,7 @@ test "queryAndFormat returns empty occurrences array when no occurrences exist" 
     var db = try setupTestDb();
     defer db.close();
 
-    const error_id = try insertTestError(&db, "flowrent", "ValueError", "msg", "tb", false);
+    const error_id = try insertTestError(&db, "myapp", "ValueError", "msg", "tb", false);
 
     const json = (try queryAndFormat(std.testing.allocator, &db, error_id)).?;
     defer std.testing.allocator.free(json);
@@ -392,7 +392,7 @@ test "queryAndFormat handles resolved error with resolved_at" {
     var db = try setupTestDb();
     defer db.close();
 
-    const error_id = try insertTestError(&db, "flowrent", "ValueError", "msg", "tb", true);
+    const error_id = try insertTestError(&db, "myapp", "ValueError", "msg", "tb", true);
 
     // Set resolved_at
     const upd = try db.prepare(
@@ -413,7 +413,7 @@ test "queryAndFormat handles null optional occurrence fields" {
     var db = try setupTestDb();
     defer db.close();
 
-    const error_id = try insertTestError(&db, "flowrent", "ValueError", "msg", "tb", false);
+    const error_id = try insertTestError(&db, "myapp", "ValueError", "msg", "tb", false);
 
     // Insert occurrence with all nullable fields as null
     _ = try insertTestOccurrence(&db, error_id, null, null, null, null, null, "tb_occ");

@@ -398,12 +398,12 @@ test "parseAndValidate accepts valid request" {
     const allocator = arena.allocator();
 
     const body =
-        \\{"project": "flowrent", "exception_type": "ValueError", "message": "invalid input", "traceback": "Traceback..."}
+        \\{"project": "myapp", "exception_type": "ValueError", "message": "invalid input", "traceback": "Traceback..."}
     ;
     var err: ValidationError = .{ .detail = "" };
     const report = parseAndValidate(allocator, body, &err);
     try std.testing.expect(report != null);
-    try std.testing.expectEqualStrings("flowrent", report.?.project);
+    try std.testing.expectEqualStrings("myapp", report.?.project);
     try std.testing.expectEqualStrings("ValueError", report.?.exception_type);
     try std.testing.expectEqualStrings("invalid input", report.?.message);
     try std.testing.expectEqualStrings("Traceback...", report.?.traceback);
@@ -519,7 +519,7 @@ test "ingest creates new error" {
     defer db.close();
 
     const report = ErrorReport{
-        .project = "flowrent",
+        .project = "myapp",
         .exception_type = "ValueError",
         .message = "invalid input",
         .traceback = "Traceback (most recent call last):\n  File \"/app/main.py\", line 42\nValueError: invalid input",
@@ -543,7 +543,7 @@ test "ingest creates new error" {
     var iter = stmt.query();
     if (iter.next()) |row| {
         const proj = row.text(0) orelse "";
-        try std.testing.expectEqualStrings("flowrent", proj);
+        try std.testing.expectEqualStrings("myapp", proj);
         const exc = row.text(1) orelse "";
         try std.testing.expectEqualStrings("ValueError", exc);
         try std.testing.expectEqual(@as(i64, 1), row.int(3)); // count
@@ -567,7 +567,7 @@ test "ingest increments existing unresolved error" {
     defer db.close();
 
     const report = ErrorReport{
-        .project = "flowrent",
+        .project = "myapp",
         .exception_type = "ValueError",
         .message = "invalid input",
         .traceback = "Traceback (most recent call last):\n  File \"/app/main.py\", line 42\nValueError: invalid input",
@@ -610,7 +610,7 @@ test "ingest reopens resolved error" {
     defer db.close();
 
     const report = ErrorReport{
-        .project = "flowrent",
+        .project = "myapp",
         .exception_type = "ValueError",
         .message = "invalid input",
         .traceback = "Traceback (most recent call last):\n  File \"/app/main.py\", line 42\nValueError: invalid input",
@@ -662,7 +662,7 @@ test "ingest trims occurrences to max 5" {
     defer db.close();
 
     const report = ErrorReport{
-        .project = "flowrent",
+        .project = "myapp",
         .exception_type = "ValueError",
         .message = "invalid input",
         .traceback = "Traceback (most recent call last):\n  File \"/app/main.py\", line 42\nValueError: invalid input",
@@ -695,7 +695,7 @@ test "ingest stores occurrence context" {
     defer db.close();
 
     const report = ErrorReport{
-        .project = "flowrent",
+        .project = "myapp",
         .exception_type = "ValueError",
         .message = "invalid input",
         .traceback = "Traceback...",

@@ -23,7 +23,7 @@ pub const Config = struct {
     metrics_collector_api_key: []const u8,
 
     /// Comma-separated DSN key seeds in "project:key" format. Optional.
-    /// Example: DSN_KEYS=flowrent:my-known-dsn-key,other-project:other-key
+    /// Example: DSN_KEYS=myapp:my-known-dsn-key,other-project:other-key
     dsn_keys: ?[]const u8,
 
     /// Comma-separated list of allowed CORS origins. Optional.
