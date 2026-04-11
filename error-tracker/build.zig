@@ -65,6 +65,7 @@ pub fn build(b: *std.Build) void {
         .{ .path = "src/projects_listing.zig", .imports = sqlite_import, .sqlite = true },
         .{ .path = "src/retention.zig", .imports = sqlite_import, .sqlite = true },
         .{ .path = "src/web_ui.zig", .imports = &.{}, .sqlite = false },
+        .{ .path = "src/email_template.zig", .imports = &.{}, .sqlite = false },
     };
 
     for (tests) |t| {

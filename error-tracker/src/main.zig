@@ -13,6 +13,7 @@ const error_resolve = @import("error_resolve.zig");
 const projects_listing = @import("projects_listing.zig");
 const retention = @import("retention.zig");
 const web_ui = @import("web_ui.zig");
+const email_template = @import("email_template.zig");
 
 const server_port: u16 = 8000;
 const max_header_size = 8192;
@@ -30,12 +31,15 @@ const alert_thread_stack_size: usize = 2 * 1024 * 1024;
 
 /// Context passed to the background SMTP alert thread.
 /// Held by value (copied) so the spawning function's stack can unwind safely.
+/// `body` is heap-allocated (page allocator) and *owned* by the alert thread,
+/// which frees it on exit. Bodies are pre-rendered as a complete
+/// `multipart/alternative` MIME container so the SMTP send path stays
+/// content-agnostic.
 const AlertContext = struct {
     cfg: *const app_config.Config,
     subject: [512]u8,
     subject_len: usize,
-    body: [8192]u8,
-    body_len: usize,
+    body: []u8,
 };
 
 /// Maximum requests per minute (rate limit for Error Tracker).
@@ -258,49 +262,41 @@ fn handleErrorIngestion(request: *std.http.Server.Request, db: *sqlite.Database,
 
     // Trigger email alert for new errors in a background thread (non-blocking)
     if (result.is_new) {
+        // Subject keeps the existing `[project] Exception: message` shape and
+        // appends `(#id)` so identical exception/message pairs from different
+        // groups still render distinctly in mail clients that thread by subject.
         var ctx = AlertContext{
             .cfg = cfg,
             .subject = undefined,
             .subject_len = 0,
-            .body = undefined,
-            .body_len = 0,
+            .body = &.{},
         };
-        // Format subject and body into context buffers
-        const msg_truncated = if (report.message.len > 50) report.message[0..50] else report.message;
-        const subject = std.fmt.bufPrint(&ctx.subject, "[{s}] {s}: {s}", .{
-            report.project, report.exception_type, msg_truncated,
+        const msg_truncated = if (report.message.len > 80) report.message[0..80] else report.message;
+        const subject = std.fmt.bufPrint(&ctx.subject, "[{s}] {s}: {s} (#{d})", .{
+            report.project, report.exception_type, msg_truncated, result.id,
         }) catch "New error alert";
         ctx.subject_len = subject.len;
 
-        const request_info = if (report.request_method != null and report.request_url != null) blk: {
-            var req_buf: [256]u8 = undefined;
-            break :blk std.fmt.bufPrint(&req_buf, "{s} {s}", .{ report.request_method.?, report.request_url.? }) catch "N/A";
-        } else "N/A";
-        const dashboard_link = blk: {
-            var link_buf: [256]u8 = undefined;
-            break :blk std.fmt.bufPrint(&link_buf, "{s}/api/errors/{d}", .{ cfg.base_url, result.id }) catch cfg.base_url;
+        // Render the full multipart body up-front so we never block the
+        // request handler waiting on the SMTP path.
+        const alert_body = email_template.buildErrorAlertMessage(std.heap.page_allocator, .{
+            .project = report.project,
+            .exception_type = report.exception_type,
+            .message = report.message,
+            .traceback = report.traceback,
+            .request_method = report.request_method,
+            .request_url = report.request_url,
+            .error_id = result.id,
+            .base_url = cfg.base_url,
+        }) catch |err| {
+            log.warn("Failed to build alert email body: {}", .{err});
+            return;
         };
-        const email_body = std.fmt.bufPrint(&ctx.body,
-            \\New error in {s}
-            \\
-            \\Exception: {s}
-            \\Message: {s}
-            \\
-            \\Request: {s}
-            \\
-            \\Traceback:
-            \\{s}
-            \\
-            \\---
-            \\View in Error Tracker: {s}
-        , .{
-            report.project, report.exception_type, report.message,
-            request_info, report.traceback, dashboard_link,
-        }) catch "Error alert - see error tracker for details";
-        ctx.body_len = email_body.len;
+        ctx.body = alert_body;
 
         const thread = std.Thread.spawn(.{ .stack_size = alert_thread_stack_size }, sendAlertEmails, .{ctx}) catch |err| {
             log.warn("Failed to spawn email alert thread: {}", .{err});
+            std.heap.page_allocator.free(alert_body);
             return;
         };
         thread.detach();
@@ -419,25 +415,22 @@ fn handleTestAlert(request: *std.http.Server.Request, cfg: *const app_config.Con
         .cfg = cfg,
         .subject = undefined,
         .subject_len = 0,
-        .body = undefined,
-        .body_len = 0,
+        .body = &.{},
     };
 
     const subject = std.fmt.bufPrint(&ctx.subject, "[error-tracker] SMTP test alert", .{}) catch "SMTP test alert";
     ctx.subject_len = subject.len;
 
-    const body = std.fmt.bufPrint(&ctx.body,
-        \\This is a test alert from the Error Tracker.
-        \\
-        \\If you received this email, your SMTP configuration is working correctly.
-        \\
-        \\---
-        \\Dashboard: {s}
-    , .{cfg.base_url}) catch "SMTP test alert from error-tracker";
-    ctx.body_len = body.len;
+    const body = email_template.buildTestAlertMessage(std.heap.page_allocator, cfg.base_url) catch |err| {
+        log.warn("Failed to build test alert body: {}", .{err});
+        sendJsonResponse(request, .internal_server_error, "{\"detail\": \"Failed to build test alert\"}") catch {};
+        return;
+    };
+    ctx.body = body;
 
     const thread = std.Thread.spawn(.{ .stack_size = alert_thread_stack_size }, sendAlertEmails, .{ctx}) catch |err| {
         log.warn("Failed to spawn test alert thread: {}", .{err});
+        std.heap.page_allocator.free(body);
         sendJsonResponse(request, .internal_server_error, "{\"detail\": \"Failed to dispatch test alert\"}") catch {};
         return;
     };
@@ -447,8 +440,10 @@ fn handleTestAlert(request: *std.http.Server.Request, cfg: *const app_config.Con
 }
 
 /// Background thread entry: send alert emails to all configured recipients.
+/// Owns `ctx.body` (page-allocated multipart MIME bytes) and frees it on exit.
 fn sendAlertEmails(ctx: anytype) void {
     log.debug("alert thread: started", .{});
+    defer std.heap.page_allocator.free(ctx.body);
     const cfg = ctx.cfg;
     const smtp_host = cfg.smtp_host orelse {
         log.warn("alert thread: smtp_host null at send time", .{});
@@ -459,7 +454,7 @@ fn sendAlertEmails(ctx: anytype) void {
         return;
     };
     const subject = ctx.subject[0..ctx.subject_len];
-    const email_body = ctx.body[0..ctx.body_len];
+    const email_body = ctx.body;
 
     var email_iter = std.mem.splitScalar(u8, alert_emails, ',');
     while (email_iter.next()) |raw_email| {
@@ -692,8 +687,14 @@ fn smtpAuthAndSend(tls: *std.crypto.tls.Client, username: ?[]const u8, password:
     smtpSendTls(tls, "DATA\r\n") catch return;
     if (!smtpReadReplyTls(tls, "354")) { log.warn("SMTP DATA rejected", .{}); return; }
 
-    var hdr_buf: [1024]u8 = undefined;
-    const headers = std.fmt.bufPrint(&hdr_buf, "From: {s}\r\nTo: {s}\r\nSubject: {s}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n", .{ from_email, to_email, subject }) catch return;
+    // `body` is a pre-rendered multipart/alternative container (text + html)
+    // produced by email_template.zig. We only emit the envelope headers here.
+    var hdr_buf: [2048]u8 = undefined;
+    const headers = std.fmt.bufPrint(
+        &hdr_buf,
+        "From: {s}\r\nTo: {s}\r\nSubject: {s}\r\nMIME-Version: 1.0\r\nContent-Type: {s}\r\n\r\n",
+        .{ from_email, to_email, subject, email_template.multipart_content_type },
+    ) catch return;
     smtpSendTls(tls, headers) catch return;
     smtpSendTls(tls, body) catch return;
     smtpSendTls(tls, "\r\n.\r\n") catch return;
@@ -736,8 +737,14 @@ fn smtpAuthAndSendPlain(reader: *SmtpReader, writer: *SmtpWriter, username: ?[]c
     smtpSend(writer, "DATA\r\n") catch return;
     if (!smtpReadReply(reader, "354")) { log.warn("SMTP DATA rejected", .{}); return; }
 
-    var hdr_buf: [1024]u8 = undefined;
-    const headers = std.fmt.bufPrint(&hdr_buf, "From: {s}\r\nTo: {s}\r\nSubject: {s}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n", .{ from_email, to_email, subject }) catch return;
+    // `body` is a pre-rendered multipart/alternative container (text + html)
+    // produced by email_template.zig. We only emit the envelope headers here.
+    var hdr_buf: [2048]u8 = undefined;
+    const headers = std.fmt.bufPrint(
+        &hdr_buf,
+        "From: {s}\r\nTo: {s}\r\nSubject: {s}\r\nMIME-Version: 1.0\r\nContent-Type: {s}\r\n\r\n",
+        .{ from_email, to_email, subject, email_template.multipart_content_type },
+    ) catch return;
     smtpSend(writer, headers) catch return;
     smtpSend(writer, body) catch return;
     smtpSend(writer, "\r\n.\r\n") catch return;
