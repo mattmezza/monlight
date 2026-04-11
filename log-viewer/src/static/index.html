@@ -4,40 +4,40 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Log Viewer</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/tailwind.css">
   <style>
     body { font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace; }
-    .log-message { white-space: pre-wrap; word-break: break-all; }
+    .log-message { white-space: pre-wrap; word-break: break-word; }
     .log-expanded { max-height: none !important; }
     .log-collapsed { max-height: 1.5em; overflow: hidden; }
   </style>
 </head>
 <body class="bg-gray-900 text-gray-100 min-h-screen">
-  <div class="max-w-7xl mx-auto px-4 py-6">
-    <header class="mb-6 flex items-center justify-between">
+  <div class="max-w-7xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
+    <header class="mb-4 sm:mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
       <div>
-        <h1 class="text-2xl font-bold text-white">Log Viewer</h1>
-        <p class="text-gray-400 text-sm mt-1">Browse and search application logs</p>
+        <h1 class="text-xl sm:text-2xl font-bold text-white">Log Viewer</h1>
+        <p class="text-gray-400 text-xs sm:text-sm mt-1">Browse and search application logs</p>
       </div>
       <div id="stats-bar" class="text-xs text-gray-500"></div>
     </header>
 
     <!-- Filters -->
-    <div class="flex flex-wrap gap-4 mb-4 items-end">
-      <div class="flex-1 min-w-[200px]">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:flex lg:flex-wrap gap-3 sm:gap-4 mb-4 lg:items-end">
+      <div class="sm:col-span-2 lg:flex-1 lg:min-w-[200px]">
         <label class="block text-xs text-gray-400 mb-1">Search</label>
         <input type="text" id="filter-search" placeholder="Full-text search..."
           class="w-full bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded px-3 py-1.5 focus:outline-none focus:border-blue-500">
       </div>
       <div>
         <label class="block text-xs text-gray-400 mb-1">Container</label>
-        <select id="filter-container" class="bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded px-3 py-1.5 focus:outline-none focus:border-blue-500">
+        <select id="filter-container" class="w-full lg:w-auto bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded px-3 py-1.5 focus:outline-none focus:border-blue-500">
           <option value="">All containers</option>
         </select>
       </div>
       <div>
         <label class="block text-xs text-gray-400 mb-1">Level</label>
-        <select id="filter-level" class="bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded px-3 py-1.5 focus:outline-none focus:border-blue-500">
+        <select id="filter-level" class="w-full lg:w-auto bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded px-3 py-1.5 focus:outline-none focus:border-blue-500">
           <option value="">All levels</option>
           <option value="DEBUG">DEBUG</option>
           <option value="INFO">INFO</option>
@@ -48,7 +48,7 @@
       </div>
       <div>
         <label class="block text-xs text-gray-400 mb-1">Time range</label>
-        <select id="filter-time" class="bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded px-3 py-1.5 focus:outline-none focus:border-blue-500">
+        <select id="filter-time" class="w-full lg:w-auto bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded px-3 py-1.5 focus:outline-none focus:border-blue-500">
           <option value="">All time</option>
           <option value="1h">Last 1 hour</option>
           <option value="24h">Last 24 hours</option>
@@ -56,7 +56,7 @@
         </select>
       </div>
       <div>
-        <button id="btn-tail" class="px-3 py-1.5 rounded text-sm font-medium bg-gray-800 border border-gray-700 hover:bg-gray-700 transition-colors">
+        <button id="btn-tail" class="w-full lg:w-auto px-3 py-1.5 rounded text-sm font-medium bg-gray-800 border border-gray-700 hover:bg-gray-700 transition-colors">
           Live Tail
         </button>
       </div>
@@ -80,8 +80,8 @@
     </div>
 
     <!-- API Key Modal -->
-    <div id="api-key-modal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-      <div class="bg-gray-800 border border-gray-700 rounded-lg p-6 w-full max-w-sm mx-4">
+    <div id="api-key-modal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-50 px-4">
+      <div class="bg-gray-800 border border-gray-700 rounded-lg p-6 w-full max-w-sm">
         <h2 class="text-lg font-bold text-white mb-2">API Key Required</h2>
         <p class="text-gray-400 text-sm mb-4">Enter your API key to access the Log Viewer.</p>
         <input id="api-key-input" type="password" placeholder="your-api-key"
@@ -91,7 +91,7 @@
     </div>
 
     <!-- Pagination -->
-    <div id="pagination" class="flex items-center justify-between mt-4 text-sm text-gray-400">
+    <div id="pagination" class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mt-4 text-sm text-gray-400">
       <span id="pagination-info"></span>
       <div class="flex gap-2">
         <button id="btn-prev" class="px-3 py-1 rounded bg-gray-800 border border-gray-700 hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed" disabled>Prev</button>
@@ -107,6 +107,7 @@
     let eventSource = null;
     let tailActive = false;
     let tailCount = 0;
+    let suppressUrlSync = false;
 
     function headers() {
       const h = { 'Content-Type': 'application/json' };
@@ -167,14 +168,16 @@
 
     function renderLogEntry(entry) {
       return `
-        <div class="px-4 py-2 hover:bg-gray-800/50 cursor-pointer transition-colors ${levelBg(entry.level)} log-row" onclick="toggleExpand(this)">
-          <div class="flex items-start gap-3">
-            <span class="text-xs text-gray-500 whitespace-nowrap mt-0.5 w-[140px] flex-shrink-0">${esc(formatTimestamp(entry.timestamp))}</span>
-            <span class="inline-block ${levelBadge(entry.level)} text-xs px-1.5 py-0.5 rounded w-[60px] text-center flex-shrink-0">${esc(entry.level)}</span>
-            <span class="text-xs text-purple-400 w-[100px] flex-shrink-0 truncate mt-0.5">${esc(entry.container)}</span>
-            <span class="log-message log-collapsed ${levelColor(entry.level)} text-sm flex-1">${esc(entry.message)}</span>
+        <div class="px-3 sm:px-4 py-2 hover:bg-gray-800/50 cursor-pointer transition-colors ${levelBg(entry.level)} log-row" onclick="toggleExpand(this)">
+          <div class="flex flex-col sm:flex-row sm:items-start sm:gap-3">
+            <div class="flex items-center gap-2 sm:gap-3 mb-1 sm:mb-0">
+              <span class="text-xs text-gray-500 whitespace-nowrap sm:mt-0.5 sm:w-[140px] sm:flex-shrink-0">${esc(formatTimestamp(entry.timestamp))}</span>
+              <span class="inline-block ${levelBadge(entry.level)} text-xs px-1.5 py-0.5 rounded sm:w-[60px] text-center sm:flex-shrink-0">${esc(entry.level)}</span>
+              <span class="text-xs text-purple-400 sm:w-[100px] sm:flex-shrink-0 truncate sm:mt-0.5">${esc(entry.container)}</span>
+            </div>
+            <span class="log-message log-collapsed ${levelColor(entry.level)} text-sm flex-1 break-words">${esc(entry.message)}</span>
           </div>
-          <div class="log-detail hidden mt-2 ml-[310px] text-xs text-gray-500 border-t border-gray-800 pt-2">
+          <div class="log-detail hidden mt-2 sm:ml-[310px] text-xs text-gray-500 border-t border-gray-800 pt-2">
             <div><strong>ID:</strong> ${entry.id}</div>
             <div><strong>Stream:</strong> ${esc(entry.stream)}</div>
             <div><strong>Container:</strong> ${esc(entry.container)}</div>
@@ -212,6 +215,41 @@
       return now.toISOString();
     }
 
+    // ─── URL state sync ───────────────────────────────────────────────────
+    function readUrlState() {
+      const params = new URLSearchParams(window.location.search);
+      suppressUrlSync = true;
+      const search = params.get('search') || '';
+      const container = params.get('container') || '';
+      const level = params.get('level') || '';
+      const time = params.get('time') || '';
+      const offset = parseInt(params.get('offset') || '0', 10);
+      document.getElementById('filter-search').value = search;
+      // container select is populated later — store the desired value
+      document.getElementById('filter-container').dataset.pending = container;
+      document.getElementById('filter-level').value = level;
+      document.getElementById('filter-time').value = time;
+      currentOffset = isNaN(offset) ? 0 : offset;
+      suppressUrlSync = false;
+    }
+
+    function writeUrlState() {
+      if (suppressUrlSync) return;
+      const params = new URLSearchParams();
+      const search = document.getElementById('filter-search').value.trim();
+      const container = document.getElementById('filter-container').value;
+      const level = document.getElementById('filter-level').value;
+      const time = document.getElementById('filter-time').value;
+      if (search) params.set('search', search);
+      if (container) params.set('container', container);
+      if (level) params.set('level', level);
+      if (time) params.set('time', time);
+      if (currentOffset > 0) params.set('offset', String(currentOffset));
+      const qs = params.toString();
+      const url = window.location.pathname + (qs ? '?' + qs : '');
+      window.history.replaceState({}, '', url);
+    }
+
     async function loadContainers() {
       try {
         const res = await fetch('/api/containers', { headers: headers() });
@@ -224,6 +262,12 @@
           opt.textContent = c.name + ' (' + c.log_count + ')';
           sel.appendChild(opt);
         });
+        // Restore pending selection from URL
+        const pending = sel.dataset.pending;
+        if (pending) {
+          sel.value = pending;
+          delete sel.dataset.pending;
+        }
       } catch (e) {
         console.error('Failed to load containers:', e);
       }
@@ -254,6 +298,8 @@
       if (since) params.set('since', since);
       params.set('limit', LIMIT);
       params.set('offset', currentOffset);
+
+      writeUrlState();
 
       const logList = document.getElementById('log-list');
 
@@ -401,6 +447,12 @@
     document.getElementById('filter-level').addEventListener('change', () => { currentOffset = 0; loadLogs(); });
     document.getElementById('filter-time').addEventListener('change', () => { currentOffset = 0; loadLogs(); });
 
+    // React to back/forward navigation
+    window.addEventListener('popstate', () => {
+      readUrlState();
+      loadLogs();
+    });
+
     function showApiKeyModal() {
       document.getElementById('api-key-modal').classList.remove('hidden');
       document.getElementById('api-key-input').focus();
@@ -412,9 +464,8 @@
       API_KEY = key;
       localStorage.setItem('api_key', key);
       document.getElementById('api-key-modal').classList.add('hidden');
-      loadContainers();
+      loadContainers().then(loadLogs);
       loadStats();
-      loadLogs();
     }
 
     document.getElementById('api-key-submit').addEventListener('click', handleApiKeySubmit);
@@ -422,13 +473,13 @@
       if (e.key === 'Enter') handleApiKeySubmit();
     });
 
-    // Initial load
+    // Initial load — read URL state, then fetch
+    readUrlState();
     if (!API_KEY) {
       showApiKeyModal();
     } else {
-      loadContainers();
+      loadContainers().then(loadLogs);
       loadStats();
-      loadLogs();
     }
   </script>
 </body>

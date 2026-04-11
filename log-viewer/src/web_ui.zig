@@ -4,23 +4,34 @@ const log = std.log;
 /// Embedded HTML page (compiled into binary at build time).
 const index_html = @embedFile("static/index.html");
 
+/// Compiled Tailwind CSS (built by scripts/build-tailwind.sh and committed to
+/// git, then embedded into the binary at build time via @embedFile).
+const tailwind_css = @embedFile("static/tailwind.css");
+
 /// Serve the log viewer page (GET /).
 pub fn serveIndex(request: *std.http.Server.Request) void {
-    sendHtmlResponse(request, .ok, index_html) catch {};
+    sendResponse(request, .ok, index_html, "text/html; charset=utf-8") catch {};
 }
 
-fn sendHtmlResponse(
+/// Serve the compiled Tailwind CSS (GET /tailwind.css).
+pub fn serveTailwindCss(request: *std.http.Server.Request) void {
+    sendResponse(request, .ok, tailwind_css, "text/css; charset=utf-8") catch {};
+}
+
+fn sendResponse(
     request: *std.http.Server.Request,
     status: std.http.Status,
     body: []const u8,
+    content_type: []const u8,
 ) !void {
     request.respond(body, .{
         .status = status,
         .extra_headers = &.{
-            .{ .name = "content-type", .value = "text/html; charset=utf-8" },
+            .{ .name = "content-type", .value = content_type },
+            .{ .name = "cache-control", .value = "public, max-age=3600" },
         },
     }) catch |err| {
-        log.err("Failed to send HTML response: {}", .{err});
+        log.err("Failed to send response: {}", .{err});
         return err;
     };
 }
@@ -30,4 +41,8 @@ fn sendHtmlResponse(
 test "index_html is embedded and non-empty" {
     try std.testing.expect(index_html.len > 0);
     try std.testing.expect(std.mem.indexOf(u8, index_html, "Log Viewer") != null);
+}
+
+test "tailwind_css is embedded and non-empty" {
+    try std.testing.expect(tailwind_css.len > 0);
 }
