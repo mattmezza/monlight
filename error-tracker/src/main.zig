@@ -478,9 +478,14 @@ fn sendSmtpEmail(
     std.posix.setsockopt(stream.handle, std.posix.SOL.SOCKET, std.posix.SO.RCVTIMEO, std.mem.asBytes(&timeout)) catch {};
     std.posix.setsockopt(stream.handle, std.posix.SOL.SOCKET, std.posix.SO.SNDTIMEO, std.mem.asBytes(&timeout)) catch {};
 
-    // Use buffered reader/writer for the stream (needed by TLS client)
-    var read_buf: [16384]u8 = undefined;
-    var write_buf: [16384]u8 = undefined;
+    // Use buffered reader/writer for the stream. The buffers double as the
+    // input/output for std.crypto.tls.Client when STARTTLS or SMTPS upgrade
+    // happens, and Client.init asserts that each is at least
+    // `tls.max_ciphertext_record_len` bytes (16645 on Zig 0.15.x). Sizing them
+    // smaller causes a hard-to-trace panic that ReleaseSafe misattributes to
+    // Bundle.zig:24:46.
+    var read_buf: [std.crypto.tls.max_ciphertext_record_len]u8 = undefined;
+    var write_buf: [std.crypto.tls.max_ciphertext_record_len]u8 = undefined;
     var reader = stream.reader(&read_buf);
     var writer = stream.writer(&write_buf);
 
