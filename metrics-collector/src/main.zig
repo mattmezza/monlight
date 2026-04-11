@@ -120,9 +120,13 @@ pub fn handleConnection(conn: net.Server.Connection, api_key: []const u8, limite
         return;
     }
 
-    // Web UI (no auth required)
+    // Web UI + static assets (no auth required)
     if (std.mem.eql(u8, target, "/") or std.mem.eql(u8, target, "/index.html")) {
         web_ui.serveIndex(&request);
+        return;
+    }
+    if (std.mem.eql(u8, target, "/tailwind.css")) {
+        web_ui.serveTailwindCss(&request);
         return;
     }
 
