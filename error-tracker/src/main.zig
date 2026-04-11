@@ -20,6 +20,14 @@ const max_header_size = 8192;
 /// Maximum request body size in bytes (256KB for Error Tracker).
 pub const max_body_size: usize = 256 * 1024;
 
+/// Stack size for the SMTP alert background thread. The TLS code path
+/// allocates four `std.crypto.tls.max_ciphertext_record_len`-sized buffers
+/// on the stack (~64 KB) plus TLS handshake state and cert verification
+/// scratch, which overflows musl's default ~80 KB pthread stack and
+/// silently corrupts the thread, manifesting as `error.ReadFailed` from
+/// post-handshake reads. 2 MB leaves comfortable headroom on every libc.
+const alert_thread_stack_size: usize = 2 * 1024 * 1024;
+
 /// Context passed to the background SMTP alert thread.
 /// Held by value (copied) so the spawning function's stack can unwind safely.
 const AlertContext = struct {
@@ -285,7 +293,7 @@ fn handleErrorIngestion(request: *std.http.Server.Request, db: *sqlite.Database,
         }) catch "Error alert - see error tracker for details";
         ctx.body_len = email_body.len;
 
-        const thread = std.Thread.spawn(.{}, sendAlertEmails, .{ctx}) catch |err| {
+        const thread = std.Thread.spawn(.{ .stack_size = alert_thread_stack_size }, sendAlertEmails, .{ctx}) catch |err| {
             log.warn("Failed to spawn email alert thread: {}", .{err});
             return;
         };
@@ -422,7 +430,7 @@ fn handleTestAlert(request: *std.http.Server.Request, cfg: *const app_config.Con
     , .{cfg.base_url}) catch "SMTP test alert from error-tracker";
     ctx.body_len = body.len;
 
-    const thread = std.Thread.spawn(.{}, sendAlertEmails, .{ctx}) catch |err| {
+    const thread = std.Thread.spawn(.{ .stack_size = alert_thread_stack_size }, sendAlertEmails, .{ctx}) catch |err| {
         log.warn("Failed to spawn test alert thread: {}", .{err});
         sendJsonResponse(request, .internal_server_error, "{\"detail\": \"Failed to dispatch test alert\"}") catch {};
         return;
