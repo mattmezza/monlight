@@ -481,10 +481,13 @@ fn sendSmtpEmail(
     };
     defer stream.close();
 
-    // Set read timeout (10 seconds) to prevent indefinite hangs
-    const timeout = std.posix.timeval{ .sec = 10, .usec = 0 };
-    std.posix.setsockopt(stream.handle, std.posix.SOL.SOCKET, std.posix.SO.RCVTIMEO, std.mem.asBytes(&timeout)) catch {};
-    std.posix.setsockopt(stream.handle, std.posix.SOL.SOCKET, std.posix.SO.SNDTIMEO, std.mem.asBytes(&timeout)) catch {};
+    // NOTE: do NOT set SO_RCVTIMEO/SO_SNDTIMEO on this socket.
+    // On Zig 0.15.x, any value of SO_RCVTIMEO causes std.crypto.tls.Client
+    // post-handshake reads to fail with error.ReadFailed (inner WouldBlock)
+    // — confirmed by bisecting against a fresh alpine:3.21 + ziglang 0.15.2
+    // build talking to smtp.zeptomail.com:465. Without the timeout the
+    // greeting arrives in milliseconds. The alert thread is detached and
+    // long-lived hangs are tolerable here.
 
     // Use buffered reader/writer for the stream. The buffers double as the
     // input/output for std.crypto.tls.Client when STARTTLS or SMTPS upgrade
