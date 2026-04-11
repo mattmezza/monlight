@@ -140,6 +140,10 @@ pub fn handleConnection(conn: net.Server.Connection, api_key: []const u8, limite
             web_ui.serveTailwindCss(&request);
             return;
         }
+        if (std.mem.eql(u8, target, "/alpine.js")) {
+            web_ui.serveAlpineJs(&request);
+            return;
+        }
     }
 
     // Authenticate the request (skips excluded paths like /health)
