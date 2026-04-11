@@ -1,7 +1,7 @@
 .{
     .name = .error_tracker,
     .fingerprint = 0x31277b8337213967,
-    .version = "0.5.1",
+    .version = "0.5.2",
     .paths = .{
         "build.zig",
         "build.zig.zon",
