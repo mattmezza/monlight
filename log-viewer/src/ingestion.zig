@@ -427,6 +427,74 @@ fn wildcardMatchContainer(pattern: []const u8, config_content: []const u8) bool 
     return globMatch(pattern, name);
 }
 
+/// One concrete container that matched a CONTAINERS pattern.
+/// Both `name` and `log_path` are owned by the caller's allocator.
+pub const ResolvedContainer = struct {
+    name: []const u8,
+    log_path: []const u8,
+};
+
+/// Resolve a CONTAINERS pattern into the list of concrete containers it matches.
+/// - Patterns without `*` resolve to at most one container (exact name match).
+/// - Patterns with `*` resolve to every container whose Docker name matches the
+///   glob, so each is ingested under its real name (not the pattern).
+///
+/// Caller owns the returned slice and each entry's `name` / `log_path`.
+pub fn findContainerLogFiles(
+    allocator: std.mem.Allocator,
+    log_sources: []const u8,
+    pattern: []const u8,
+) ![]ResolvedContainer {
+    var results: std.ArrayList(ResolvedContainer) = .{};
+    errdefer {
+        for (results.items) |r| {
+            allocator.free(r.name);
+            allocator.free(r.log_path);
+        }
+        results.deinit(allocator);
+    }
+
+    var dir = std.fs.openDirAbsolute(log_sources, .{ .iterate = true }) catch |err| {
+        log.err("failed to open log sources directory '{s}': {}", .{ log_sources, err });
+        return try results.toOwnedSlice(allocator);
+    };
+    defer dir.close();
+
+    const has_wildcard = std.mem.indexOf(u8, pattern, "*") != null;
+
+    var iter = dir.iterate();
+    while (try iter.next()) |entry| {
+        if (entry.kind != .directory) continue;
+
+        const config_path = try std.fmt.allocPrint(allocator, "{s}/{s}/config.v2.json", .{ log_sources, entry.name });
+        defer allocator.free(config_path);
+
+        const config_content = std.fs.cwd().readFileAlloc(allocator, config_path, 1024 * 1024) catch continue;
+        defer allocator.free(config_content);
+
+        const docker_name = extractDockerName(config_content) orelse continue;
+
+        const matches = if (has_wildcard)
+            globMatch(pattern, docker_name)
+        else
+            std.mem.eql(u8, pattern, docker_name);
+
+        if (!matches) continue;
+
+        const name_owned = try allocator.dupe(u8, docker_name);
+        errdefer allocator.free(name_owned);
+        const log_path = try std.fmt.allocPrint(allocator, "{s}/{s}/{s}-json.log", .{ log_sources, entry.name, entry.name });
+        errdefer allocator.free(log_path);
+
+        try results.append(allocator, .{ .name = name_owned, .log_path = log_path });
+
+        // Exact (non-wildcard) match: stop after the first hit.
+        if (!has_wildcard) break;
+    }
+
+    return try results.toOwnedSlice(allocator);
+}
+
 /// Extract container name from Docker config.v2.json content.
 /// Looks for "Name":"/<name>" and returns <name> (without the leading slash).
 fn extractDockerName(content: []const u8) ?[]const u8 {
@@ -668,67 +736,86 @@ pub fn ingestionThread(
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    // Parse container names
-    var container_names = parseContainerNames(allocator, containers_str) catch |err| {
-        log.err("ingestion thread: failed to parse container names: {}", .{err});
+    // Parse CONTAINERS into the list of patterns to watch (each entry may be an
+    // exact name or a glob like `flowrent_*`).
+    var container_patterns = parseContainerNames(allocator, containers_str) catch |err| {
+        log.err("ingestion thread: failed to parse container patterns: {}", .{err});
         return;
     };
-    defer container_names.deinit(allocator);
+    defer container_patterns.deinit(allocator);
 
-    log.info("ingestion thread started: watching {d} container(s), poll interval {d}s", .{
-        container_names.items.len,
+    log.info("ingestion thread started: watching {d} container pattern(s), poll interval {d}s", .{
+        container_patterns.items.len,
         poll_interval_s,
     });
 
-    // Cache of container name -> log file path
-    var log_file_paths = std.StringHashMap([]const u8).init(allocator);
+    // Active containers: resolved real name -> log file path. Both keys and
+    // values are owned by `allocator`. Patterns are expanded into this map at
+    // startup and re-expanded periodically so newly-started matching containers
+    // are picked up automatically.
+    var active = std.StringHashMap([]const u8).init(allocator);
     defer {
-        var iter = log_file_paths.valueIterator();
-        while (iter.next()) |val| {
-            allocator.free(val.*);
+        var it = active.iterator();
+        while (it.next()) |entry| {
+            allocator.free(entry.key_ptr.*);
+            allocator.free(entry.value_ptr.*);
         }
-        log_file_paths.deinit();
+        active.deinit();
     }
 
     const poll_interval_ns: u64 = @intCast(poll_interval_s * std.time.ns_per_s);
+    // Re-scan log_sources every 30s to discover new matches for wildcard patterns.
+    const rescan_interval_ns: i128 = 30 * std.time.ns_per_s;
+    var last_rescan_ns: i128 = 0;
 
     while (!stop.load(.acquire)) {
-        // Process each container
-        for (container_names.items) |container_name| {
-            if (stop.load(.acquire)) break;
-
-            // Find log file path (cached)
-            const log_path = blk: {
-                if (log_file_paths.get(container_name)) |cached_path| {
-                    // Verify the file still exists
-                    std.fs.cwd().access(cached_path, .{}) catch {
-                        // File no longer exists, remove from cache and re-scan
-                        if (log_file_paths.fetchRemove(container_name)) |kv| {
-                            allocator.free(kv.value);
-                        }
-                        break :blk null;
+        const now_ns: i128 = std.time.nanoTimestamp();
+        const should_rescan = last_rescan_ns == 0 or (now_ns - last_rescan_ns) >= rescan_interval_ns;
+        if (should_rescan) {
+            for (container_patterns.items) |pattern| {
+                const matches = findContainerLogFiles(allocator, log_sources, pattern) catch |err| {
+                    log.err("failed to discover containers for pattern '{s}': {}", .{ pattern, err });
+                    continue;
+                };
+                defer allocator.free(matches);
+                for (matches) |m| {
+                    if (active.contains(m.name)) {
+                        // Already tracked — drop the duplicate copies.
+                        allocator.free(m.name);
+                        allocator.free(m.log_path);
+                        continue;
+                    }
+                    active.put(m.name, m.log_path) catch |err| {
+                        log.err("failed to track container '{s}': {}", .{ m.name, err });
+                        allocator.free(m.name);
+                        allocator.free(m.log_path);
+                        continue;
                     };
-                    break :blk cached_path;
+                    log.info("discovered container '{s}' (pattern '{s}'): {s}", .{ m.name, pattern, m.log_path });
                 }
-                break :blk null;
-            } orelse blk: {
-                // Scan for the container's log file
-                const found = findContainerLogFile(allocator, log_sources, container_name) catch |err| {
-                    log.err("failed to find log file for container '{s}': {}", .{ container_name, err });
-                    break :blk null;
-                } orelse {
-                    break :blk null;
-                };
-                log_file_paths.put(container_name, found) catch |err| {
-                    log.err("failed to cache log file path: {}", .{err});
-                    allocator.free(found);
-                    break :blk null;
-                };
-                log.info("found log file for container '{s}': {s}", .{ container_name, found });
-                break :blk found;
-            };
+            }
+            last_rescan_ns = now_ns;
+        }
 
-            if (log_path == null) continue;
+        // Iterate active containers. Collect entries whose log file disappeared
+        // for removal after the loop (mutating a hashmap during iteration is
+        // unsafe).
+        var to_remove: std.ArrayList([]const u8) = .{};
+        defer to_remove.deinit(allocator);
+
+        var act_iter = active.iterator();
+        while (act_iter.next()) |entry| {
+            if (stop.load(.acquire)) break;
+            const container_name = entry.key_ptr.*;
+            const log_path = entry.value_ptr.*;
+
+            // Verify the log file still exists; if not, mark for removal so
+            // the next rescan can re-discover the container if it comes back.
+            std.fs.cwd().access(log_path, .{}) catch {
+                log.info("container '{s}' log file disappeared, dropping from active set", .{container_name});
+                to_remove.append(allocator, container_name) catch {};
+                continue;
+            };
 
             // Load cursor
             const cursor = loadCursor(&db, container_name) catch |err| {
@@ -738,8 +825,8 @@ pub fn ingestionThread(
 
             // Check for rotation (inode change)
             if (cursor) |c| {
-                const current_inode = getFileInode(log_path.?) catch |err| {
-                    log.err("failed to get inode for '{s}': {}", .{ log_path.?, err });
+                const current_inode = getFileInode(log_path) catch |err| {
+                    log.err("failed to get inode for '{s}': {}", .{ log_path, err });
                     continue;
                 };
                 if (c.inode != 0 and c.inode != current_inode) {
@@ -747,7 +834,7 @@ pub fn ingestionThread(
                         container_name, c.inode, current_inode,
                     });
                     // Reset cursor — will start from beginning of new file
-                    _ = ingestContainerLogs(allocator, &db, container_name, log_path.?, null, tail_buffer) catch |err| {
+                    _ = ingestContainerLogs(allocator, &db, container_name, log_path, null, tail_buffer) catch |err| {
                         log.err("failed to ingest after rotation for '{s}': {}", .{ container_name, err });
                     };
                     continue;
@@ -755,9 +842,17 @@ pub fn ingestionThread(
             }
 
             // Ingest new log lines
-            _ = ingestContainerLogs(allocator, &db, container_name, log_path.?, cursor, tail_buffer) catch |err| {
+            _ = ingestContainerLogs(allocator, &db, container_name, log_path, cursor, tail_buffer) catch |err| {
                 log.err("failed to ingest logs for '{s}': {}", .{ container_name, err });
             };
+        }
+
+        // Drop entries whose log file disappeared.
+        for (to_remove.items) |name| {
+            if (active.fetchRemove(name)) |kv| {
+                allocator.free(kv.key);
+                allocator.free(kv.value);
+            }
         }
 
         // Ring buffer cleanup after each poll cycle
@@ -1122,4 +1217,71 @@ test "wildcardMatchContainer matches pattern against docker config" {
     try std.testing.expect(wildcardMatchContainer("flowrent_*", config));
     try std.testing.expect(!wildcardMatchContainer("other_*", config));
     try std.testing.expect(!wildcardMatchContainer("flowrent_web", config)); // no wildcard, uses exact path
+}
+
+test "findContainerLogFiles expands wildcard into all matching containers" {
+    const allocator = std.testing.allocator;
+
+    // Build a fake `log_sources` directory with three "container" subdirs.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const fixtures = [_]struct { dir: []const u8, name: []const u8 }{
+        .{ .dir = "id_web", .name = "flowrent_web" },
+        .{ .dir = "id_worker", .name = "flowrent_worker" },
+        .{ .dir = "id_other", .name = "other_app" },
+    };
+    for (fixtures) |f| {
+        var sub = try tmp.dir.makeOpenPath(f.dir, .{});
+        defer sub.close();
+        const json = try std.fmt.allocPrint(allocator, "{{\"ID\":\"abc\",\"Name\":\"/{s}\"}}", .{f.name});
+        defer allocator.free(json);
+        try sub.writeFile(.{ .sub_path = "config.v2.json", .data = json });
+        // Touch the json log file too so the discovered path is valid on disk.
+        const log_name = try std.fmt.allocPrint(allocator, "{s}-json.log", .{f.dir});
+        defer allocator.free(log_name);
+        try sub.writeFile(.{ .sub_path = log_name, .data = "" });
+    }
+
+    const log_sources = try tmp.dir.realpathAlloc(allocator, ".");
+    defer allocator.free(log_sources);
+
+    // Wildcard should resolve to two real container names.
+    const wild = try findContainerLogFiles(allocator, log_sources, "flowrent_*");
+    defer {
+        for (wild) |r| {
+            allocator.free(r.name);
+            allocator.free(r.log_path);
+        }
+        allocator.free(wild);
+    }
+    try std.testing.expectEqual(@as(usize, 2), wild.len);
+
+    var saw_web = false;
+    var saw_worker = false;
+    for (wild) |r| {
+        if (std.mem.eql(u8, r.name, "flowrent_web")) saw_web = true;
+        if (std.mem.eql(u8, r.name, "flowrent_worker")) saw_worker = true;
+        // log_path must point at the per-id-json log inside the matching dir.
+        try std.testing.expect(std.mem.endsWith(u8, r.log_path, "-json.log"));
+    }
+    try std.testing.expect(saw_web);
+    try std.testing.expect(saw_worker);
+
+    // Exact match should resolve to exactly one entry.
+    const exact = try findContainerLogFiles(allocator, log_sources, "other_app");
+    defer {
+        for (exact) |r| {
+            allocator.free(r.name);
+            allocator.free(r.log_path);
+        }
+        allocator.free(exact);
+    }
+    try std.testing.expectEqual(@as(usize, 1), exact.len);
+    try std.testing.expectEqualStrings("other_app", exact[0].name);
+
+    // Pattern with no matches returns empty.
+    const none = try findContainerLogFiles(allocator, log_sources, "nope_*");
+    defer allocator.free(none);
+    try std.testing.expectEqual(@as(usize, 0), none.len);
 }
