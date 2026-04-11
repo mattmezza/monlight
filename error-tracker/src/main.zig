@@ -442,9 +442,16 @@ fn handleTestAlert(request: *std.http.Server.Request, cfg: *const app_config.Con
 
 /// Background thread entry: send alert emails to all configured recipients.
 fn sendAlertEmails(ctx: anytype) void {
+    log.debug("alert thread: started", .{});
     const cfg = ctx.cfg;
-    const smtp_host = cfg.smtp_host orelse return;
-    const alert_emails = cfg.alert_emails orelse return;
+    const smtp_host = cfg.smtp_host orelse {
+        log.warn("alert thread: smtp_host null at send time", .{});
+        return;
+    };
+    const alert_emails = cfg.alert_emails orelse {
+        log.warn("alert thread: alert_emails null at send time", .{});
+        return;
+    };
     const subject = ctx.subject[0..ctx.subject_len];
     const email_body = ctx.body[0..ctx.body_len];
 
@@ -474,12 +481,14 @@ fn sendSmtpEmail(
     subject: []const u8,
     body: []const u8,
 ) void {
+    log.debug("alert thread: sendSmtpEmail -> {s}:{d} to={s}", .{ host, port, to_email });
     const allocator = std.heap.page_allocator;
     const stream = net.tcpConnectToHost(allocator, host, port) catch |err| {
         log.warn("Failed to connect to SMTP server {s}:{d}: {}", .{ host, port, err });
         return;
     };
     defer stream.close();
+    log.debug("alert thread: TCP connected to {s}:{d}", .{ host, port });
 
     // NOTE: do NOT set SO_RCVTIMEO/SO_SNDTIMEO on this socket.
     // On Zig 0.15.x, any value of SO_RCVTIMEO causes std.crypto.tls.Client
@@ -502,12 +511,14 @@ fn sendSmtpEmail(
 
     // Implicit TLS (SMTPS) on port 465: handshake immediately, no plaintext phase.
     if (port == 465) {
+        log.debug("alert thread: port 465 -> SMTPS path", .{});
         var ca_bundle: std.crypto.Certificate.Bundle = .{};
         ca_bundle.rescan(allocator) catch |err| {
             log.warn("Failed to load CA certificates: {}", .{err});
             return;
         };
         defer ca_bundle.deinit(allocator);
+        log.debug("alert thread: CA bundle loaded", .{});
 
         var tls_read_buf: [std.crypto.tls.max_ciphertext_record_len]u8 = undefined;
         var tls_write_buf: [std.crypto.tls.max_ciphertext_record_len]u8 = undefined;
@@ -520,6 +531,7 @@ fn sendSmtpEmail(
             log.warn("TLS handshake failed with {s}:{d}: {}", .{ host, port, err });
             return;
         };
+        log.debug("alert thread: TLS handshake OK", .{});
 
         // Read TLS greeting
         const greeting = smtpReadResponseTls(&tls_client) catch |err| {
@@ -532,6 +544,7 @@ fn sendSmtpEmail(
             });
             return;
         }
+        log.debug("alert thread: got SMTP greeting ({d} bytes)", .{greeting.len});
 
         // EHLO over TLS
         smtpSendTls(&tls_client, "EHLO localhost\r\n") catch {
@@ -542,6 +555,7 @@ fn sendSmtpEmail(
             log.warn("SMTP EHLO rejected over SMTPS", .{});
             return;
         }
+        log.debug("alert thread: EHLO accepted, entering AUTH", .{});
 
         smtpAuthAndSend(&tls_client, username, password, from_email, to_email, subject, body, "SMTPS");
         return;
@@ -634,27 +648,28 @@ const SmtpWriter = net.Stream.Writer;
 /// Perform AUTH LOGIN + mail send over a TLS connection. `mode_label` is used
 /// purely for the success log line so operators can tell SMTPS and STARTTLS apart.
 fn smtpAuthAndSend(tls: *std.crypto.tls.Client, username: ?[]const u8, password: ?[]const u8, from_email: []const u8, to_email: []const u8, subject: []const u8, body: []const u8, mode_label: []const u8) void {
-    // AUTH LOGIN
+    // AUTH PLAIN — single-message authentication. The payload is
+    // base64("\x00" ++ username ++ "\x00" ++ password). Preferred over AUTH LOGIN
+    // because some servers (e.g. zoho/zeptomail) reply to the multi-step LOGIN
+    // dance in ways that deadlock our buffered TLS reader; PLAIN is a single
+    // request/response and sidesteps the issue.
     if (username != null and password != null) {
-        smtpSendTls(tls, "AUTH LOGIN\r\n") catch return;
-        if (!smtpReadReplyTls(tls, "334")) return;
-
-        var user_b64_buf: [512]u8 = undefined;
-        const user_b64_len = std.base64.standard.Encoder.calcSize(username.?.len);
-        _ = std.base64.standard.Encoder.encode(user_b64_buf[0..user_b64_len], username.?);
-        _ = tls.writer.write(user_b64_buf[0..user_b64_len]) catch return;
-        smtpSendTls(tls, "\r\n") catch return;
-        if (!smtpReadReplyTls(tls, "334")) return;
-
-        var pass_b64_buf: [512]u8 = undefined;
-        const pass_b64_len = std.base64.standard.Encoder.calcSize(password.?.len);
-        _ = std.base64.standard.Encoder.encode(pass_b64_buf[0..pass_b64_len], password.?);
-        _ = tls.writer.write(pass_b64_buf[0..pass_b64_len]) catch return;
-        smtpSendTls(tls, "\r\n") catch return;
+        var auth_line_buf: [768]u8 = undefined;
+        const line = buildAuthPlainLine(&auth_line_buf, username.?, password.?) catch |err| {
+            log.warn("SMTP AUTH PLAIN payload build failed: {}", .{err});
+            return;
+        };
+        log.debug("alert thread: AUTH PLAIN line built ({d} bytes)", .{line.len});
+        smtpSendTls(tls, line) catch |err| {
+            log.warn("Failed to send AUTH PLAIN over {s}: {}", .{ mode_label, err });
+            return;
+        };
+        log.debug("alert thread: AUTH PLAIN sent, awaiting 235", .{});
         if (!smtpReadReplyTls(tls, "235")) {
-            log.warn("SMTP authentication failed", .{});
+            log.warn("SMTP AUTH PLAIN rejected over {s}", .{mode_label});
             return;
         }
+        log.debug("alert thread: AUTH PLAIN accepted over {s}", .{mode_label});
     }
 
     // MAIL FROM / RCPT TO / DATA / message
@@ -682,27 +697,21 @@ fn smtpAuthAndSend(tls: *std.crypto.tls.Client, username: ?[]const u8, password:
     log.info("Email alert sent to {s} via SMTP ({s})", .{ to_email, mode_label });
 }
 
-/// Perform AUTH LOGIN + mail send over a plain (non-TLS) connection.
+/// Perform AUTH PLAIN + mail send over a plain (non-TLS) connection.
 fn smtpAuthAndSendPlain(reader: *SmtpReader, writer: *SmtpWriter, username: ?[]const u8, password: ?[]const u8, from_email: []const u8, to_email: []const u8, subject: []const u8, body: []const u8) void {
-    // AUTH LOGIN
+    // AUTH PLAIN — see smtpAuthAndSend for rationale.
     if (username != null and password != null) {
-        smtpSend(writer, "AUTH LOGIN\r\n") catch return;
-        if (!smtpReadReply(reader, "334")) return;
-
-        var user_b64_buf: [512]u8 = undefined;
-        const user_b64_len = std.base64.standard.Encoder.calcSize(username.?.len);
-        _ = std.base64.standard.Encoder.encode(user_b64_buf[0..user_b64_len], username.?);
-        _ = writer.interface.write(user_b64_buf[0..user_b64_len]) catch return;
-        smtpSend(writer, "\r\n") catch return;
-        if (!smtpReadReply(reader, "334")) return;
-
-        var pass_b64_buf: [512]u8 = undefined;
-        const pass_b64_len = std.base64.standard.Encoder.calcSize(password.?.len);
-        _ = std.base64.standard.Encoder.encode(pass_b64_buf[0..pass_b64_len], password.?);
-        _ = writer.interface.write(pass_b64_buf[0..pass_b64_len]) catch return;
-        smtpSend(writer, "\r\n") catch return;
+        var auth_line_buf: [768]u8 = undefined;
+        const line = buildAuthPlainLine(&auth_line_buf, username.?, password.?) catch |err| {
+            log.warn("SMTP AUTH PLAIN payload build failed: {}", .{err});
+            return;
+        };
+        smtpSend(writer, line) catch |err| {
+            log.warn("Failed to send AUTH PLAIN (plain SMTP): {}", .{err});
+            return;
+        };
         if (!smtpReadReply(reader, "235")) {
-            log.warn("SMTP authentication failed", .{});
+            log.warn("SMTP AUTH PLAIN rejected (plain SMTP)", .{});
             return;
         }
     }
@@ -732,7 +741,63 @@ fn smtpAuthAndSendPlain(reader: *SmtpReader, writer: *SmtpWriter, username: ?[]c
     log.info("Email alert sent to {s} via SMTP (plain)", .{to_email});
 }
 
-// --- SMTP I/O helpers for plain streams ---
+/// Build an `AUTH PLAIN <base64>\r\n` command line into `out_buf` and return
+/// the written slice. The SASL PLAIN payload is `\0 username \0 password`,
+/// base64-encoded per RFC 4616. Errors when the credentials do not fit into
+/// the caller-supplied buffer.
+fn buildAuthPlainLine(out_buf: []u8, username: []const u8, password: []const u8) ![]const u8 {
+    const prefix = "AUTH PLAIN ";
+    const suffix = "\r\n";
+
+    var raw_buf: [512]u8 = undefined;
+    const raw_len = 1 + username.len + 1 + password.len;
+    if (raw_len > raw_buf.len) return error.CredentialsTooLong;
+    raw_buf[0] = 0;
+    @memcpy(raw_buf[1 .. 1 + username.len], username);
+    raw_buf[1 + username.len] = 0;
+    @memcpy(raw_buf[2 + username.len .. raw_len], password);
+
+    const b64_len = std.base64.standard.Encoder.calcSize(raw_len);
+    const total = prefix.len + b64_len + suffix.len;
+    if (total > out_buf.len) return error.BufferTooSmall;
+
+    @memcpy(out_buf[0..prefix.len], prefix);
+    _ = std.base64.standard.Encoder.encode(out_buf[prefix.len .. prefix.len + b64_len], raw_buf[0..raw_len]);
+    @memcpy(out_buf[prefix.len + b64_len .. total], suffix);
+    return out_buf[0..total];
+}
+
+// --- SMTP I/O helpers ---
+
+const SmtpResponse = struct { buf: [1024]u8, len: usize };
+
+/// Read a complete SMTP reply (possibly multi-line) from `reader` into `out`.
+///
+/// SMTP replies are newline-terminated lines of the form `NNN-text\r\n` for
+/// continuation lines and `NNN text\r\n` for the final line of a reply (RFC
+/// 5321 §4.2). Reading line-by-line is required because the wire protocol has
+/// no length framing — an earlier version of this code called `readSliceShort`
+/// on a 1024-byte buffer, which internally loops `readVec` until the buffer
+/// fills or EOF, and therefore blocked forever waiting for more bytes that
+/// the server would only send in response to the *next* command.
+///
+/// Returns the total number of bytes appended to `out`.
+fn readSmtpReply(reader: *std.Io.Reader, out: []u8) !usize {
+    var total: usize = 0;
+    while (true) {
+        const line = try reader.takeDelimiterInclusive('\n');
+        if (line.len > out.len - total) return error.StreamTooLong;
+        @memcpy(out[total .. total + line.len], line);
+        total += line.len;
+        // Final line of a reply has a space in column 4; continuation uses '-'.
+        // Anything shorter than that is malformed — stop rather than hang.
+        if (line.len < 4) break;
+        if (line[3] != '-') break;
+    }
+    return total;
+}
+
+// --- Plain stream helpers ---
 
 fn smtpSend(writer: *SmtpWriter, data: []const u8) !void {
     _ = try writer.interface.write(data);
@@ -743,41 +808,46 @@ fn smtpReadOk(reader: *SmtpReader) bool {
     return smtpReadReply(reader, "2");
 }
 
-const SmtpResponse = struct { buf: [1024]u8, len: usize };
-
 fn smtpReadResponse(reader: *SmtpReader) !SmtpResponse {
     var resp = SmtpResponse{ .buf = undefined, .len = 0 };
-    resp.len = try reader.interface().readSliceShort(&resp.buf);
-    return resp;
-}
-
-fn smtpReadResponseTls(tls: *std.crypto.tls.Client) !SmtpResponse {
-    var resp = SmtpResponse{ .buf = undefined, .len = 0 };
-    resp.len = try tls.reader.readSliceShort(&resp.buf);
+    resp.len = try readSmtpReply(reader.interface(), &resp.buf);
     return resp;
 }
 
 fn smtpReadReply(reader: *SmtpReader, expected_prefix: []const u8) bool {
     var buf: [1024]u8 = undefined;
-    const n = reader.interface().readSliceShort(&buf) catch return false;
+    const n = readSmtpReply(reader.interface(), &buf) catch return false;
     if (n < expected_prefix.len) return false;
     return std.mem.startsWith(u8, buf[0..n], expected_prefix);
 }
 
-// --- SMTP I/O helpers for TLS streams ---
+// --- TLS stream helpers ---
 
 fn smtpSendTls(tls: *std.crypto.tls.Client, data: []const u8) !void {
     _ = try tls.writer.write(data);
-    tls.writer.flush() catch {};
+    // Flush the TLS layer (encrypts and pushes ciphertext into the underlying
+    // writer's buffer) AND the underlying writer itself (drains that buffer to
+    // the socket). `std.crypto.tls.Client.flush` only performs the first of
+    // those steps, so without the second call the EHLO/AUTH/etc. commands
+    // sit in the stream writer's buffer and the server never sees them,
+    // leaving our next read blocked forever.
+    try tls.writer.flush();
+    try tls.output.flush();
 }
 
 fn smtpReadOkTls(tls: *std.crypto.tls.Client) bool {
     return smtpReadReplyTls(tls, "2");
 }
 
+fn smtpReadResponseTls(tls: *std.crypto.tls.Client) !SmtpResponse {
+    var resp = SmtpResponse{ .buf = undefined, .len = 0 };
+    resp.len = try readSmtpReply(&tls.reader, &resp.buf);
+    return resp;
+}
+
 fn smtpReadReplyTls(tls: *std.crypto.tls.Client, expected_prefix: []const u8) bool {
     var buf: [1024]u8 = undefined;
-    const n = tls.reader.readSliceShort(&buf) catch return false;
+    const n = readSmtpReply(&tls.reader, &buf) catch return false;
     if (n < expected_prefix.len) return false;
     return std.mem.startsWith(u8, buf[0..n], expected_prefix);
 }
