@@ -30,6 +30,7 @@ const HttpResponse = struct {
 const TestServer = struct {
     server: net.Server,
     thread: ?std.Thread = null,
+    stop: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     db: sqlite.Database,
     cfg: app_config.Config,
     cors_config: cors.CorsConfig,
@@ -61,7 +62,15 @@ const TestServer = struct {
         defer limiter.deinit();
         var handled: usize = 0;
         while (handled < count) {
-            const conn = self.server.accept() catch continue;
+            if (self.stop.load(.acquire)) return;
+            const conn = self.server.accept() catch {
+                if (self.stop.load(.acquire)) return;
+                continue;
+            };
+            if (self.stop.load(.acquire)) {
+                conn.stream.close();
+                return;
+            }
             main.handleConnection(conn, test_admin_api_key, &limiter, &self.db, &self.cfg, &self.cors_config) catch {};
             handled += 1;
         }
@@ -79,6 +88,13 @@ const TestServer = struct {
     }
 
     fn waitAndDeinit(self: *TestServer) void {
+        // Defensive shutdown so a stuck acceptLoop can never block forever
+        // (e.g. when a test sent fewer requests than expected). Signal the
+        // loop to stop and unblock any pending accept() with a self-connect.
+        self.stop.store(true, .release);
+        if (net.tcpConnectToAddress(self.server.listen_address)) |s| {
+            s.close();
+        } else |_| {}
         if (self.thread) |t| t.join();
         self.db.close();
         self.server.deinit();
