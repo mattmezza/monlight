@@ -134,9 +134,12 @@ fn makeTestConfig() app_config.Config {
     var cfg: app_config.Config = undefined;
     cfg.database_path = ":memory:";
     cfg.admin_api_key = test_admin_api_key;
-    cfg.error_tracker_url = "http://localhost:5010";
+    // Use 127.0.0.1 (not "localhost") so std.http.Client does not attempt
+    // an IPv6 connection that may hang on dev boxes where ::1 SYNs are
+    // dropped instead of refused. High ports guarantee ECONNREFUSED.
+    cfg.error_tracker_url = "http://127.0.0.1:19999";
     cfg.error_tracker_api_key = "test_et_key";
-    cfg.metrics_collector_url = "http://localhost:5012";
+    cfg.metrics_collector_url = "http://127.0.0.1:19998";
     cfg.metrics_collector_api_key = "test_mc_key";
     cfg.cors_origins = null;
     cfg.max_body_size = 64 * 1024;
