@@ -30,6 +30,7 @@ const HttpResponse = struct {
 const TestServer = struct {
     server: net.Server,
     thread: ?std.Thread = null,
+    stop: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     db: sqlite.Database,
     cfg: app_config.Config,
     cors_config: cors.CorsConfig,
@@ -61,7 +62,15 @@ const TestServer = struct {
         defer limiter.deinit();
         var handled: usize = 0;
         while (handled < count) {
-            const conn = self.server.accept() catch continue;
+            if (self.stop.load(.acquire)) return;
+            const conn = self.server.accept() catch {
+                if (self.stop.load(.acquire)) return;
+                continue;
+            };
+            if (self.stop.load(.acquire)) {
+                conn.stream.close();
+                return;
+            }
             main.handleConnection(conn, test_admin_api_key, &limiter, &self.db, &self.cfg, &self.cors_config) catch {};
             handled += 1;
         }
@@ -79,6 +88,13 @@ const TestServer = struct {
     }
 
     fn waitAndDeinit(self: *TestServer) void {
+        // Defensive shutdown so a stuck acceptLoop can never block forever
+        // (e.g. when a test sent fewer requests than expected). Signal the
+        // loop to stop and unblock any pending accept() with a self-connect.
+        self.stop.store(true, .release);
+        if (net.tcpConnectToAddress(self.server.listen_address)) |s| {
+            s.close();
+        } else |_| {}
         if (self.thread) |t| t.join();
         self.db.close();
         self.server.deinit();
@@ -90,8 +106,12 @@ fn sendRequest(srv_port: u16, method: []const u8, path: []const u8, headers: []c
     const stream = try net.tcpConnectToAddress(address);
     defer stream.close();
 
+    // Always send Content-Length: 0. Without it, the Zig std.http server's
+    // body reader for POST/PUT/PATCH falls back to the raw connection stream
+    // and blocks waiting for client bytes that never arrive — deadlocking
+    // any test that successfully passes auth on a body-bearing method.
     var request_buf: [2048]u8 = undefined;
-    const request_str = std.fmt.bufPrint(&request_buf, "{s} {s} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n{s}\r\n", .{
+    const request_str = std.fmt.bufPrint(&request_buf, "{s} {s} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Length: 0\r\n{s}\r\n", .{
         method,
         path,
         headers,
@@ -134,9 +154,12 @@ fn makeTestConfig() app_config.Config {
     var cfg: app_config.Config = undefined;
     cfg.database_path = ":memory:";
     cfg.admin_api_key = test_admin_api_key;
-    cfg.error_tracker_url = "http://localhost:5010";
+    // Use 127.0.0.1 (not "localhost") so std.http.Client does not attempt
+    // an IPv6 connection that may hang on dev boxes where ::1 SYNs are
+    // dropped instead of refused. High ports guarantee ECONNREFUSED.
+    cfg.error_tracker_url = "http://127.0.0.1:19999";
     cfg.error_tracker_api_key = "test_et_key";
-    cfg.metrics_collector_url = "http://localhost:5012";
+    cfg.metrics_collector_url = "http://127.0.0.1:19998";
     cfg.metrics_collector_api_key = "test_mc_key";
     cfg.cors_origins = null;
     cfg.max_body_size = 64 * 1024;
