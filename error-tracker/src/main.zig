@@ -137,11 +137,14 @@ pub fn handleConnection(conn: net.Server.Connection, api_key: []const u8, limite
         return;
     };
 
-    // Serve web UI pages (static HTML, no auth required)
+    // Serve web UI pages + static assets (no auth required)
     if (request.head.method == .GET) {
         const target = request.head.target;
         if (std.mem.eql(u8, target, "/") or std.mem.eql(u8, target, "/index.html")) {
             web_ui.serveIndex(&request);
+            return;
+        } else if (std.mem.eql(u8, target, "/tailwind.css")) {
+            web_ui.serveTailwindCss(&request);
             return;
         } else if (web_ui.isErrorDetailPath(target)) {
             web_ui.serveErrorDetail(&request);

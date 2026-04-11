@@ -5,15 +5,24 @@ const log = std.log;
 const index_html = @embedFile("static/index.html");
 const error_detail_html = @embedFile("static/error_detail.html");
 
+/// Compiled Tailwind CSS (built by scripts/build-tailwind.sh and committed to
+/// git, then embedded into the binary at build time via @embedFile).
+const tailwind_css = @embedFile("static/tailwind.css");
+
 /// Serve the error listing page (GET /).
 pub fn serveIndex(request: *std.http.Server.Request) void {
-    sendHtmlResponse(request, .ok, index_html) catch {};
+    sendResponse(request, .ok, index_html, "text/html; charset=utf-8") catch {};
 }
 
 /// Serve the error detail page (GET /errors/{id}).
 /// The page itself loads the error data via JavaScript fetch to /api/errors/{id}.
 pub fn serveErrorDetail(request: *std.http.Server.Request) void {
-    sendHtmlResponse(request, .ok, error_detail_html) catch {};
+    sendResponse(request, .ok, error_detail_html, "text/html; charset=utf-8") catch {};
+}
+
+/// Serve the compiled Tailwind CSS (GET /tailwind.css).
+pub fn serveTailwindCss(request: *std.http.Server.Request) void {
+    sendResponse(request, .ok, tailwind_css, "text/css; charset=utf-8") catch {};
 }
 
 /// Check if the path matches /errors/{id} (numeric ID, for the web UI page).
@@ -35,18 +44,20 @@ pub fn isErrorDetailPath(target: []const u8) bool {
     return true;
 }
 
-fn sendHtmlResponse(
+fn sendResponse(
     request: *std.http.Server.Request,
     status: std.http.Status,
     body: []const u8,
+    content_type: []const u8,
 ) !void {
     request.respond(body, .{
         .status = status,
         .extra_headers = &.{
-            .{ .name = "content-type", .value = "text/html; charset=utf-8" },
+            .{ .name = "content-type", .value = content_type },
+            .{ .name = "cache-control", .value = "public, max-age=3600" },
         },
     }) catch |err| {
-        log.err("Failed to send HTML response: {}", .{err});
+        log.err("Failed to send response: {}", .{err});
         return err;
     };
 }
@@ -67,4 +78,8 @@ test "isErrorDetailPath rejects invalid paths" {
     try std.testing.expect(!isErrorDetailPath("/api/errors/1"));
     try std.testing.expect(!isErrorDetailPath("/"));
     try std.testing.expect(!isErrorDetailPath("/errors"));
+}
+
+test "tailwind_css is embedded and non-empty" {
+    try std.testing.expect(tailwind_css.len > 0);
 }

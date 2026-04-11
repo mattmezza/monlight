@@ -4,14 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Error Detail - Error Tracker</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/tailwind.css">
   <style>
     body { font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace; }
-    .traceback-text { white-space: pre-wrap; word-break: break-all; }
+    .traceback-text { white-space: pre-wrap; word-break: break-word; }
   </style>
 </head>
 <body class="bg-gray-900 text-gray-100 min-h-screen">
-  <div class="max-w-5xl mx-auto px-4 py-6">
+  <div class="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
     <!-- Back link -->
     <a href="/" class="text-blue-400 hover:text-blue-300 text-sm mb-4 inline-block">&larr; Back to errors</a>
 
@@ -132,11 +132,11 @@
         // Render header
         const isResolved = err.resolved;
         document.getElementById('error-header').innerHTML = `
-          <div class="flex items-start justify-between gap-4">
-            <div>
-              <h1 class="text-xl font-bold text-red-400">${esc(err.exception_type)}</h1>
-              <p class="text-gray-300 mt-1">${esc(err.message)}</p>
-              <div class="flex flex-wrap items-center gap-3 mt-3 text-sm">
+          <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4">
+            <div class="min-w-0 flex-1">
+              <h1 class="text-lg sm:text-xl font-bold text-red-400 break-words">${esc(err.exception_type)}</h1>
+              <p class="text-gray-300 mt-1 break-words">${esc(err.message)}</p>
+              <div class="flex flex-wrap items-center gap-2 sm:gap-3 mt-3 text-xs sm:text-sm">
                 <span class="inline-block bg-blue-900/40 text-blue-300 text-xs px-2 py-0.5 rounded">${esc(err.project)}</span>
                 <span id="status-badge" class="inline-block text-xs px-2 py-0.5 rounded ${isResolved ? 'bg-green-900/40 text-green-300' : 'bg-red-900/40 text-red-300'}">
                   ${isResolved ? 'Resolved' : 'Unresolved'}

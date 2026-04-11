@@ -4,47 +4,60 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Error Tracker</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/tailwind.css">
   <style>
     body { font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace; }
   </style>
 </head>
 <body class="bg-gray-900 text-gray-100 min-h-screen">
-  <div class="max-w-7xl mx-auto px-4 py-6">
-    <header class="mb-6">
-      <h1 class="text-2xl font-bold text-white">Error Tracker</h1>
-      <p class="text-gray-400 text-sm mt-1">Monitor and manage application errors</p>
+  <div class="max-w-7xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
+    <header class="mb-4 sm:mb-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <h1 class="text-xl sm:text-2xl font-bold text-white">Error Tracker</h1>
+        <p class="text-gray-400 text-xs sm:text-sm mt-1">Monitor and manage application errors</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <select id="filter-refresh" class="bg-gray-800 border border-gray-700 text-gray-200 text-xs sm:text-sm rounded px-2 sm:px-3 py-1.5 focus:outline-none focus:border-blue-500">
+          <option value="0">Auto-refresh: off</option>
+          <option value="5">Every 5s</option>
+          <option value="30">Every 30s</option>
+          <option value="60">Every 1m</option>
+          <option value="300">Every 5m</option>
+        </select>
+        <span id="refresh-indicator" class="hidden text-green-400 text-xs">&#9679; live</span>
+      </div>
     </header>
 
+    <!-- Session ID filter banner -->
+    <div id="session-filter-banner" class="hidden mb-4 bg-amber-900/30 border border-amber-700/40 text-amber-300 text-sm rounded px-3 sm:px-4 py-2 flex flex-wrap items-center justify-between gap-2">
+      <span>Showing errors from session: <strong id="session-filter-value" class="break-all"></strong></span>
+      <button id="clear-session-filter" class="text-amber-400 hover:text-amber-200 text-xs underline">Clear filter</button>
+    </div>
+
     <!-- Filters -->
-    <div class="flex flex-wrap gap-4 mb-6 items-end">
-      <!-- Session ID filter banner -->
-      <div id="session-filter-banner" class="hidden w-full mb-2 bg-amber-900/30 border border-amber-700/40 text-amber-300 text-sm rounded px-4 py-2 flex items-center justify-between">
-        <span>Showing errors from session: <strong id="session-filter-value"></strong></span>
-        <button id="clear-session-filter" class="text-amber-400 hover:text-amber-200 text-xs underline ml-4">Clear filter</button>
-      </div>
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:flex lg:flex-wrap gap-3 sm:gap-4 mb-4 sm:mb-6 lg:items-end">
       <div>
         <label class="block text-xs text-gray-400 mb-1">Project</label>
-        <select id="filter-project" class="bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded px-3 py-1.5 focus:outline-none focus:border-blue-500">
+        <select id="filter-project" class="w-full lg:w-auto bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded px-3 py-1.5 focus:outline-none focus:border-blue-500">
           <option value="">All projects</option>
         </select>
       </div>
       <div>
         <label class="block text-xs text-gray-400 mb-1">Source</label>
-        <select id="filter-source" class="bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded px-3 py-1.5 focus:outline-none focus:border-blue-500">
+        <select id="filter-source" class="w-full lg:w-auto bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded px-3 py-1.5 focus:outline-none focus:border-blue-500">
           <option value="">All sources</option>
           <option value="server">Server</option>
           <option value="browser">Browser</option>
         </select>
       </div>
-      <div class="flex items-center gap-2">
-        <label class="block text-xs text-gray-400">Show resolved</label>
+      <div class="flex items-center gap-2 sm:col-span-2 lg:col-span-1 lg:pb-1">
         <input type="checkbox" id="filter-resolved" class="rounded bg-gray-800 border-gray-700 text-blue-500 focus:ring-blue-500 focus:ring-offset-gray-900">
+        <label for="filter-resolved" class="text-xs text-gray-400">Show resolved</label>
       </div>
     </div>
 
-    <!-- Error Table -->
-    <div class="overflow-x-auto rounded-lg border border-gray-700">
+    <!-- Error Table (desktop) / cards (mobile) -->
+    <div class="hidden md:block overflow-x-auto rounded-lg border border-gray-700">
       <table class="w-full text-sm">
         <thead class="bg-gray-800 text-gray-400 text-xs uppercase tracking-wider">
           <tr>
@@ -62,10 +75,13 @@
         </tbody>
       </table>
     </div>
+    <div id="error-cards" class="md:hidden space-y-2">
+      <div class="px-4 py-8 text-center text-gray-500 rounded-lg border border-gray-700">Loading...</div>
+    </div>
 
     <!-- API Key Modal -->
-    <div id="api-key-modal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-      <div class="bg-gray-800 border border-gray-700 rounded-lg p-6 w-full max-w-sm mx-4">
+    <div id="api-key-modal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-50 px-4">
+      <div class="bg-gray-800 border border-gray-700 rounded-lg p-6 w-full max-w-sm">
         <h2 class="text-lg font-bold text-white mb-2">API Key Required</h2>
         <p class="text-gray-400 text-sm mb-4">Enter your API key to access the Error Tracker.</p>
         <input id="api-key-input" type="password" placeholder="your-api-key"
@@ -75,7 +91,7 @@
     </div>
 
     <!-- Pagination -->
-    <div id="pagination" class="flex items-center justify-between mt-4 text-sm text-gray-400">
+    <div id="pagination" class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mt-4 text-sm text-gray-400">
       <span id="pagination-info"></span>
       <div class="flex gap-2">
         <button id="btn-prev" class="px-3 py-1 rounded bg-gray-800 border border-gray-700 hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed" disabled>Prev</button>
@@ -88,26 +104,59 @@
     let API_KEY = localStorage.getItem('api_key') || '';
     let currentOffset = 0;
     const LIMIT = 50;
+    let suppressUrlSync = false;
+    let autoRefreshTimer = null;
+    let sessionIdFilter = '';
 
-    // Read session_id filter from URL query parameters
-    const urlParams = new URLSearchParams(window.location.search);
-    let sessionIdFilter = urlParams.get('session_id') || '';
+    // ─── URL state ────────────────────────────────────────────────────
+    function readUrlState() {
+      suppressUrlSync = true;
+      const params = new URLSearchParams(window.location.search);
+      sessionIdFilter = params.get('session_id') || '';
+      const project = params.get('project') || '';
+      const source = params.get('source') || '';
+      const resolved = params.get('resolved') === 'true';
+      const refresh = params.get('refresh') || '0';
+      const offset = parseInt(params.get('offset') || '0', 10);
+      // project select populated later — store pending
+      document.getElementById('filter-project').dataset.pending = project;
+      document.getElementById('filter-source').value = source;
+      document.getElementById('filter-resolved').checked = resolved;
+      document.getElementById('filter-refresh').value = refresh;
+      currentOffset = isNaN(offset) ? 0 : offset;
+      suppressUrlSync = false;
+    }
+
+    function writeUrlState() {
+      if (suppressUrlSync) return;
+      const params = new URLSearchParams();
+      if (sessionIdFilter) params.set('session_id', sessionIdFilter);
+      const project = document.getElementById('filter-project').value;
+      const source = document.getElementById('filter-source').value;
+      const resolved = document.getElementById('filter-resolved').checked;
+      const refresh = document.getElementById('filter-refresh').value;
+      if (project) params.set('project', project);
+      if (source) params.set('source', source);
+      if (resolved) params.set('resolved', 'true');
+      if (refresh && refresh !== '0') params.set('refresh', refresh);
+      if (currentOffset > 0) params.set('offset', String(currentOffset));
+      const qs = params.toString();
+      window.history.replaceState({}, '', window.location.pathname + (qs ? '?' + qs : ''));
+    }
 
     function initSessionBanner() {
       const banner = document.getElementById('session-filter-banner');
       if (sessionIdFilter) {
         banner.classList.remove('hidden');
         document.getElementById('session-filter-value').textContent = sessionIdFilter;
+      } else {
+        banner.classList.add('hidden');
       }
     }
 
     document.getElementById('clear-session-filter').addEventListener('click', () => {
       sessionIdFilter = '';
-      document.getElementById('session-filter-banner').classList.add('hidden');
-      // Remove session_id from URL without reload
-      const url = new URL(window.location);
-      url.searchParams.delete('session_id');
-      window.history.replaceState({}, '', url.pathname);
+      initSessionBanner();
       currentOffset = 0;
       loadErrors();
     });
@@ -146,15 +195,31 @@
         if (res.status === 401) { showApiKeyModal(); return; }
         const data = await res.json();
         const sel = document.getElementById('filter-project');
+        const pending = sel.dataset.pending || sel.value || '';
+        sel.innerHTML = '<option value="">All projects</option>';
         (data.projects || []).forEach(p => {
           const opt = document.createElement('option');
           opt.value = p;
           opt.textContent = p;
           sel.appendChild(opt);
         });
+        if (pending) sel.value = pending;
+        delete sel.dataset.pending;
       } catch (e) {
         console.error('Failed to load projects:', e);
       }
+    }
+
+    function countClass(c) {
+      if (c > 100) return 'text-red-400';
+      if (c > 10) return 'text-yellow-400';
+      return 'text-gray-300';
+    }
+
+    function sourceBadge(src) {
+      return src === 'browser'
+        ? 'bg-purple-900/40 text-purple-300'
+        : 'bg-gray-700/40 text-gray-300';
     }
 
     async function loadErrors() {
@@ -170,7 +235,10 @@
       params.set('limit', LIMIT);
       params.set('offset', currentOffset);
 
+      writeUrlState();
+
       const tbody = document.getElementById('error-table-body');
+      const cards = document.getElementById('error-cards');
 
       try {
         const res = await fetch('/api/errors?' + params.toString(), { headers: headers() });
@@ -179,6 +247,7 @@
 
         if (!data.errors || data.errors.length === 0) {
           tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-500">No errors found</td></tr>';
+          cards.innerHTML = '<div class="px-4 py-8 text-center text-gray-500 rounded-lg border border-gray-700">No errors found</div>';
           updatePagination(0, 0);
           return;
         }
@@ -192,18 +261,35 @@
             <td class="px-4 py-3">
               <span class="inline-block bg-blue-900/40 text-blue-300 text-xs px-2 py-0.5 rounded">${esc(err.project)}</span>
             </td>
-            <td class="px-4 py-3 text-right font-medium ${err.count > 100 ? 'text-red-400' : err.count > 10 ? 'text-yellow-400' : 'text-gray-300'}">${err.count}</td>
+            <td class="px-4 py-3 text-right font-medium ${countClass(err.count)}">${err.count}</td>
             <td class="px-4 py-3 text-gray-400 whitespace-nowrap" title="${esc(formatDate(err.first_seen))}">${timeAgo(err.first_seen)}</td>
             <td class="px-4 py-3 text-gray-400 whitespace-nowrap" title="${esc(formatDate(err.last_seen))}">${timeAgo(err.last_seen)}</td>
             <td class="px-4 py-3">
-              <span class="inline-block text-xs px-2 py-0.5 rounded ${err.source === 'browser' ? 'bg-purple-900/40 text-purple-300' : 'bg-gray-700/40 text-gray-300'}">${esc(err.source || 'server')}</span>
+              <span class="inline-block text-xs px-2 py-0.5 rounded ${sourceBadge(err.source)}">${esc(err.source || 'server')}</span>
             </td>
           </tr>
+        `).join('');
+
+        cards.innerHTML = data.errors.map(err => `
+          <a href="/errors/${err.id}" class="block rounded-lg border border-gray-700 bg-gray-900/50 hover:bg-gray-800/70 transition-colors p-3">
+            <div class="flex items-start justify-between gap-2">
+              <span class="text-red-400 font-medium break-all">${esc(err.exception_type)}</span>
+              <span class="font-medium ${countClass(err.count)} text-sm whitespace-nowrap">${err.count}×</span>
+            </div>
+            <div class="text-gray-300 text-sm mt-1 break-words">${esc(truncate(err.message, 120))}</div>
+            <div class="flex flex-wrap items-center gap-2 mt-2 text-xs">
+              <span class="inline-block bg-blue-900/40 text-blue-300 px-2 py-0.5 rounded">${esc(err.project)}</span>
+              <span class="inline-block ${sourceBadge(err.source)} px-2 py-0.5 rounded">${esc(err.source || 'server')}</span>
+              <span class="text-gray-500">first ${timeAgo(err.first_seen)}</span>
+              <span class="text-gray-500">last ${timeAgo(err.last_seen)}</span>
+            </div>
+          </a>
         `).join('');
 
         updatePagination(data.total, data.offset);
       } catch (e) {
         tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-red-400">Failed to load errors</td></tr>';
+        cards.innerHTML = '<div class="px-4 py-8 text-center text-red-400 rounded-lg border border-gray-700">Failed to load errors</div>';
         console.error('Failed to load errors:', e);
       }
     }
@@ -235,6 +321,22 @@
       btnNext.disabled = offset + LIMIT >= total;
     }
 
+    function setAutoRefresh() {
+      const seconds = parseInt(document.getElementById('filter-refresh').value, 10);
+      const indicator = document.getElementById('refresh-indicator');
+      if (autoRefreshTimer) {
+        clearInterval(autoRefreshTimer);
+        autoRefreshTimer = null;
+      }
+      if (seconds > 0) {
+        autoRefreshTimer = setInterval(loadErrors, seconds * 1000);
+        indicator.classList.remove('hidden');
+      } else {
+        indicator.classList.add('hidden');
+      }
+      writeUrlState();
+    }
+
     document.getElementById('btn-prev').addEventListener('click', () => {
       currentOffset = Math.max(0, currentOffset - LIMIT);
       loadErrors();
@@ -248,6 +350,14 @@
     document.getElementById('filter-project').addEventListener('change', () => { currentOffset = 0; loadErrors(); });
     document.getElementById('filter-source').addEventListener('change', () => { currentOffset = 0; loadErrors(); });
     document.getElementById('filter-resolved').addEventListener('change', () => { currentOffset = 0; loadErrors(); });
+    document.getElementById('filter-refresh').addEventListener('change', setAutoRefresh);
+
+    window.addEventListener('popstate', () => {
+      readUrlState();
+      initSessionBanner();
+      setAutoRefresh();
+      loadErrors();
+    });
 
     function showApiKeyModal() {
       document.getElementById('api-key-modal').classList.remove('hidden');
@@ -260,8 +370,7 @@
       API_KEY = key;
       localStorage.setItem('api_key', key);
       document.getElementById('api-key-modal').classList.add('hidden');
-      loadProjects();
-      loadErrors();
+      loadProjects().then(loadErrors);
     }
 
     document.getElementById('api-key-submit').addEventListener('click', handleApiKeySubmit);
@@ -270,12 +379,13 @@
     });
 
     // Initial load
+    readUrlState();
     initSessionBanner();
+    setAutoRefresh();
     if (!API_KEY) {
       showApiKeyModal();
     } else {
-      loadProjects();
-      loadErrors();
+      loadProjects().then(loadErrors);
     }
   </script>
 </body>
