@@ -15,7 +15,8 @@
 
 .PHONY: help versions release-error-tracker release-log-viewer release-metrics-collector \
         release-browser-relay release-python release-js release-all release-services \
-        check-clean check-version
+        check-clean check-version tailwind tailwind-log-viewer tailwind-metrics-collector \
+        tailwind-error-tracker
 
 SHELL := /bin/bash
 
@@ -157,6 +158,26 @@ release-all: check-version check-clean
 	@echo "==> All components tagged at v$(V) and pushed"
 	@echo "    CI will publish: 4 Docker images to GHCR, Python to PyPI, JS to npm"
 
+# ─── Tailwind CSS ────────────────────────────────────────────────────────────
+#
+# The web UIs (log-viewer, metrics-collector, error-tracker) ship with a
+# pre-built Tailwind CSS file embedded into the binary at compile time. The
+# build script runs the Tailwind v4 CLI from tools/tailwind/ and writes
+# tailwind.css into each service's src/static/. Output is committed to git so
+# the docker build does not need Node.
+
+tailwind:
+	@scripts/build-tailwind.sh
+
+tailwind-log-viewer:
+	@scripts/build-tailwind.sh log-viewer
+
+tailwind-metrics-collector:
+	@scripts/build-tailwind.sh metrics-collector
+
+tailwind-error-tracker:
+	@scripts/build-tailwind.sh error-tracker
+
 # ─── Help ────────────────────────────────────────────────────────────────────
 
 help:
@@ -173,6 +194,9 @@ help:
 	@echo ""
 	@echo "  make release-services V=x.y.z     Release all 4 Docker services"
 	@echo "  make release-all V=x.y.z          Release everything (services + clients)"
+	@echo ""
+	@echo "  make tailwind                     Rebuild compiled Tailwind CSS for all UIs"
+	@echo "  make tailwind-log-viewer          Rebuild Tailwind for log-viewer only"
 	@echo ""
 	@echo "Each target bumps versions, commits, tags, and pushes."
 	@echo "CI handles building, publishing, and creating GitHub Releases."

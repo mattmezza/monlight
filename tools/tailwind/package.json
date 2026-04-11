@@ -1,0 +1,10 @@
+{
+  "name": "monlight-tailwind-tools",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Local Tailwind v4 CLI used to build static CSS for the Zig services. Not published.",
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.2.2",
+    "tailwindcss": "^4.2.2"
+  }
+}

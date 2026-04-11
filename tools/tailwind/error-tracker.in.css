@@ -1,0 +1,3 @@
+@import "tailwindcss";
+@source "../../error-tracker/src/static/index.html";
+@source "../../error-tracker/src/static/error_detail.html";
