@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Metrics Dashboard</title>
     <link rel="stylesheet" href="/tailwind.css">
+    <script defer src="/alpine.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/uplot@1.6.30/dist/uPlot.iife.min.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.30/dist/uPlot.min.css">
     <style>
@@ -35,9 +36,10 @@
         .rating-poor { background: #7f1d1d; color: #f87171; }
         .rating-unknown { background: #334155; color: #94a3b8; }
         .section-title { font-size: 1rem; font-weight: 600; color: #e2e8f0; margin-bottom: 0.75rem; border-bottom: 1px solid #334155; padding-bottom: 0.5rem; }
+        [x-cloak] { display: none !important; }
     </style>
 </head>
-<body class="min-h-screen p-3 sm:p-6">
+<body class="min-h-screen p-3 sm:p-6" x-data="metricsDashboard()" x-init="init()" x-cloak>
     <div class="max-w-7xl mx-auto">
         <!-- Header -->
         <div class="flex flex-col gap-3 mb-4 sm:mb-6 lg:flex-row lg:items-center lg:justify-between">
@@ -46,26 +48,29 @@
                 <p class="text-xs sm:text-sm text-gray-400 mt-1">Monlight Metrics Collector</p>
             </div>
             <div class="flex flex-wrap items-center gap-2 sm:gap-3">
-                <select id="projectSelect" class="w-full sm:w-auto">
+                <select x-model="project" class="w-full sm:w-auto">
                     <option value="">All projects</option>
+                    <template x-for="p in projects" :key="p">
+                        <option :value="p" x-text="p"></option>
+                    </template>
                 </select>
-                <select id="periodSelect" class="w-full sm:w-auto">
+                <select x-model="period" class="w-full sm:w-auto">
                     <option value="1m">Last 1 minute</option>
                     <option value="5m">Last 5 minutes</option>
                     <option value="1h">Last 1 hour</option>
-                    <option value="24h" selected>Last 24 hours</option>
+                    <option value="24h">Last 24 hours</option>
                     <option value="7d">Last 7 days</option>
                     <option value="30d">Last 30 days</option>
                 </select>
-                <select id="refreshSelect" class="w-full sm:w-auto">
+                <select x-model="refresh" class="w-full sm:w-auto">
                     <option value="0">Auto-refresh: off</option>
                     <option value="5">Every 5s</option>
                     <option value="30">Every 30s</option>
                     <option value="60">Every 1m</option>
                     <option value="300">Every 5m</option>
                 </select>
-                <span id="refreshIndicator" style="display:none;" class="text-green-400 text-xs">&#9679; live</span>
-                <button id="manualRefresh" title="Refresh">Refresh</button>
+                <span x-show="refresh !== '0'" class="text-green-400 text-xs">&#9679; live</span>
+                <button @click="loadDashboard()" title="Refresh">Refresh</button>
             </div>
         </div>
 
@@ -73,15 +78,15 @@
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-4 sm:mb-6">
             <div class="card p-4">
                 <div class="stat-label">Total Datapoints</div>
-                <div class="stat-value" id="totalDatapoints">--</div>
+                <div class="stat-value" x-text="(summary.total_datapoints || 0).toLocaleString()"></div>
             </div>
             <div class="card p-4">
                 <div class="stat-label">Distinct Metrics</div>
-                <div class="stat-value" id="distinctMetrics">--</div>
+                <div class="stat-value" x-text="(summary.distinct_metrics || 0).toLocaleString()"></div>
             </div>
             <div class="card p-4">
                 <div class="stat-label">Status</div>
-                <div class="stat-value" id="healthStatus">--</div>
+                <div class="stat-value" :style="{ color: healthColor }" x-text="healthLabel"></div>
             </div>
         </div>
 
@@ -90,23 +95,29 @@
             <div class="card p-4">
                 <h3 class="text-sm font-semibold text-gray-300 mb-3">Metric Explorer</h3>
                 <div class="flex gap-2 mb-3">
-                    <select id="metricSelect" class="flex-1 min-w-0">
+                    <select x-model="metricName" class="flex-1 min-w-0">
                         <option value="">Select a metric...</option>
+                        <template x-for="m in metricNames" :key="m.name">
+                            <option :value="m.name" x-text="m.name + ' (' + m.type + ')'"></option>
+                        </template>
                     </select>
                 </div>
-                <div class="chart-container" id="metricChart">
-                    <p class="loading p-4">Select a metric to view chart</p>
+                <div class="chart-container" x-ref="metricChart">
+                    <p class="loading p-4" x-show="!metricName">Select a metric to view chart</p>
                 </div>
             </div>
             <div class="card p-4">
                 <h3 class="text-sm font-semibold text-gray-300 mb-3">Latency Percentiles</h3>
                 <div class="flex gap-2 mb-3">
-                    <select id="latencyMetricSelect" class="flex-1 min-w-0">
+                    <select x-model="latencyName" class="flex-1 min-w-0">
                         <option value="">Select a histogram metric...</option>
+                        <template x-for="m in histogramNames" :key="m.name">
+                            <option :value="m.name" x-text="m.name"></option>
+                        </template>
                     </select>
                 </div>
-                <div class="chart-container" id="latencyChart">
-                    <p class="loading p-4">Select a histogram metric to view percentiles</p>
+                <div class="chart-container" x-ref="latencyChart">
+                    <p class="loading p-4" x-show="!latencyName">Select a histogram metric to view percentiles</p>
                 </div>
             </div>
         </div>
@@ -114,504 +125,406 @@
         <!-- Top Metrics Table -->
         <div class="card p-4">
             <h3 class="text-sm font-semibold text-gray-300 mb-3">Top Metrics</h3>
-            <div id="topMetrics">
-                <p class="loading p-4">Loading...</p>
-            </div>
+            <template x-if="topMetrics.length === 0">
+                <p class="text-gray-500 p-4">No metrics collected yet</p>
+            </template>
+            <template x-if="topMetrics.length > 0">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="text-gray-400 text-left border-b border-gray-700">
+                                <th class="pb-2 pr-4">Name</th>
+                                <th class="pb-2 pr-4">Type</th>
+                                <th class="pb-2 pr-4 text-right">Count</th>
+                                <th class="pb-2 text-right">Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="m in topMetrics" :key="m.name">
+                                <tr class="metric-row">
+                                    <td class="py-2 pr-4 font-medium break-all" x-text="m.name"></td>
+                                    <td class="py-2 pr-4">
+                                        <span class="type-badge" :class="'type-' + m.type" x-text="m.type"></span>
+                                    </td>
+                                    <td class="py-2 pr-4 text-right text-gray-300" x-text="m.count.toLocaleString()"></td>
+                                    <td class="py-2 text-right text-gray-300" x-text="m.total.toFixed(2)"></td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </template>
         </div>
 
         <!-- Web Vitals Section (hidden until data available) -->
-        <div id="webVitalsSection" style="display: none;" class="mt-6">
+        <div x-show="webVitals" class="mt-6">
             <h2 class="section-title">Web Vitals</h2>
 
             <!-- Web Vitals Summary Cards -->
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-4 sm:mb-6">
-                <div class="card p-4 vital-card">
-                    <div class="stat-label">Largest Contentful Paint</div>
-                    <div class="vital-value" id="lcpValue">--</div>
-                    <div class="vital-unit">ms</div>
-                    <div class="vital-rating rating-unknown" id="lcpRating">--</div>
-                </div>
-                <div class="card p-4 vital-card">
-                    <div class="stat-label">Interaction to Next Paint</div>
-                    <div class="vital-value" id="inpValue">--</div>
-                    <div class="vital-unit">ms</div>
-                    <div class="vital-rating rating-unknown" id="inpRating">--</div>
-                </div>
-                <div class="card p-4 vital-card">
-                    <div class="stat-label">Cumulative Layout Shift</div>
-                    <div class="vital-value" id="clsValue">--</div>
-                    <div class="vital-unit">&nbsp;</div>
-                    <div class="vital-rating rating-unknown" id="clsRating">--</div>
-                </div>
+                <template x-for="v in vitalCards" :key="v.id">
+                    <div class="card p-4 vital-card">
+                        <div class="stat-label" x-text="v.label"></div>
+                        <div class="vital-value" :style="{ color: v.color }" x-text="v.value"></div>
+                        <div class="vital-unit" x-text="v.unit || '\u00a0'"></div>
+                        <div class="vital-rating" :class="'rating-' + v.rating" x-text="v.ratingLabel"></div>
+                    </div>
+                </template>
             </div>
 
             <!-- Web Vitals Trend Chart -->
             <div class="card p-4 mb-4 sm:mb-6">
                 <h3 class="text-sm font-semibold text-gray-300 mb-3">Web Vitals Trend</h3>
-                <div class="chart-container" id="webVitalsChart">
-                    <p class="loading p-4">Loading chart...</p>
+                <div class="chart-container" x-ref="webVitalsChart">
+                    <p class="loading p-4" x-show="!webVitals || (webVitals.timeseries || []).length === 0">No Web Vitals data for selected period</p>
                 </div>
             </div>
 
             <!-- Page Performance Breakdown -->
             <div class="card p-4">
                 <h3 class="text-sm font-semibold text-gray-300 mb-3">Page Performance</h3>
-                <div id="pagePerformance">
-                    <p class="loading p-4">Loading...</p>
-                </div>
+                <template x-if="!webVitals || (webVitals.by_page || []).length === 0">
+                    <p class="text-gray-500 p-4">No page data available</p>
+                </template>
+                <template x-if="webVitals && (webVitals.by_page || []).length > 0">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead>
+                                <tr class="text-gray-400 text-left border-b border-gray-700">
+                                    <th class="pb-2 pr-4">Page</th>
+                                    <th class="pb-2 pr-4 text-right">LCP (ms)</th>
+                                    <th class="pb-2 pr-4 text-right">INP (ms)</th>
+                                    <th class="pb-2 pr-4 text-right">CLS</th>
+                                    <th class="pb-2 text-right">Views</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="p in webVitals.by_page" :key="p.page || '/'">
+                                    <tr class="metric-row">
+                                        <td class="py-2 pr-4 font-medium break-all" x-text="p.page || '/'"></td>
+                                        <td class="py-2 pr-4 text-right" :class="vitalColor(p.lcp, 2500, 4000)" x-text="p.lcp != null ? p.lcp.toFixed(0) : '--'"></td>
+                                        <td class="py-2 pr-4 text-right" :class="vitalColor(p.inp, 200, 500)" x-text="p.inp != null ? p.inp.toFixed(0) : '--'"></td>
+                                        <td class="py-2 pr-4 text-right" :class="vitalColor(p.cls, 0.1, 0.25)" x-text="p.cls != null ? p.cls.toFixed(3) : '--'"></td>
+                                        <td class="py-2 text-right text-gray-300" x-text="(p.page_views || 0).toLocaleString()"></td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </template>
             </div>
         </div>
     </div>
 
     <script>
-        const API_KEY = localStorage.getItem('api_key') || prompt('Enter API key:');
-        if (API_KEY) localStorage.setItem('api_key', API_KEY);
+        function metricsDashboard() {
+            return {
+                // Auth
+                apiKey: localStorage.getItem('api_key') || '',
 
-        const headers = { 'X-API-Key': API_KEY };
-        let suppressUrlSync = false;
+                // Filter / query state (mirrored to URL)
+                project: '',
+                period: '24h',
+                refresh: '0',
+                metricName: '',
+                latencyName: '',
 
-        // ─── URL state ────────────────────────────────────────────────────
-        function readUrlState() {
-            suppressUrlSync = true;
-            const params = new URLSearchParams(window.location.search);
-            const period = params.get('period');
-            const refresh = params.get('refresh');
-            const project = params.get('project') || '';
-            const metric = params.get('metric') || '';
-            const latency = params.get('latency') || '';
-            if (period) document.getElementById('periodSelect').value = period;
-            if (refresh != null) document.getElementById('refreshSelect').value = refresh;
-            // project select is populated later — store the desired value
-            document.getElementById('projectSelect').dataset.pending = project;
-            document.getElementById('metricSelect').dataset.pending = metric;
-            document.getElementById('latencyMetricSelect').dataset.pending = latency;
-            suppressUrlSync = false;
-        }
+                // Server data
+                projects: [],
+                metricNames: [],
+                summary: {},
+                topMetrics: [],
+                webVitals: null,
+                healthLabel: '--',
+                healthColor: '#38bdf8',
 
-        function writeUrlState() {
-            if (suppressUrlSync) return;
-            const params = new URLSearchParams();
-            const project = document.getElementById('projectSelect').value;
-            const period = document.getElementById('periodSelect').value;
-            const refresh = document.getElementById('refreshSelect').value;
-            const metric = document.getElementById('metricSelect').value;
-            const latency = document.getElementById('latencyMetricSelect').value;
-            if (project) params.set('project', project);
-            if (period && period !== '24h') params.set('period', period);
-            if (refresh && refresh !== '0') params.set('refresh', refresh);
-            if (metric) params.set('metric', metric);
-            if (latency) params.set('latency', latency);
-            const qs = params.toString();
-            window.history.replaceState({}, '', window.location.pathname + (qs ? '?' + qs : ''));
-        }
+                // Internals
+                metricChart: null,
+                latencyChart: null,
+                webVitalsChartInst: null,
+                autoRefreshTimer: null,
+                suppressUrlSync: false,
 
-        function getProjectParam() {
-            const p = document.getElementById('projectSelect').value;
-            return p ? `&project=${encodeURIComponent(p)}` : '';
-        }
+                init() {
+                    if (!this.apiKey) {
+                        const k = prompt('Enter API key:');
+                        if (k) {
+                            this.apiKey = k;
+                            localStorage.setItem('api_key', k);
+                        }
+                    }
+                    this.readUrlState();
 
-        async function loadProjects() {
-            try {
-                const resp = await fetch('/api/projects', { headers });
-                if (resp.ok) {
-                    const data = await resp.json();
-                    const sel = document.getElementById('projectSelect');
-                    const current = sel.value || sel.dataset.pending || '';
-                    sel.innerHTML = '<option value="">All projects</option>';
-                    (data.projects || []).forEach(p => {
-                        const opt = document.createElement('option');
-                        opt.value = p;
-                        opt.textContent = p;
-                        sel.appendChild(opt);
+                    this.$watch('project',     () => this.loadDashboard());
+                    this.$watch('period',      () => this.loadDashboard());
+                    this.$watch('refresh',     () => this.setupAutoRefresh());
+                    this.$watch('metricName',  () => this.loadMetricChart());
+                    this.$watch('latencyName', () => this.loadLatencyChart());
+
+                    window.addEventListener('popstate', () => {
+                        this.readUrlState();
+                        this.setupAutoRefresh();
+                        this.loadDashboard();
                     });
-                    if (current) sel.value = current;
-                    delete sel.dataset.pending;
-                }
-            } catch (e) {
-                console.error('Projects load failed:', e);
-            }
-        }
 
-        async function loadDashboard() {
-            const period = document.getElementById('periodSelect').value;
-            const projectParam = getProjectParam();
+                    this.setupAutoRefresh();
+                    this.loadDashboard();
+                },
 
-            // Load projects list
-            await loadProjects();
+                // ─── URL state ───────────────────────────────────────
+                readUrlState() {
+                    this.suppressUrlSync = true;
+                    const p = new URLSearchParams(window.location.search);
+                    this.project     = p.get('project')  || '';
+                    this.period      = p.get('period')   || '24h';
+                    this.refresh     = p.get('refresh')  || '0';
+                    this.metricName  = p.get('metric')   || '';
+                    this.latencyName = p.get('latency')  || '';
+                    this.suppressUrlSync = false;
+                },
 
-            // Load dashboard data
-            try {
-                const resp = await fetch(`/api/dashboard?period=${period}${projectParam}`, { headers });
-                if (resp.ok) {
-                    const data = await resp.json();
-                    document.getElementById('totalDatapoints').textContent = data.summary?.total_datapoints?.toLocaleString() || '0';
-                    document.getElementById('distinctMetrics').textContent = data.summary?.distinct_metrics?.toLocaleString() || '0';
-                    renderTopMetrics(data.top_metrics || []);
-                    renderWebVitals(data.web_vitals);
-                }
-            } catch (e) {
-                console.error('Dashboard load failed:', e);
-            }
+                writeUrlState() {
+                    if (this.suppressUrlSync) return;
+                    const p = new URLSearchParams();
+                    if (this.project)     p.set('project', this.project);
+                    if (this.period && this.period !== '24h') p.set('period', this.period);
+                    if (this.refresh && this.refresh !== '0') p.set('refresh', this.refresh);
+                    if (this.metricName)  p.set('metric', this.metricName);
+                    if (this.latencyName) p.set('latency', this.latencyName);
+                    const qs = p.toString();
+                    window.history.replaceState({}, '', window.location.pathname + (qs ? '?' + qs : ''));
+                },
 
-            // Load health
-            try {
-                const resp = await fetch('/health');
-                if (resp.ok) {
-                    const data = await resp.json();
-                    document.getElementById('healthStatus').textContent = data.status === 'ok' ? 'OK' : 'Error';
-                    document.getElementById('healthStatus').style.color = data.status === 'ok' ? '#4ade80' : '#f87171';
-                }
-            } catch (e) {
-                document.getElementById('healthStatus').textContent = 'Error';
-                document.getElementById('healthStatus').style.color = '#f87171';
-            }
+                get headers() {
+                    return { 'X-API-Key': this.apiKey };
+                },
 
-            // Load metric names for dropdowns
-            try {
-                const resp = await fetch(`/api/metrics/names?${projectParam.substring(1)}`, { headers });
-                if (resp.ok) {
-                    const data = await resp.json();
-                    populateMetricDropdowns(data.metrics || []);
-                }
-            } catch (e) {
-                console.error('Metric names load failed:', e);
-            }
+                get projectParam() {
+                    return this.project ? `&project=${encodeURIComponent(this.project)}` : '';
+                },
 
-            // Refresh any currently shown charts
-            if (document.getElementById('metricSelect').value) loadMetricChart();
-            if (document.getElementById('latencyMetricSelect').value) loadLatencyChart();
+                get histogramNames() {
+                    return this.metricNames.filter(m => m.type === 'histogram');
+                },
 
-            writeUrlState();
-        }
+                get vitalCards() {
+                    const s = (this.webVitals && this.webVitals.summary) || {};
+                    const colors = { good: '#4ade80', 'needs-improvement': '#facc15', poor: '#f87171', unknown: '#38bdf8' };
+                    const card = (id, label, unit, src, fmt) => {
+                        if (!src || src.avg == null) {
+                            return { id, label, unit, value: '--', rating: 'unknown', ratingLabel: '--', color: '#38bdf8' };
+                        }
+                        const rating = src.rating || 'unknown';
+                        return {
+                            id, label, unit,
+                            value: fmt(src.avg),
+                            rating,
+                            ratingLabel: rating.replace('-', ' '),
+                            color: colors[rating] || '#38bdf8',
+                        };
+                    };
+                    return [
+                        card('lcp', 'Largest Contentful Paint', 'ms', s.lcp, v => v.toFixed(0)),
+                        card('inp', 'Interaction to Next Paint', 'ms', s.inp, v => v.toFixed(0)),
+                        card('cls', 'Cumulative Layout Shift', '',   s.cls, v => v.toFixed(3)),
+                    ];
+                },
 
-        function populateMetricDropdowns(metrics) {
-            const metricSelect = document.getElementById('metricSelect');
-            const latencySelect = document.getElementById('latencyMetricSelect');
+                vitalColor(value, goodMax, poorMin) {
+                    if (value == null) return 'text-gray-500';
+                    if (value < goodMax) return 'text-green-400';
+                    if (value < poorMin) return 'text-yellow-400';
+                    return 'text-red-400';
+                },
 
-            // Save current selections (or pending from URL state)
-            const currentMetric = metricSelect.value || metricSelect.dataset.pending || '';
-            const currentLatency = latencySelect.value || latencySelect.dataset.pending || '';
+                // ─── Data fetching ───────────────────────────────────
+                async loadProjects() {
+                    try {
+                        const resp = await fetch('/api/projects', { headers: this.headers });
+                        if (resp.ok) {
+                            const data = await resp.json();
+                            this.projects = data.projects || [];
+                        }
+                    } catch (e) {
+                        console.error('Projects load failed:', e);
+                    }
+                },
 
-            metricSelect.innerHTML = '<option value="">Select a metric...</option>';
-            latencySelect.innerHTML = '<option value="">Select a histogram metric...</option>';
+                async loadDashboard() {
+                    this.writeUrlState();
+                    await this.loadProjects();
 
-            metrics.forEach(m => {
-                const opt = document.createElement('option');
-                opt.value = m.name;
-                opt.textContent = `${m.name} (${m.type})`;
-                metricSelect.appendChild(opt);
+                    try {
+                        const resp = await fetch(`/api/dashboard?period=${this.period}${this.projectParam}`, { headers: this.headers });
+                        if (resp.ok) {
+                            const data = await resp.json();
+                            this.summary = data.summary || {};
+                            this.topMetrics = data.top_metrics || [];
+                            this.webVitals = data.web_vitals || null;
+                            if (this.webVitals) {
+                                this.$nextTick(() => this.renderWebVitalsChart(this.webVitals.timeseries || []));
+                            }
+                        }
+                    } catch (e) {
+                        console.error('Dashboard load failed:', e);
+                    }
 
-                if (m.type === 'histogram') {
-                    const opt2 = document.createElement('option');
-                    opt2.value = m.name;
-                    opt2.textContent = m.name;
-                    latencySelect.appendChild(opt2);
-                }
-            });
+                    try {
+                        const resp = await fetch('/health');
+                        if (resp.ok) {
+                            const data = await resp.json();
+                            this.healthLabel = data.status === 'ok' ? 'OK' : 'Error';
+                            this.healthColor = data.status === 'ok' ? '#4ade80' : '#f87171';
+                        }
+                    } catch {
+                        this.healthLabel = 'Error';
+                        this.healthColor = '#f87171';
+                    }
 
-            // Restore selections
-            if (currentMetric) metricSelect.value = currentMetric;
-            if (currentLatency) latencySelect.value = currentLatency;
-            delete metricSelect.dataset.pending;
-            delete latencySelect.dataset.pending;
-        }
+                    try {
+                        const resp = await fetch(`/api/metrics/names?${this.projectParam.substring(1)}`, { headers: this.headers });
+                        if (resp.ok) {
+                            const data = await resp.json();
+                            this.metricNames = data.metrics || [];
+                        }
+                    } catch (e) {
+                        console.error('Metric names load failed:', e);
+                    }
 
-        function renderTopMetrics(metrics) {
-            const container = document.getElementById('topMetrics');
-            if (metrics.length === 0) {
-                container.innerHTML = '<p class="text-gray-500 p-4">No metrics collected yet</p>';
-                return;
-            }
+                    // Refresh any visible charts so auto-refresh keeps them current
+                    if (this.metricName)  this.loadMetricChart();
+                    if (this.latencyName) this.loadLatencyChart();
+                },
 
-            let html = '<div class="overflow-x-auto"><table class="w-full text-sm">';
-            html += '<thead><tr class="text-gray-400 text-left border-b border-gray-700">';
-            html += '<th class="pb-2 pr-4">Name</th><th class="pb-2 pr-4">Type</th><th class="pb-2 pr-4 text-right">Count</th><th class="pb-2 text-right">Total</th>';
-            html += '</tr></thead><tbody>';
+                async loadMetricChart() {
+                    this.writeUrlState();
+                    const container = this.$refs.metricChart;
+                    if (!container) return;
+                    if (!this.metricName) {
+                        if (this.metricChart) { this.metricChart.destroy(); this.metricChart = null; }
+                        container.innerHTML = '<p class="loading p-4">Select a metric to view chart</p>';
+                        return;
+                    }
+                    try {
+                        const resp = await fetch(`/api/metrics?name=${encodeURIComponent(this.metricName)}&period=${this.period}${this.projectParam}`, { headers: this.headers });
+                        if (!resp.ok) return;
+                        const data = await resp.json();
+                        if (data.data.length === 0) {
+                            container.innerHTML = '<p class="loading p-4">No data for selected period</p>';
+                            if (this.metricChart) { this.metricChart.destroy(); this.metricChart = null; }
+                            return;
+                        }
+                        container.innerHTML = '';
+                        if (this.metricChart) this.metricChart.destroy();
+                        const ts = data.data.map(d => new Date(d.bucket).getTime() / 1000);
+                        const v  = data.data.map(d => d.avg);
+                        const c  = data.data.map(d => d.count);
+                        this.metricChart = new uPlot({
+                            width: container.clientWidth, height: 220,
+                            series: [
+                                {},
+                                { label: 'Avg Value', stroke: '#38bdf8', width: 2, fill: 'rgba(56,189,248,0.1)' },
+                                { label: 'Count', stroke: '#4ade80', width: 1, dash: [4, 4] },
+                            ],
+                            axes: [
+                                { stroke: '#64748b', grid: { stroke: '#1e293b' } },
+                                { stroke: '#64748b', grid: { stroke: '#1e293b' } },
+                            ],
+                            scales: { x: { time: true } },
+                        }, [ts, v, c], container);
+                    } catch (e) {
+                        console.error('Chart load failed:', e);
+                        container.innerHTML = '<p class="loading p-4">Failed to load chart</p>';
+                    }
+                },
 
-            metrics.forEach(m => {
-                const typeClass = `type-${m.type}`;
-                html += `<tr class="metric-row">`;
-                html += `<td class="py-2 pr-4 font-medium break-all">${escapeHtml(m.name)}</td>`;
-                html += `<td class="py-2 pr-4"><span class="type-badge ${typeClass}">${escapeHtml(m.type)}</span></td>`;
-                html += `<td class="py-2 pr-4 text-right text-gray-300">${m.count.toLocaleString()}</td>`;
-                html += `<td class="py-2 text-right text-gray-300">${m.total.toFixed(2)}</td>`;
-                html += `</tr>`;
-            });
+                async loadLatencyChart() {
+                    this.writeUrlState();
+                    const container = this.$refs.latencyChart;
+                    if (!container) return;
+                    if (!this.latencyName) {
+                        if (this.latencyChart) { this.latencyChart.destroy(); this.latencyChart = null; }
+                        container.innerHTML = '<p class="loading p-4">Select a histogram metric to view percentiles</p>';
+                        return;
+                    }
+                    try {
+                        const resp = await fetch(`/api/metrics?name=${encodeURIComponent(this.latencyName)}&period=${this.period}${this.projectParam}`, { headers: this.headers });
+                        if (!resp.ok) return;
+                        const data = await resp.json();
+                        if (data.data.length === 0) {
+                            container.innerHTML = '<p class="loading p-4">No data for selected period</p>';
+                            if (this.latencyChart) { this.latencyChart.destroy(); this.latencyChart = null; }
+                            return;
+                        }
+                        container.innerHTML = '';
+                        if (this.latencyChart) this.latencyChart.destroy();
+                        const ts  = data.data.map(d => new Date(d.bucket).getTime() / 1000);
+                        const p50 = data.data.map(d => d.p50);
+                        const p95 = data.data.map(d => d.p95);
+                        const p99 = data.data.map(d => d.p99);
+                        this.latencyChart = new uPlot({
+                            width: container.clientWidth, height: 220,
+                            series: [
+                                {},
+                                { label: 'p50', stroke: '#4ade80', width: 2 },
+                                { label: 'p95', stroke: '#facc15', width: 2 },
+                                { label: 'p99', stroke: '#f87171', width: 2 },
+                            ],
+                            axes: [
+                                { stroke: '#64748b', grid: { stroke: '#1e293b' } },
+                                { stroke: '#64748b', grid: { stroke: '#1e293b' } },
+                            ],
+                            scales: { x: { time: true } },
+                        }, [ts, p50, p95, p99], container);
+                    } catch (e) {
+                        console.error('Latency chart load failed:', e);
+                        container.innerHTML = '<p class="loading p-4">Failed to load chart</p>';
+                    }
+                },
 
-            html += '</tbody></table></div>';
-            container.innerHTML = html;
-        }
+                renderWebVitalsChart(timeseries) {
+                    const container = this.$refs.webVitalsChart;
+                    if (!container) return;
+                    if (timeseries.length === 0) {
+                        if (this.webVitalsChartInst) { this.webVitalsChartInst.destroy(); this.webVitalsChartInst = null; }
+                        return;
+                    }
+                    container.innerHTML = '';
+                    if (this.webVitalsChartInst) this.webVitalsChartInst.destroy();
+                    const ts  = timeseries.map(d => new Date(d.bucket).getTime() / 1000);
+                    const lcp = timeseries.map(d => d.lcp);
+                    const inp = timeseries.map(d => d.inp);
+                    const cls = timeseries.map(d => d.cls != null ? d.cls * 1000 : null);
+                    this.webVitalsChartInst = new uPlot({
+                        width: container.clientWidth, height: 220,
+                        series: [
+                            {},
+                            { label: 'LCP (ms)', stroke: '#38bdf8', width: 2 },
+                            { label: 'INP (ms)', stroke: '#c084fc', width: 2 },
+                            { label: 'CLS (x1000)', stroke: '#4ade80', width: 2, dash: [4, 4] },
+                        ],
+                        axes: [
+                            { stroke: '#64748b', grid: { stroke: '#1e293b' } },
+                            { stroke: '#64748b', grid: { stroke: '#1e293b' } },
+                        ],
+                        scales: { x: { time: true } },
+                    }, [ts, lcp, inp, cls], container);
+                },
 
-        let metricChartInstance = null;
-        async function loadMetricChart() {
-            const name = document.getElementById('metricSelect').value;
-            const container = document.getElementById('metricChart');
-            if (!name) {
-                container.innerHTML = '<p class="loading p-4">Select a metric to view chart</p>';
-                if (metricChartInstance) { metricChartInstance.destroy(); metricChartInstance = null; }
-                writeUrlState();
-                return;
-            }
-
-            const period = document.getElementById('periodSelect').value;
-            const projectParam = getProjectParam();
-            try {
-                const resp = await fetch(`/api/metrics?name=${encodeURIComponent(name)}&period=${period}${projectParam}`, { headers });
-                if (!resp.ok) return;
-                const data = await resp.json();
-
-                if (data.data.length === 0) {
-                    container.innerHTML = '<p class="loading p-4">No data for selected period</p>';
-                    if (metricChartInstance) { metricChartInstance.destroy(); metricChartInstance = null; }
-                    writeUrlState();
-                    return;
-                }
-
-                container.innerHTML = '';
-                if (metricChartInstance) metricChartInstance.destroy();
-
-                const timestamps = data.data.map(d => new Date(d.bucket).getTime() / 1000);
-                const values = data.data.map(d => d.avg);
-                const counts = data.data.map(d => d.count);
-
-                const opts = {
-                    width: container.clientWidth,
-                    height: 220,
-                    series: [
-                        {},
-                        { label: 'Avg Value', stroke: '#38bdf8', width: 2, fill: 'rgba(56,189,248,0.1)' },
-                        { label: 'Count', stroke: '#4ade80', width: 1, dash: [4, 4] },
-                    ],
-                    axes: [
-                        { stroke: '#64748b', grid: { stroke: '#1e293b' } },
-                        { stroke: '#64748b', grid: { stroke: '#1e293b' } },
-                    ],
-                    scales: { x: { time: true } },
-                };
-
-                metricChartInstance = new uPlot(opts, [timestamps, values, counts], container);
-                writeUrlState();
-            } catch (e) {
-                console.error('Chart load failed:', e);
-                container.innerHTML = '<p class="loading p-4">Failed to load chart</p>';
-            }
-        }
-
-        let latencyChartInstance = null;
-        async function loadLatencyChart() {
-            const name = document.getElementById('latencyMetricSelect').value;
-            const container = document.getElementById('latencyChart');
-            if (!name) {
-                container.innerHTML = '<p class="loading p-4">Select a histogram metric to view percentiles</p>';
-                if (latencyChartInstance) { latencyChartInstance.destroy(); latencyChartInstance = null; }
-                writeUrlState();
-                return;
-            }
-
-            const period = document.getElementById('periodSelect').value;
-            const projectParam = getProjectParam();
-            try {
-                const resp = await fetch(`/api/metrics?name=${encodeURIComponent(name)}&period=${period}${projectParam}`, { headers });
-                if (!resp.ok) return;
-                const data = await resp.json();
-
-                if (data.data.length === 0) {
-                    container.innerHTML = '<p class="loading p-4">No data for selected period</p>';
-                    if (latencyChartInstance) { latencyChartInstance.destroy(); latencyChartInstance = null; }
-                    writeUrlState();
-                    return;
-                }
-
-                container.innerHTML = '';
-                if (latencyChartInstance) latencyChartInstance.destroy();
-
-                const timestamps = data.data.map(d => new Date(d.bucket).getTime() / 1000);
-                const p50 = data.data.map(d => d.p50);
-                const p95 = data.data.map(d => d.p95);
-                const p99 = data.data.map(d => d.p99);
-
-                const opts = {
-                    width: container.clientWidth,
-                    height: 220,
-                    series: [
-                        {},
-                        { label: 'p50', stroke: '#4ade80', width: 2 },
-                        { label: 'p95', stroke: '#facc15', width: 2 },
-                        { label: 'p99', stroke: '#f87171', width: 2 },
-                    ],
-                    axes: [
-                        { stroke: '#64748b', grid: { stroke: '#1e293b' } },
-                        { stroke: '#64748b', grid: { stroke: '#1e293b' } },
-                    ],
-                    scales: { x: { time: true } },
-                };
-
-                latencyChartInstance = new uPlot(opts, [timestamps, p50, p95, p99], container);
-                writeUrlState();
-            } catch (e) {
-                console.error('Latency chart load failed:', e);
-                container.innerHTML = '<p class="loading p-4">Failed to load chart</p>';
-            }
-        }
-
-        function renderWebVitals(webVitals) {
-            const section = document.getElementById('webVitalsSection');
-            if (!webVitals) {
-                section.style.display = 'none';
-                return;
-            }
-            section.style.display = 'block';
-
-            // Summary cards
-            const summary = webVitals.summary || {};
-            renderVitalCard('lcp', summary.lcp, 'ms', v => v.toFixed(0));
-            renderVitalCard('inp', summary.inp, 'ms', v => v.toFixed(0));
-            renderVitalCard('cls', summary.cls, '', v => v.toFixed(3));
-
-            // Trend chart
-            renderWebVitalsChart(webVitals.timeseries || []);
-
-            // Page breakdown
-            renderPagePerformance(webVitals.by_page || []);
-        }
-
-        function renderVitalCard(id, data, unit, formatter) {
-            const valueEl = document.getElementById(id + 'Value');
-            const ratingEl = document.getElementById(id + 'Rating');
-
-            if (!data || data.avg === null) {
-                valueEl.textContent = '--';
-                ratingEl.textContent = '--';
-                ratingEl.className = 'vital-rating rating-unknown';
-                return;
-            }
-
-            valueEl.textContent = formatter(data.avg);
-            const rating = data.rating || 'unknown';
-            ratingEl.textContent = rating.replace('-', ' ');
-            ratingEl.className = 'vital-rating rating-' + rating;
-
-            // Color the value based on rating
-            const colors = { good: '#4ade80', 'needs-improvement': '#facc15', poor: '#f87171' };
-            valueEl.style.color = colors[rating] || '#38bdf8';
-        }
-
-        let webVitalsChartInstance = null;
-        function renderWebVitalsChart(timeseries) {
-            const container = document.getElementById('webVitalsChart');
-            if (timeseries.length === 0) {
-                container.innerHTML = '<p class="loading p-4">No Web Vitals data for selected period</p>';
-                if (webVitalsChartInstance) { webVitalsChartInstance.destroy(); webVitalsChartInstance = null; }
-                return;
-            }
-
-            container.innerHTML = '';
-            if (webVitalsChartInstance) webVitalsChartInstance.destroy();
-
-            const timestamps = timeseries.map(d => new Date(d.bucket).getTime() / 1000);
-            const lcp = timeseries.map(d => d.lcp);
-            const inp = timeseries.map(d => d.inp);
-            const cls = timeseries.map(d => d.cls != null ? d.cls * 1000 : null); // scale CLS for visibility
-
-            const opts = {
-                width: container.clientWidth,
-                height: 220,
-                series: [
-                    {},
-                    { label: 'LCP (ms)', stroke: '#38bdf8', width: 2 },
-                    { label: 'INP (ms)', stroke: '#c084fc', width: 2 },
-                    { label: 'CLS (x1000)', stroke: '#4ade80', width: 2, dash: [4, 4] },
-                ],
-                axes: [
-                    { stroke: '#64748b', grid: { stroke: '#1e293b' } },
-                    { stroke: '#64748b', grid: { stroke: '#1e293b' } },
-                ],
-                scales: { x: { time: true } },
+                // ─── Auto-refresh ────────────────────────────────────
+                setupAutoRefresh() {
+                    this.writeUrlState();
+                    if (this.autoRefreshTimer) {
+                        clearInterval(this.autoRefreshTimer);
+                        this.autoRefreshTimer = null;
+                    }
+                    const seconds = parseInt(this.refresh, 10);
+                    if (seconds > 0) {
+                        this.autoRefreshTimer = setInterval(() => this.loadDashboard(), seconds * 1000);
+                    }
+                },
             };
-
-            webVitalsChartInstance = new uPlot(opts, [timestamps, lcp, inp, cls], container);
         }
-
-        function renderPagePerformance(pages) {
-            const container = document.getElementById('pagePerformance');
-            if (pages.length === 0) {
-                container.innerHTML = '<p class="text-gray-500 p-4">No page data available</p>';
-                return;
-            }
-
-            let html = '<div class="overflow-x-auto"><table class="w-full text-sm">';
-            html += '<thead><tr class="text-gray-400 text-left border-b border-gray-700">';
-            html += '<th class="pb-2 pr-4">Page</th><th class="pb-2 pr-4 text-right">LCP (ms)</th>';
-            html += '<th class="pb-2 pr-4 text-right">INP (ms)</th><th class="pb-2 pr-4 text-right">CLS</th>';
-            html += '<th class="pb-2 text-right">Views</th>';
-            html += '</tr></thead><tbody>';
-
-            pages.forEach(p => {
-                html += '<tr class="metric-row">';
-                html += `<td class="py-2 pr-4 font-medium break-all">${escapeHtml(p.page || '/')}</td>`;
-                html += `<td class="py-2 pr-4 text-right ${vitalColor(p.lcp, 2500, 4000)}">${p.lcp != null ? p.lcp.toFixed(0) : '--'}</td>`;
-                html += `<td class="py-2 pr-4 text-right ${vitalColor(p.inp, 200, 500)}">${p.inp != null ? p.inp.toFixed(0) : '--'}</td>`;
-                html += `<td class="py-2 pr-4 text-right ${vitalColor(p.cls, 0.1, 0.25)}">${p.cls != null ? p.cls.toFixed(3) : '--'}</td>`;
-                html += `<td class="py-2 text-right text-gray-300">${(p.page_views || 0).toLocaleString()}</td>`;
-                html += '</tr>';
-            });
-
-            html += '</tbody></table></div>';
-            container.innerHTML = html;
-        }
-
-        function vitalColor(value, goodMax, poorMin) {
-            if (value == null) return 'text-gray-500';
-            if (value < goodMax) return 'text-green-400';
-            if (value < poorMin) return 'text-yellow-400';
-            return 'text-red-400';
-        }
-
-        function escapeHtml(str) {
-            const div = document.createElement('div');
-            div.textContent = str;
-            return div.innerHTML;
-        }
-
-        // Auto-refresh — refreshes dashboard data AND any visible charts
-        let autoRefreshTimer = null;
-
-        function setAutoRefresh() {
-            const seconds = parseInt(document.getElementById('refreshSelect').value);
-            const indicator = document.getElementById('refreshIndicator');
-
-            if (autoRefreshTimer) {
-                clearInterval(autoRefreshTimer);
-                autoRefreshTimer = null;
-            }
-
-            if (seconds > 0) {
-                autoRefreshTimer = setInterval(loadDashboard, seconds * 1000);
-                indicator.style.display = 'inline';
-            } else {
-                indicator.style.display = 'none';
-            }
-            writeUrlState();
-        }
-
-        // Wire up listeners
-        document.getElementById('projectSelect').addEventListener('change', loadDashboard);
-        document.getElementById('periodSelect').addEventListener('change', loadDashboard);
-        document.getElementById('refreshSelect').addEventListener('change', setAutoRefresh);
-        document.getElementById('manualRefresh').addEventListener('click', loadDashboard);
-        document.getElementById('metricSelect').addEventListener('change', loadMetricChart);
-        document.getElementById('latencyMetricSelect').addEventListener('change', loadLatencyChart);
-
-        window.addEventListener('popstate', () => {
-            readUrlState();
-            setAutoRefresh();
-            loadDashboard();
-        });
-
-        // Initial load
-        readUrlState();
-        setAutoRefresh();
-        loadDashboard();
     </script>
 </body>
 </html>
