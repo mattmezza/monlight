@@ -121,15 +121,16 @@ pub fn handleConnection(conn: net.Server.Connection, api_key: []const u8, limite
     }
 
     // Web UI + static assets (no auth required)
-    if (std.mem.eql(u8, target, "/") or std.mem.eql(u8, target, "/index.html")) {
+    const path = if (std.mem.indexOfScalar(u8, target, '?')) |qi| target[0..qi] else target;
+    if (std.mem.eql(u8, path, "/") or std.mem.eql(u8, path, "/index.html")) {
         web_ui.serveIndex(&request);
         return;
     }
-    if (std.mem.eql(u8, target, "/tailwind.css")) {
+    if (std.mem.eql(u8, path, "/tailwind.css")) {
         web_ui.serveTailwindCss(&request);
         return;
     }
-    if (std.mem.eql(u8, target, "/alpine.js")) {
+    if (std.mem.eql(u8, path, "/alpine.js")) {
         web_ui.serveAlpineJs(&request);
         return;
     }
