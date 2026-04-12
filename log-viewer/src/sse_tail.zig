@@ -3,6 +3,7 @@ const net = std.net;
 const sqlite = @import("sqlite");
 const database = @import("database.zig");
 const log_query = @import("log_query.zig");
+const log_level = @import("log_level.zig");
 const log = std.log;
 
 /// Maximum concurrent SSE connections allowed.
@@ -24,6 +25,8 @@ var active_connections = std.atomic.Value(u32).init(0);
 pub const SseParams = struct {
     container: ?[]const u8 = null,
     level: ?[]const u8 = null,
+    /// Internal buffer for decoded level value.
+    level_buf: [32]u8 = undefined,
 };
 
 /// Parse SSE filter parameters from a URL target string.
@@ -42,7 +45,13 @@ pub fn parseSseParams(target: []const u8) SseParams {
         if (std.mem.eql(u8, key, "container")) {
             if (value.len > 0) params.container = value;
         } else if (std.mem.eql(u8, key, "level")) {
-            if (value.len > 0) params.level = value;
+            if (value.len > 0) {
+                if (value.len <= params.level_buf.len) {
+                    params.level = log_query.percentDecode(&params.level_buf, value);
+                } else {
+                    params.level = value;
+                }
+            }
         }
     }
 
@@ -215,8 +224,16 @@ fn pollNewEntries(
     if (container_filter != null) {
         try sql_writer.writeAll(" AND container = ?");
     }
-    if (level_filter != null) {
-        try sql_writer.writeAll(" AND level = ?");
+    if (level_filter) |level_val| {
+        if (level_val.len > 2 and std.mem.startsWith(u8, level_val, ">=")) {
+            const base_level = level_val[2..];
+            if (log_level.levelsAtOrAbove(base_level)) |in_clause| {
+                try sql_writer.writeAll(" AND level IN ");
+                try sql_writer.writeAll(in_clause);
+            }
+        } else {
+            try sql_writer.writeAll(" AND level = ?");
+        }
     }
 
     try sql_writer.writeAll(" ORDER BY id ASC LIMIT 100");
@@ -235,9 +252,11 @@ fn pollNewEntries(
         try stmt.bindText(bind_idx, container);
         bind_idx += 1;
     }
-    if (level_filter) |level| {
-        try stmt.bindText(bind_idx, level);
-        bind_idx += 1;
+    if (level_filter) |level_val| {
+        if (!(level_val.len > 2 and std.mem.startsWith(u8, level_val, ">="))) {
+            try stmt.bindText(bind_idx, level_val);
+            bind_idx += 1;
+        }
     }
 
     var new_last_id: i64 = last_id;

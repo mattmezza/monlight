@@ -124,8 +124,25 @@ fn extractColonPattern(message: []const u8) ?Level {
     return parseLevel(candidate);
 }
 
+/// Severity order for hierarchical filtering.
+const severity_order = [_]Level{ .DEBUG, .INFO, .WARNING, .ERROR, .CRITICAL };
+
+/// Return the SQL IN clause contents for levels at or above the given level.
+/// E.g. levelsAtOrAbove("WARNING") → "('WARNING','ERROR','CRITICAL')"
+/// Returns null if the level string is not recognized.
+pub fn levelsAtOrAbove(level_str: []const u8) ?[]const u8 {
+    const level = parseLevel(level_str) orelse return null;
+    return switch (level) {
+        .DEBUG => "('DEBUG','INFO','WARNING','ERROR','CRITICAL')",
+        .INFO => "('INFO','WARNING','ERROR','CRITICAL')",
+        .WARNING => "('WARNING','ERROR','CRITICAL')",
+        .ERROR => "('ERROR','CRITICAL')",
+        .CRITICAL => "('CRITICAL')",
+    };
+}
+
 /// Parse a level string (case-insensitive) to a Level enum.
-fn parseLevel(s: []const u8) ?Level {
+pub fn parseLevel(s: []const u8) ?Level {
     if (s.len < 3 or s.len > 8) return null;
 
     // Convert to uppercase for comparison
@@ -185,6 +202,21 @@ test "default to INFO for stdout when no level detected" {
 test "default to ERROR for stderr when no level detected" {
     try std.testing.expectEqual(Level.ERROR, extract("Just a plain message", "stderr"));
     try std.testing.expectEqual(Level.ERROR, extract("Traceback (most recent call last):", "stderr"));
+}
+
+test "levelsAtOrAbove returns correct IN clauses" {
+    try std.testing.expectEqualStrings("('DEBUG','INFO','WARNING','ERROR','CRITICAL')", levelsAtOrAbove("DEBUG").?);
+    try std.testing.expectEqualStrings("('INFO','WARNING','ERROR','CRITICAL')", levelsAtOrAbove("INFO").?);
+    try std.testing.expectEqualStrings("('WARNING','ERROR','CRITICAL')", levelsAtOrAbove("WARNING").?);
+    try std.testing.expectEqualStrings("('ERROR','CRITICAL')", levelsAtOrAbove("ERROR").?);
+    try std.testing.expectEqualStrings("('CRITICAL')", levelsAtOrAbove("CRITICAL").?);
+    try std.testing.expect(levelsAtOrAbove("unknown") == null);
+}
+
+test "levelsAtOrAbove is case insensitive" {
+    try std.testing.expectEqualStrings("('WARNING','ERROR','CRITICAL')", levelsAtOrAbove("warning").?);
+    try std.testing.expectEqualStrings("('WARNING','ERROR','CRITICAL')", levelsAtOrAbove("warn").?);
+    try std.testing.expectEqualStrings("('INFO','WARNING','ERROR','CRITICAL')", levelsAtOrAbove("info").?);
 }
 
 test "parseLevel handles case insensitivity" {
