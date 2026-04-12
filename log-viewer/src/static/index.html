@@ -61,12 +61,17 @@
       </div>
       <div>
         <label class="block text-xs text-gray-400 mb-1">Time range</label>
-        <select x-model="time" class="w-full lg:w-auto bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded px-3 py-1.5 focus:outline-none focus:border-blue-500">
+        <input type="text" x-model="time" list="time-presets" placeholder="e.g. 5m, 1h, 7d"
+          class="w-full lg:w-[120px] bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded px-3 py-1.5 focus:outline-none focus:border-blue-500">
+        <datalist id="time-presets">
           <option value="">All time</option>
+          <option value="30s">Last 30 seconds</option>
+          <option value="5m">Last 5 minutes</option>
           <option value="1h">Last 1 hour</option>
           <option value="24h">Last 24 hours</option>
           <option value="7d">Last 7 days</option>
-        </select>
+          <option value="30d">Last 30 days</option>
+        </datalist>
       </div>
       <div>
         <label class="block text-xs text-gray-400 mb-1">Auto-refresh</label>
@@ -259,11 +264,16 @@
 
         get sinceTimestamp() {
           if (!this.time) return null;
+          const m = this.time.match(/^(\d+)([smhd])$/);
+          if (!m) return null;
+          const n = parseInt(m[1], 10);
+          const unit = m[2];
           const now = new Date();
-          switch (this.time) {
-            case '1h': now.setHours(now.getHours() - 1); break;
-            case '24h': now.setDate(now.getDate() - 1); break;
-            case '7d': now.setDate(now.getDate() - 7); break;
+          switch (unit) {
+            case 's': now.setSeconds(now.getSeconds() - n); break;
+            case 'm': now.setMinutes(now.getMinutes() - n); break;
+            case 'h': now.setHours(now.getHours() - n); break;
+            case 'd': now.setDate(now.getDate() - n); break;
             default: return null;
           }
           return now.toISOString();

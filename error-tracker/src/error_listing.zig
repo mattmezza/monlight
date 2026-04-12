@@ -7,6 +7,7 @@ pub const ListParams = struct {
     project: ?[]const u8 = null,
     source: ?[]const u8 = null, // "browser", "server", or null (all)
     session_id: ?[]const u8 = null, // filter by session_id in occurrence extra JSON
+    since: ?[]const u8 = null, // ISO 8601 timestamp to filter last_seen >=
     resolved: bool = false,
     limit: u32 = 50,
     offset: u32 = 0,
@@ -42,6 +43,8 @@ pub fn parseQueryParams(target: []const u8) ListParams {
             } else {
                 params.resolved = false;
             }
+        } else if (std.mem.eql(u8, key, "since")) {
+            if (value.len > 0 and value.len <= 30) params.since = value;
         } else if (std.mem.eql(u8, key, "limit")) {
             const parsed = std.fmt.parseInt(u32, value, 10) catch continue;
             params.limit = if (parsed > 200) 200 else if (parsed == 0) 50 else parsed;
@@ -104,6 +107,12 @@ fn buildWhereClause(params: *const ListParams) WhereResult {
         result.len += frag.len;
         result.bind_count += 1;
     }
+    if (params.since != null) {
+        const frag = " AND last_seen >= ?";
+        @memcpy(result.buf[result.len .. result.len + frag.len], frag);
+        result.len += frag.len;
+        result.bind_count += 1;
+    }
 
     return result;
 }
@@ -124,6 +133,10 @@ fn bindFilterParams(stmt: sqlite.Statement, params: *const ListParams) !void {
     }
     if (params.session_id) |sid| {
         try stmt.bindText(pos, sid);
+        pos += 1;
+    }
+    if (params.since) |since| {
+        try stmt.bindText(pos, since);
         pos += 1;
     }
 }

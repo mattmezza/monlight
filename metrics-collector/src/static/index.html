@@ -54,14 +54,16 @@
                         <option :value="p" x-text="p"></option>
                     </template>
                 </select>
-                <select x-model="period" class="w-full sm:w-auto">
+                <input type="text" x-model.debounce.500ms="period" list="period-presets" placeholder="e.g. 5m, 1h, 7d"
+                    class="w-full sm:w-[130px]">
+                <datalist id="period-presets">
                     <option value="1m">Last 1 minute</option>
                     <option value="5m">Last 5 minutes</option>
                     <option value="1h">Last 1 hour</option>
                     <option value="24h">Last 24 hours</option>
                     <option value="7d">Last 7 days</option>
                     <option value="30d">Last 30 days</option>
-                </select>
+                </datalist>
                 <select x-model="refresh" class="w-full sm:w-auto">
                     <option value="0">Auto-refresh: off</option>
                     <option value="5">Every 5s</option>
