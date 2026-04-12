@@ -3,6 +3,7 @@ const net = std.net;
 const sqlite = @import("sqlite");
 const database = @import("database.zig");
 const log_query = @import("log_query.zig");
+const log_level = @import("log_level.zig");
 const log = std.log;
 
 /// Maximum concurrent SSE connections allowed.
@@ -49,12 +50,43 @@ pub fn parseSseParams(target: []const u8) SseParams {
     return params;
 }
 
-/// Context passed to the SSE thread.
+/// Context passed to the SSE thread. Owns copies of filter strings
+/// so they outlive the HTTP request that spawned the thread.
 const SseContext = struct {
     stream: net.Stream,
     db_path: [*:0]const u8,
-    container: ?[]const u8,
-    level: ?[]const u8,
+    container_buf: [128]u8 = undefined,
+    container_len: u8 = 0,
+    level_buf: [32]u8 = undefined,
+    level_len: u8 = 0,
+
+    fn container(self: *const SseContext) ?[]const u8 {
+        if (self.container_len == 0) return null;
+        return self.container_buf[0..self.container_len];
+    }
+
+    fn level(self: *const SseContext) ?[]const u8 {
+        if (self.level_len == 0) return null;
+        return self.level_buf[0..self.level_len];
+    }
+
+    fn init(stream: net.Stream, db_path: [*:0]const u8, params: SseParams) SseContext {
+        var ctx = SseContext{
+            .stream = stream,
+            .db_path = db_path,
+        };
+        if (params.container) |c| {
+            const len: u8 = @intCast(@min(c.len, ctx.container_buf.len));
+            @memcpy(ctx.container_buf[0..len], c[0..len]);
+            ctx.container_len = len;
+        }
+        if (params.level) |l| {
+            // Percent-decode the level value into our owned buffer
+            const decoded = log_query.percentDecode(&ctx.level_buf, l);
+            ctx.level_len = @intCast(decoded.len);
+        }
+        return ctx;
+    }
 };
 
 /// Try to start an SSE tail connection. Returns false if too many connections.
@@ -81,12 +113,9 @@ pub fn tryStartTail(
     }
 
     // Spawn thread to handle the SSE stream
-    const thread = std.Thread.spawn(.{}, sseThread, .{SseContext{
-        .stream = stream,
-        .db_path = db_path,
-        .container = params.container,
-        .level = params.level,
-    }}) catch {
+    const thread = std.Thread.spawn(.{}, sseThread, .{
+        SseContext.init(stream, db_path, params),
+    }) catch {
         // Failed to spawn thread, decrement counter and return failure
         _ = active_connections.fetchSub(1, .release);
         return false;
@@ -164,7 +193,7 @@ fn sseThread(ctx: SseContext) void {
         }
 
         // Poll for new entries
-        const new_last_id = pollNewEntries(&db, last_id, ctx.container, ctx.level, ctx.stream) catch |err| {
+        const new_last_id = pollNewEntries(&db, last_id, ctx.container(), ctx.level(), ctx.stream) catch |err| {
             switch (err) {
                 error.BrokenPipe => return, // Client disconnected
                 else => {
@@ -215,8 +244,19 @@ fn pollNewEntries(
     if (container_filter != null) {
         try sql_writer.writeAll(" AND container = ?");
     }
-    if (level_filter != null) {
-        try sql_writer.writeAll(" AND level = ?");
+    if (level_filter) |level_val| {
+        if (log_level.isHierarchical(level_val)) {
+            const base = log_level.hierarchicalBase(level_val);
+            // in_clause is a compile-time string literal, safe to inline
+            if (log_level.levelsAtOrAbove(base)) |in_clause| {
+                try sql_writer.writeAll(" AND level IN ");
+                try sql_writer.writeAll(in_clause);
+            } else {
+                try sql_writer.writeAll(" AND level = ?");
+            }
+        } else {
+            try sql_writer.writeAll(" AND level = ?");
+        }
     }
 
     try sql_writer.writeAll(" ORDER BY id ASC LIMIT 100");
@@ -235,9 +275,11 @@ fn pollNewEntries(
         try stmt.bindText(bind_idx, container);
         bind_idx += 1;
     }
-    if (level_filter) |level| {
-        try stmt.bindText(bind_idx, level);
-        bind_idx += 1;
+    if (level_filter) |level_val| {
+        if (log_level.needsLevelBind(level_val)) {
+            try stmt.bindText(bind_idx, level_val);
+            bind_idx += 1;
+        }
     }
 
     var new_last_id: i64 = last_id;
@@ -305,6 +347,24 @@ test "parseSseParams handles partial params" {
     const params = parseSseParams("/api/logs/tail?level=WARN");
     try std.testing.expect(params.container == null);
     try std.testing.expectEqualStrings("WARN", params.level.?);
+}
+
+test "SseContext.init decodes percent-encoded hierarchical level" {
+    const params = parseSseParams("/api/logs/tail?container=web&level=%3E%3DWARNING");
+    // parseSseParams stores raw value
+    try std.testing.expectEqualStrings("%3E%3DWARNING", params.level.?);
+
+    // SseContext.init copies and decodes into owned buffers
+    const ctx = SseContext.init(undefined, undefined, params);
+    try std.testing.expectEqualStrings(">=WARNING", ctx.level().?);
+    try std.testing.expectEqualStrings("web", ctx.container().?);
+}
+
+test "SseContext.init handles null filters" {
+    const params = parseSseParams("/api/logs/tail");
+    const ctx = SseContext.init(undefined, undefined, params);
+    try std.testing.expect(ctx.level() == null);
+    try std.testing.expect(ctx.container() == null);
 }
 
 test "getMaxId returns 0 for empty database" {

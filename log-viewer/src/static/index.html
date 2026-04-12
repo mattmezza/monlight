@@ -43,11 +43,20 @@
         <label class="block text-xs text-gray-400 mb-1">Level</label>
         <select x-model="level" class="w-full lg:w-auto bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded px-3 py-1.5 focus:outline-none focus:border-blue-500">
           <option value="">All levels</option>
-          <option value="DEBUG">DEBUG</option>
-          <option value="INFO">INFO</option>
-          <option value="WARNING">WARNING</option>
-          <option value="ERROR">ERROR</option>
-          <option value="CRITICAL">CRITICAL</option>
+          <optgroup label="Exact match">
+            <option value="DEBUG">DEBUG</option>
+            <option value="INFO">INFO</option>
+            <option value="WARNING">WARNING</option>
+            <option value="ERROR">ERROR</option>
+            <option value="CRITICAL">CRITICAL</option>
+          </optgroup>
+          <optgroup label="And above">
+            <option value=">=DEBUG">&ge; DEBUG</option>
+            <option value=">=INFO">&ge; INFO</option>
+            <option value=">=WARNING">&ge; WARNING</option>
+            <option value=">=ERROR">&ge; ERROR</option>
+            <!-- >=CRITICAL omitted: equivalent to exact CRITICAL match -->
+          </optgroup>
         </select>
       </div>
       <div>

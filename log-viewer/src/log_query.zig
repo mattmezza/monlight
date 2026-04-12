@@ -1,6 +1,42 @@
 const std = @import("std");
 const sqlite = @import("sqlite");
 const log = std.log;
+const log_level = @import("log_level.zig");
+
+/// Percent-decode a URL-encoded string in place (result is always <= input length).
+/// Returns the decoded slice. Only supports ASCII percent-encoded sequences.
+pub fn percentDecode(buf: []u8, input: []const u8) []const u8 {
+    var i: usize = 0;
+    var out: usize = 0;
+    while (i < input.len) {
+        if (input[i] == '%' and i + 2 < input.len) {
+            const hi = std.fmt.charToDigit(input[i + 1], 16) catch {
+                buf[out] = input[i];
+                out += 1;
+                i += 1;
+                continue;
+            };
+            const lo = std.fmt.charToDigit(input[i + 2], 16) catch {
+                buf[out] = input[i];
+                out += 1;
+                i += 1;
+                continue;
+            };
+            buf[out] = (hi << 4) | lo;
+            out += 1;
+            i += 3;
+        } else if (input[i] == '+') {
+            buf[out] = ' ';
+            out += 1;
+            i += 1;
+        } else {
+            buf[out] = input[i];
+            out += 1;
+            i += 1;
+        }
+    }
+    return buf[0..out];
+}
 
 /// Query parameters for the log listing endpoint.
 pub const LogQueryParams = struct {
@@ -11,6 +47,8 @@ pub const LogQueryParams = struct {
     until: ?[]const u8 = null,
     limit: u32 = 100,
     offset: u32 = 0,
+    /// Internal buffer for decoded level value.
+    level_buf: [32]u8 = undefined,
 };
 
 /// Parse query parameters from a URL target string.
@@ -29,7 +67,13 @@ pub fn parseQueryParams(target: []const u8) LogQueryParams {
         if (std.mem.eql(u8, key, "container")) {
             if (value.len > 0) params.container = value;
         } else if (std.mem.eql(u8, key, "level")) {
-            if (value.len > 0) params.level = value;
+            if (value.len > 0) {
+                if (value.len <= params.level_buf.len) {
+                    params.level = percentDecode(&params.level_buf, value);
+                } else {
+                    params.level = value;
+                }
+            }
         } else if (std.mem.eql(u8, key, "search") or std.mem.eql(u8, key, "q")) {
             if (value.len > 0) params.search = value;
         } else if (std.mem.eql(u8, key, "since")) {
@@ -83,12 +127,32 @@ pub fn queryLogs(db: *sqlite.Database, params: LogQueryParams) ![]const u8 {
         where_added = true;
     }
 
-    if (params.level != null) {
+    if (params.level) |level_val| {
         const conj = if (where_added) " AND" else " WHERE";
-        try sql_writer.writeAll(conj);
-        try sql_writer.writeAll(" level = ?");
-        try count_writer.writeAll(conj);
-        try count_writer.writeAll(" level = ?");
+        if (log_level.isHierarchical(level_val)) {
+            const base = log_level.hierarchicalBase(level_val);
+            // in_clause is a compile-time string literal from a switch on Level enum,
+            // not derived from user input — safe to inline in SQL.
+            if (log_level.levelsAtOrAbove(base)) |in_clause| {
+                try sql_writer.writeAll(conj);
+                try sql_writer.writeAll(" level IN ");
+                try sql_writer.writeAll(in_clause);
+                try count_writer.writeAll(conj);
+                try count_writer.writeAll(" level IN ");
+                try count_writer.writeAll(in_clause);
+            } else {
+                // Unrecognized level after >=, treat as exact match on full value
+                try sql_writer.writeAll(conj);
+                try sql_writer.writeAll(" level = ?");
+                try count_writer.writeAll(conj);
+                try count_writer.writeAll(" level = ?");
+            }
+        } else {
+            try sql_writer.writeAll(conj);
+            try sql_writer.writeAll(" level = ?");
+            try count_writer.writeAll(conj);
+            try count_writer.writeAll(" level = ?");
+        }
         where_added = true;
     }
 
@@ -131,9 +195,11 @@ pub fn queryLogs(db: *sqlite.Database, params: LogQueryParams) ![]const u8 {
         try count_stmt.bindText(bind_idx, container);
         bind_idx += 1;
     }
-    if (params.level) |level| {
-        try count_stmt.bindText(bind_idx, level);
-        bind_idx += 1;
+    if (params.level) |level_val| {
+        if (log_level.needsLevelBind(level_val)) {
+            try count_stmt.bindText(bind_idx, level_val);
+            bind_idx += 1;
+        }
     }
     if (params.since) |since| {
         try count_stmt.bindText(bind_idx, since);
@@ -165,9 +231,13 @@ pub fn queryLogs(db: *sqlite.Database, params: LogQueryParams) ![]const u8 {
         try stmt.bindText(bind_idx, container);
         bind_idx += 1;
     }
-    if (params.level) |level| {
-        try stmt.bindText(bind_idx, level);
-        bind_idx += 1;
+    if (params.level) |level_val| {
+        const is_hier = log_level.isHierarchical(level_val);
+        const hier_recognized = is_hier and log_level.levelsAtOrAbove(log_level.hierarchicalBase(level_val)) != null;
+        if (!hier_recognized) {
+            try stmt.bindText(bind_idx, level_val);
+            bind_idx += 1;
+        }
     }
     if (params.since) |since| {
         try stmt.bindText(bind_idx, since);
@@ -450,6 +520,11 @@ test "parseQueryParams uses defaults for missing params" {
     try std.testing.expectEqual(@as(u32, 0), params.offset);
 }
 
+test "parseQueryParams decodes percent-encoded level >=WARNING" {
+    const params = parseQueryParams("/api/logs?level=%3E%3DWARNING");
+    try std.testing.expectEqualStrings(">=WARNING", params.level.?);
+}
+
 test "parseQueryParams clamps limit to max 500" {
     const params = parseQueryParams("/api/logs?limit=1000");
     try std.testing.expectEqual(@as(u32, 500), params.limit);
@@ -531,6 +606,149 @@ test "queryLogs filters by level" {
 
     try std.testing.expect(std.mem.indexOf(u8, result, "\"total\": 1") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "error message") != null);
+}
+
+test "queryLogs hierarchical level filter >=WARNING" {
+    const database = @import("database.zig");
+    const ingestion = @import("ingestion.zig");
+    var db = try database.init(":memory:");
+    defer db.close();
+
+    try ingestion.insertLogEntry(&db, &.{
+        .timestamp = "2025-01-20T10:00:00Z",
+        .container = "web",
+        .stream = "stdout",
+        .level = "DEBUG",
+        .message = "debug message",
+        .raw = null,
+    });
+    try ingestion.insertLogEntry(&db, &.{
+        .timestamp = "2025-01-20T10:01:00Z",
+        .container = "web",
+        .stream = "stdout",
+        .level = "INFO",
+        .message = "info message",
+        .raw = null,
+    });
+    try ingestion.insertLogEntry(&db, &.{
+        .timestamp = "2025-01-20T10:02:00Z",
+        .container = "web",
+        .stream = "stdout",
+        .level = "WARNING",
+        .message = "warning message",
+        .raw = null,
+    });
+    try ingestion.insertLogEntry(&db, &.{
+        .timestamp = "2025-01-20T10:03:00Z",
+        .container = "web",
+        .stream = "stderr",
+        .level = "ERROR",
+        .message = "error message",
+        .raw = null,
+    });
+    try ingestion.insertLogEntry(&db, &.{
+        .timestamp = "2025-01-20T10:04:00Z",
+        .container = "web",
+        .stream = "stderr",
+        .level = "CRITICAL",
+        .message = "critical message",
+        .raw = null,
+    });
+
+    const params = LogQueryParams{ .level = ">=WARNING" };
+    const result = try queryLogs(&db, params);
+    defer std.heap.page_allocator.free(result);
+
+    // Should match WARNING + ERROR + CRITICAL = 3
+    try std.testing.expect(std.mem.indexOf(u8, result, "\"total\": 3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "warning message") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "error message") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "critical message") != null);
+    // Should NOT contain debug or info
+    try std.testing.expect(std.mem.indexOf(u8, result, "debug message") == null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "info message") == null);
+}
+
+test "queryLogs hierarchical level filter >=ERROR" {
+    const database = @import("database.zig");
+    const ingestion = @import("ingestion.zig");
+    var db = try database.init(":memory:");
+    defer db.close();
+
+    try ingestion.insertLogEntry(&db, &.{
+        .timestamp = "2025-01-20T10:00:00Z",
+        .container = "web",
+        .stream = "stdout",
+        .level = "INFO",
+        .message = "info message",
+        .raw = null,
+    });
+    try ingestion.insertLogEntry(&db, &.{
+        .timestamp = "2025-01-20T10:01:00Z",
+        .container = "web",
+        .stream = "stderr",
+        .level = "ERROR",
+        .message = "error message",
+        .raw = null,
+    });
+    try ingestion.insertLogEntry(&db, &.{
+        .timestamp = "2025-01-20T10:02:00Z",
+        .container = "web",
+        .stream = "stderr",
+        .level = "CRITICAL",
+        .message = "critical message",
+        .raw = null,
+    });
+
+    const params = LogQueryParams{ .level = ">=ERROR" };
+    const result = try queryLogs(&db, params);
+    defer std.heap.page_allocator.free(result);
+
+    try std.testing.expect(std.mem.indexOf(u8, result, "\"total\": 2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "error message") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "critical message") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "info message") == null);
+}
+
+test "queryLogs hierarchical level filter combined with container" {
+    const database = @import("database.zig");
+    const ingestion = @import("ingestion.zig");
+    var db = try database.init(":memory:");
+    defer db.close();
+
+    try ingestion.insertLogEntry(&db, &.{
+        .timestamp = "2025-01-20T10:00:00Z",
+        .container = "web",
+        .stream = "stderr",
+        .level = "ERROR",
+        .message = "web error",
+        .raw = null,
+    });
+    try ingestion.insertLogEntry(&db, &.{
+        .timestamp = "2025-01-20T10:01:00Z",
+        .container = "api",
+        .stream = "stderr",
+        .level = "ERROR",
+        .message = "api error",
+        .raw = null,
+    });
+    try ingestion.insertLogEntry(&db, &.{
+        .timestamp = "2025-01-20T10:02:00Z",
+        .container = "web",
+        .stream = "stdout",
+        .level = "INFO",
+        .message = "web info",
+        .raw = null,
+    });
+
+    const params = LogQueryParams{ .level = ">=ERROR", .container = "web" };
+    const result = try queryLogs(&db, params);
+    defer std.heap.page_allocator.free(result);
+
+    try std.testing.expect(std.mem.indexOf(u8, result, "\"total\": 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "web error") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "api error") == null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "web info") == null);
 }
 
 test "queryLogs full-text search works" {
