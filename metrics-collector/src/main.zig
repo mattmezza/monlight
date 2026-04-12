@@ -275,7 +275,8 @@ fn handleApiDashboard(request: *std.http.Server.Request, db: *sqlite.Database) v
     // Parse period from query params (default: 24h)
     const target = request.head.target;
     const period = parseDashboardPeriod(target);
-    const offset = periodToOffset(period);
+    var offset_buf: [48]u8 = undefined;
+    const offset = periodToOffset(period, &offset_buf);
     const project = parseDashboardProject(target);
 
     var response = std.ArrayList(u8){};
@@ -291,6 +292,16 @@ fn handleApiDashboard(request: *std.http.Server.Request, db: *sqlite.Database) v
     sendJsonResponse(request, .ok, response.items) catch {};
 }
 
+/// Parse a period string like "30s", "5m", "1h", "24h", "7d" into (number, unit).
+fn parsePeriod(p: []const u8) ?struct { n: u32, unit: u8 } {
+    if (p.len < 2 or p.len > 10) return null;
+    const unit = p[p.len - 1];
+    if (unit != 's' and unit != 'm' and unit != 'h' and unit != 'd') return null;
+    const n = std.fmt.parseInt(u32, p[0 .. p.len - 1], 10) catch return null;
+    if (n == 0) return null;
+    return .{ .n = n, .unit = unit };
+}
+
 fn parseDashboardPeriod(target: []const u8) []const u8 {
     const query_start = std.mem.indexOf(u8, target, "?") orelse return "24h";
     const query_string = target[query_start + 1 ..];
@@ -300,12 +311,7 @@ fn parseDashboardPeriod(target: []const u8) []const u8 {
         const key = pair[0..eq_pos];
         const value = pair[eq_pos + 1 ..];
         if (std.mem.eql(u8, key, "period")) {
-            if (std.mem.eql(u8, value, "1m") or std.mem.eql(u8, value, "5m") or
-                std.mem.eql(u8, value, "1h") or std.mem.eql(u8, value, "24h") or
-                std.mem.eql(u8, value, "7d") or std.mem.eql(u8, value, "30d"))
-            {
-                return value;
-            }
+            if (parsePeriod(value) != null) return value;
         }
     }
     return "24h";
@@ -326,14 +332,29 @@ fn parseDashboardProject(target: []const u8) ?[]const u8 {
     return null;
 }
 
-fn periodToOffset(period: []const u8) []const u8 {
-    if (std.mem.eql(u8, period, "1m")) return "-1 minutes";
-    if (std.mem.eql(u8, period, "5m")) return "-5 minutes";
-    if (std.mem.eql(u8, period, "1h")) return "-1 hours";
-    if (std.mem.eql(u8, period, "24h")) return "-24 hours";
-    if (std.mem.eql(u8, period, "7d")) return "-7 days";
-    if (std.mem.eql(u8, period, "30d")) return "-30 days";
-    return "-24 hours";
+fn periodToOffset(period: []const u8, buf: *[48]u8) []const u8 {
+    const parsed = parsePeriod(period) orelse {
+        const fb = "-24 hours";
+        @memcpy(buf[0..fb.len], fb);
+        return buf[0..fb.len];
+    };
+    const unit_word: []const u8 = switch (parsed.unit) {
+        's' => " seconds",
+        'm' => " minutes",
+        'h' => " hours",
+        'd' => " days",
+        else => " hours",
+    };
+    const dash = "-";
+    @memcpy(buf[0..1], dash);
+    const num_slice = std.fmt.bufPrint(buf[1..], "{d}", .{parsed.n}) catch {
+        const fb = "-24 hours";
+        @memcpy(buf[0..fb.len], fb);
+        return buf[0..fb.len];
+    };
+    const num_end = 1 + num_slice.len;
+    @memcpy(buf[num_end .. num_end + unit_word.len], unit_word);
+    return buf[0 .. num_end + unit_word.len];
 }
 
 fn buildDashboardJson(
@@ -552,11 +573,18 @@ fn buildDashboardJson(
             // For each vital, bucket by time and compute approximate p75
             try writer.writeAll(", \"timeseries\": [");
             {
-                // Determine bucket format based on period
-                const bucket_fmt = if (std.mem.eql(u8, period, "1h") or std.mem.eql(u8, period, "24h"))
-                    "%Y-%m-%dT%H:%M:00Z"
-                else
-                    "%Y-%m-%dT%H:00:00Z";
+                // Determine bucket format based on period (minute buckets for <=24h)
+                const bucket_fmt = blk: {
+                    const pp = parsePeriod(period) orelse break :blk "%Y-%m-%dT%H:%M:00Z";
+                    const total_s: u64 = switch (pp.unit) {
+                        's' => pp.n,
+                        'm' => @as(u64, pp.n) * 60,
+                        'h' => @as(u64, pp.n) * 3600,
+                        'd' => @as(u64, pp.n) * 86400,
+                        else => 86400,
+                    };
+                    break :blk if (total_s <= 86400) "%Y-%m-%dT%H:%M:00Z" else "%Y-%m-%dT%H:00:00Z";
+                };
 
                 var ts_buf: [896]u8 = undefined;
                 const ts_p1 = "SELECT strftime('";

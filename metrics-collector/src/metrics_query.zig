@@ -46,13 +46,18 @@ pub fn parseQueryParams(target: []const u8) QueryParams {
     return params;
 }
 
+/// Parse a period string like "30s", "5m", "1h", "24h", "7d" into (number, unit).
+fn parsePeriod(p: []const u8) ?struct { n: u32, unit: u8 } {
+    if (p.len < 2 or p.len > 10) return null;
+    const unit = p[p.len - 1];
+    if (unit != 's' and unit != 'm' and unit != 'h' and unit != 'd') return null;
+    const n = std.fmt.parseInt(u32, p[0 .. p.len - 1], 10) catch return null;
+    if (n == 0) return null;
+    return .{ .n = n, .unit = unit };
+}
+
 fn isValidPeriod(p: []const u8) bool {
-    return std.mem.eql(u8, p, "1m") or
-        std.mem.eql(u8, p, "5m") or
-        std.mem.eql(u8, p, "1h") or
-        std.mem.eql(u8, p, "24h") or
-        std.mem.eql(u8, p, "7d") or
-        std.mem.eql(u8, p, "30d");
+    return parsePeriod(p) != null;
 }
 
 fn isValidResolution(r: []const u8) bool {
@@ -65,25 +70,43 @@ fn isValidResolution(r: []const u8) bool {
 /// Auto: minute for <=24h, hour for >24h.
 fn resolveResolution(period: []const u8, resolution: []const u8) []const u8 {
     if (!std.mem.eql(u8, resolution, "auto")) return resolution;
-
-    // Auto: minute for short periods, hour for long periods
-    if (std.mem.eql(u8, period, "1m") or std.mem.eql(u8, period, "5m") or
-        std.mem.eql(u8, period, "1h") or std.mem.eql(u8, period, "24h"))
-    {
-        return "minute";
-    }
-    return "hour";
+    // Auto: minute for <=24h, hour for >24h
+    const parsed = parsePeriod(period) orelse return "minute";
+    const total_seconds: u64 = switch (parsed.unit) {
+        's' => parsed.n,
+        'm' => @as(u64, parsed.n) * 60,
+        'h' => @as(u64, parsed.n) * 3600,
+        'd' => @as(u64, parsed.n) * 86400,
+        else => 86400,
+    };
+    return if (total_seconds <= 86400) "minute" else "hour";
 }
 
-/// Get the SQLite time offset string for a given period.
-fn periodToOffset(period: []const u8) []const u8 {
-    if (std.mem.eql(u8, period, "1m")) return "-1 minutes";
-    if (std.mem.eql(u8, period, "5m")) return "-5 minutes";
-    if (std.mem.eql(u8, period, "1h")) return "-1 hours";
-    if (std.mem.eql(u8, period, "24h")) return "-24 hours";
-    if (std.mem.eql(u8, period, "7d")) return "-7 days";
-    if (std.mem.eql(u8, period, "30d")) return "-30 days";
-    return "-24 hours";
+/// Format a period string into a SQLite time offset, e.g. "5m" → "-5 minutes".
+fn periodToOffset(period: []const u8, buf: *[48]u8) []const u8 {
+    const parsed = parsePeriod(period) orelse {
+        const fb = "-24 hours";
+        @memcpy(buf[0..fb.len], fb);
+        return buf[0..fb.len];
+    };
+    const unit_word: []const u8 = switch (parsed.unit) {
+        's' => " seconds",
+        'm' => " minutes",
+        'h' => " hours",
+        'd' => " days",
+        else => " hours",
+    };
+    // Format: "-N unit"
+    const dash = "-";
+    @memcpy(buf[0..1], dash);
+    const num_slice = std.fmt.bufPrint(buf[1..], "{d}", .{parsed.n}) catch {
+        const fb = "-24 hours";
+        @memcpy(buf[0..fb.len], fb);
+        return buf[0..fb.len];
+    };
+    const num_end = 1 + num_slice.len;
+    @memcpy(buf[num_end .. num_end + unit_word.len], unit_word);
+    return buf[0 .. num_end + unit_word.len];
 }
 
 /// Query aggregated metrics and write JSON response to the writer.
@@ -95,7 +118,8 @@ pub fn queryMetrics(
 ) !usize {
     const name = params.name orelse return error.MissingName;
     const effective_resolution = resolveResolution(params.period, params.resolution);
-    const offset = periodToOffset(params.period);
+    var offset_buf: [48]u8 = undefined;
+    const offset = periodToOffset(params.period, &offset_buf);
 
     // Build SQL query
     var sql_buf: [512]u8 = undefined;

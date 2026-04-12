@@ -18,7 +18,16 @@
         <h1 class="text-xl sm:text-2xl font-bold text-white">Error Tracker</h1>
         <p class="text-gray-400 text-xs sm:text-sm mt-1">Monitor and manage application errors</p>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2">
+        <input type="text" x-model="time" list="time-presets" placeholder="e.g. 5m, 1h, 7d"
+          class="w-[120px] bg-gray-800 border border-gray-700 text-gray-200 text-xs sm:text-sm rounded px-2 sm:px-3 py-1.5 focus:outline-none focus:border-blue-500">
+        <datalist id="time-presets">
+          <option value="">All time</option>
+          <option value="1h">Last 1 hour</option>
+          <option value="24h">Last 24 hours</option>
+          <option value="7d">Last 7 days</option>
+          <option value="30d">Last 30 days</option>
+        </datalist>
         <select x-model="refresh" class="bg-gray-800 border border-gray-700 text-gray-200 text-xs sm:text-sm rounded px-2 sm:px-3 py-1.5 focus:outline-none focus:border-blue-500">
           <option value="0">Auto-refresh: off</option>
           <option value="5">Every 5s</option>
@@ -26,6 +35,8 @@
           <option value="60">Every 1m</option>
           <option value="300">Every 5m</option>
         </select>
+        <button @click="loadErrors()" title="Refresh"
+          class="bg-gray-800 border border-gray-700 text-gray-200 text-xs sm:text-sm rounded px-2 sm:px-3 py-1.5 hover:bg-gray-700 transition-colors">Refresh</button>
         <span x-show="refresh !== '0'" class="text-green-400 text-xs">&#9679; live</span>
       </div>
     </header>
@@ -163,6 +174,7 @@
         project: '',
         source: '',
         resolved: false,
+        time: '',
         refresh: '0',
         sessionId: '',
         offset: 0,
@@ -184,6 +196,7 @@
           this.$watch('project',  () => { this.offset = 0; this.loadErrors(); });
           this.$watch('source',   () => { this.offset = 0; this.loadErrors(); });
           this.$watch('resolved', () => { this.offset = 0; this.loadErrors(); });
+          this.$watch('time',     () => { this.offset = 0; this.loadErrors(); });
           this.$watch('refresh',  () => this.setupAutoRefresh());
 
           window.addEventListener('popstate', () => {
@@ -208,6 +221,7 @@
           this.project   = p.get('project')    || '';
           this.source    = p.get('source')     || '';
           this.resolved  = p.get('resolved') === 'true';
+          this.time      = p.get('time')       || '';
           this.refresh   = p.get('refresh')    || '0';
           const off = parseInt(p.get('offset') || '0', 10);
           this.offset = isNaN(off) ? 0 : off;
@@ -221,6 +235,7 @@
           if (this.project)   p.set('project', this.project);
           if (this.source)    p.set('source', this.source);
           if (this.resolved)  p.set('resolved', 'true');
+          if (this.time)      p.set('time', this.time);
           if (this.refresh && this.refresh !== '0') p.set('refresh', this.refresh);
           if (this.offset > 0) p.set('offset', String(this.offset));
           const qs = p.toString();
@@ -231,6 +246,23 @@
           this.sessionId = '';
           this.offset = 0;
           this.loadErrors();
+        },
+
+        get sinceTimestamp() {
+          if (!this.time) return null;
+          const m = this.time.match(/^(\d+)([smhd])$/);
+          if (!m) return null;
+          const n = parseInt(m[1], 10);
+          const unit = m[2];
+          const now = new Date();
+          switch (unit) {
+            case 's': now.setSeconds(now.getSeconds() - n); break;
+            case 'm': now.setMinutes(now.getMinutes() - n); break;
+            case 'h': now.setHours(now.getHours() - n); break;
+            case 'd': now.setDate(now.getDate() - n); break;
+            default: return null;
+          }
+          return now.toISOString();
         },
 
         // ─── Helpers ────────────────────────────────────────────────
@@ -300,6 +332,8 @@
           if (this.source)    params.set('source', this.source);
           if (this.sessionId) params.set('session_id', this.sessionId);
           if (this.resolved)  params.set('resolved', 'true');
+          const since = this.sinceTimestamp;
+          if (since) params.set('since', since);
           params.set('limit', this.limit);
           params.set('offset', this.offset);
 
