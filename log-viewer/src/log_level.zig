@@ -124,8 +124,16 @@ fn extractColonPattern(message: []const u8) ?Level {
     return parseLevel(candidate);
 }
 
-/// Severity order for hierarchical filtering.
-const severity_order = [_]Level{ .DEBUG, .INFO, .WARNING, .ERROR, .CRITICAL };
+/// Check if a level filter value uses hierarchical syntax (>= prefix).
+pub fn isHierarchical(level_val: []const u8) bool {
+    return level_val.len > 2 and std.mem.startsWith(u8, level_val, ">=");
+}
+
+/// Extract the base level from a hierarchical filter (strip >= prefix).
+/// Caller must ensure isHierarchical() is true.
+pub fn hierarchicalBase(level_val: []const u8) []const u8 {
+    return level_val[2..];
+}
 
 /// Return the SQL IN clause contents for levels at or above the given level.
 /// E.g. levelsAtOrAbove("WARNING") → "('WARNING','ERROR','CRITICAL')"

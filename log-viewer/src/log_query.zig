@@ -129,16 +129,23 @@ pub fn queryLogs(db: *sqlite.Database, params: LogQueryParams) ![]const u8 {
 
     if (params.level) |level_val| {
         const conj = if (where_added) " AND" else " WHERE";
-        // Check for hierarchical filter prefix ">="
-        if (level_val.len > 2 and std.mem.startsWith(u8, level_val, ">=")) {
-            const base_level = level_val[2..];
-            if (log_level.levelsAtOrAbove(base_level)) |in_clause| {
+        if (log_level.isHierarchical(level_val)) {
+            const base = log_level.hierarchicalBase(level_val);
+            // in_clause is a compile-time string literal from a switch on Level enum,
+            // not derived from user input — safe to inline in SQL.
+            if (log_level.levelsAtOrAbove(base)) |in_clause| {
                 try sql_writer.writeAll(conj);
                 try sql_writer.writeAll(" level IN ");
                 try sql_writer.writeAll(in_clause);
                 try count_writer.writeAll(conj);
                 try count_writer.writeAll(" level IN ");
                 try count_writer.writeAll(in_clause);
+            } else {
+                // Unrecognized level after >=, treat as exact match on full value
+                try sql_writer.writeAll(conj);
+                try sql_writer.writeAll(" level = ?");
+                try count_writer.writeAll(conj);
+                try count_writer.writeAll(" level = ?");
             }
         } else {
             try sql_writer.writeAll(conj);
@@ -189,8 +196,10 @@ pub fn queryLogs(db: *sqlite.Database, params: LogQueryParams) ![]const u8 {
         bind_idx += 1;
     }
     if (params.level) |level_val| {
-        // Hierarchical filters are inlined in SQL, no bind needed
-        if (!(level_val.len > 2 and std.mem.startsWith(u8, level_val, ">="))) {
+        // Hierarchical filters with recognized levels are inlined in SQL, no bind needed
+        const is_hier = log_level.isHierarchical(level_val);
+        const hier_recognized = is_hier and log_level.levelsAtOrAbove(log_level.hierarchicalBase(level_val)) != null;
+        if (!hier_recognized) {
             try count_stmt.bindText(bind_idx, level_val);
             bind_idx += 1;
         }
@@ -226,7 +235,9 @@ pub fn queryLogs(db: *sqlite.Database, params: LogQueryParams) ![]const u8 {
         bind_idx += 1;
     }
     if (params.level) |level_val| {
-        if (!(level_val.len > 2 and std.mem.startsWith(u8, level_val, ">="))) {
+        const is_hier = log_level.isHierarchical(level_val);
+        const hier_recognized = is_hier and log_level.levelsAtOrAbove(log_level.hierarchicalBase(level_val)) != null;
+        if (!hier_recognized) {
             try stmt.bindText(bind_idx, level_val);
             bind_idx += 1;
         }
@@ -700,6 +711,47 @@ test "queryLogs hierarchical level filter >=ERROR" {
     try std.testing.expect(std.mem.indexOf(u8, result, "error message") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "critical message") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "info message") == null);
+}
+
+test "queryLogs hierarchical level filter combined with container" {
+    const database = @import("database.zig");
+    const ingestion = @import("ingestion.zig");
+    var db = try database.init(":memory:");
+    defer db.close();
+
+    try ingestion.insertLogEntry(&db, &.{
+        .timestamp = "2025-01-20T10:00:00Z",
+        .container = "web",
+        .stream = "stderr",
+        .level = "ERROR",
+        .message = "web error",
+        .raw = null,
+    });
+    try ingestion.insertLogEntry(&db, &.{
+        .timestamp = "2025-01-20T10:01:00Z",
+        .container = "api",
+        .stream = "stderr",
+        .level = "ERROR",
+        .message = "api error",
+        .raw = null,
+    });
+    try ingestion.insertLogEntry(&db, &.{
+        .timestamp = "2025-01-20T10:02:00Z",
+        .container = "web",
+        .stream = "stdout",
+        .level = "INFO",
+        .message = "web info",
+        .raw = null,
+    });
+
+    const params = LogQueryParams{ .level = ">=ERROR", .container = "web" };
+    const result = try queryLogs(&db, params);
+    defer std.heap.page_allocator.free(result);
+
+    try std.testing.expect(std.mem.indexOf(u8, result, "\"total\": 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "web error") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "api error") == null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "web info") == null);
 }
 
 test "queryLogs full-text search works" {

@@ -225,11 +225,14 @@ fn pollNewEntries(
         try sql_writer.writeAll(" AND container = ?");
     }
     if (level_filter) |level_val| {
-        if (level_val.len > 2 and std.mem.startsWith(u8, level_val, ">=")) {
-            const base_level = level_val[2..];
-            if (log_level.levelsAtOrAbove(base_level)) |in_clause| {
+        if (log_level.isHierarchical(level_val)) {
+            const base = log_level.hierarchicalBase(level_val);
+            // in_clause is a compile-time string literal, safe to inline
+            if (log_level.levelsAtOrAbove(base)) |in_clause| {
                 try sql_writer.writeAll(" AND level IN ");
                 try sql_writer.writeAll(in_clause);
+            } else {
+                try sql_writer.writeAll(" AND level = ?");
             }
         } else {
             try sql_writer.writeAll(" AND level = ?");
@@ -253,7 +256,9 @@ fn pollNewEntries(
         bind_idx += 1;
     }
     if (level_filter) |level_val| {
-        if (!(level_val.len > 2 and std.mem.startsWith(u8, level_val, ">="))) {
+        const is_hier = log_level.isHierarchical(level_val);
+        const hier_recognized = is_hier and log_level.levelsAtOrAbove(log_level.hierarchicalBase(level_val)) != null;
+        if (!hier_recognized) {
             try stmt.bindText(bind_idx, level_val);
             bind_idx += 1;
         }
