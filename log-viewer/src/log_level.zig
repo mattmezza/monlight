@@ -135,6 +135,13 @@ pub fn hierarchicalBase(level_val: []const u8) []const u8 {
     return level_val[2..];
 }
 
+/// Whether a level filter value requires a SQL bind parameter.
+/// Hierarchical filters with recognized levels are inlined in SQL; all others need binding.
+pub fn needsLevelBind(level_val: []const u8) bool {
+    if (!isHierarchical(level_val)) return true;
+    return levelsAtOrAbove(hierarchicalBase(level_val)) == null;
+}
+
 /// Return the SQL IN clause contents for levels at or above the given level.
 /// E.g. levelsAtOrAbove("WARNING") → "('WARNING','ERROR','CRITICAL')"
 /// Returns null if the level string is not recognized.

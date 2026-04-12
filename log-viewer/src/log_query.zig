@@ -196,10 +196,7 @@ pub fn queryLogs(db: *sqlite.Database, params: LogQueryParams) ![]const u8 {
         bind_idx += 1;
     }
     if (params.level) |level_val| {
-        // Hierarchical filters with recognized levels are inlined in SQL, no bind needed
-        const is_hier = log_level.isHierarchical(level_val);
-        const hier_recognized = is_hier and log_level.levelsAtOrAbove(log_level.hierarchicalBase(level_val)) != null;
-        if (!hier_recognized) {
+        if (log_level.needsLevelBind(level_val)) {
             try count_stmt.bindText(bind_idx, level_val);
             bind_idx += 1;
         }
